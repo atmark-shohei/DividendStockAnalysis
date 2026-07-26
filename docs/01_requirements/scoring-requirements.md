@@ -18,6 +18,12 @@
 取り込み時に発見した5件の曖昧点は**すべて決着済み**。
 **この節の決定は下の各指標表に優先する**（食い違う場合はこちらが正）。
 
+> 🔴 **2026-07-27 追記: スコア基準の出典がもう1つ見つかり、10指標すべてで
+> 閾値が食い違っている。** 本ファイルの表は**据え置き**（変更していない）。
+> 相違の一覧と判断は
+> [scoring-source-comparison.md](./scoring-source-comparison.md) にまとめてある。
+> §0 の5件の決定はこの相違とは独立に有効。
+
 | #   | 論点                           | 決定                                                         |
 | :-- | :----------------------------- | :----------------------------------------------------------- |
 | 0.1 | 境界値がどちらの区分に属するか | **下限以上・上限未満**                                       |
@@ -89,6 +95,8 @@
 
 ### ① 直近5年間の増配率（CAGR）
 
+- **詳細仕様:** [dividend-growth-rate-scoring.md](../02_design/logic/dividend-growth-rate-scoring.md)
+
 - **計算式:** $\text{CAGR} = \left( \frac{\text{昨年の配当金}}{\text{5年前の配当金}} \right)^{\frac{1}{5}} - 1$
 - **使用データ:** 株式分割の影響を排除した「分割調整」列の値を用いる（§2.2 参照）
 - **注意:** 5年前の配当金が 0 の場合はゼロ除算。計算不能として `null` を返すこと
@@ -113,6 +121,8 @@
 
 ### ② 連続非減配年数
 
+- **詳細仕様:** [consecutive-years-scoring.md](../02_design/logic/consecutive-years-scoring.md)
+
 - **定義:** 直近から過去18年前まで遡り、前年比で減配していない連続年数
 
 | 年数（下限） | 年数（上限） | 点数 |
@@ -125,6 +135,8 @@
 ---
 
 ### ③ 予想配当性向
+
+- **詳細仕様:** [payout-ratio-scoring.md](../02_design/logic/payout-ratio-scoring.md)
 
 - **定義:** 今期予想ベースの配当性向
 
@@ -150,6 +162,8 @@
 
 ### ④ EPS の5年 CAGR
 
+- **詳細仕様:** [eps-cagr-scoring.md](../02_design/logic/eps-cagr-scoring.md)
+
 - **計算方法:** 異常値を除外するため、直近3年間の中央値および5年前から遡った
   3年間の中央値を使用して成長率を算出する
 
@@ -170,6 +184,8 @@
 ---
 
 ### ⑤ ROE の5年平均
+
+- **詳細仕様:** [roe-scoring.md](../02_design/logic/roe-scoring.md)
 
 - **定義:** 直近5年間の ROE の単純平均
 
@@ -192,6 +208,8 @@
 ---
 
 ### ⑥ 配当維持可能年数
+
+- **詳細仕様:** [dividend-sustainability-scoring.md](../02_design/logic/dividend-sustainability-scoring.md)
 
 - **計算式:** $\frac{\text{ネットキャッシュ}}{\text{前期末の配当総額}}$
 - **ネットキャッシュ定義:** $(\text{流動資産} + \text{投資有価証券} \times 0.7) - \text{負債総額}$
@@ -219,6 +237,8 @@
 
 ### ⑦ 売上高の5年 CAGR
 
+- **詳細仕様:** [revenue-cagr-scoring.md](../02_design/logic/revenue-cagr-scoring.md)
+
 - **計算式:** $\text{CAGR} = \left( \frac{\text{現在の売上高}}{\text{5年前の売上高}} \right)^{\frac{1}{5}} - 1$
 
 | 売上成長率（下限） | 売上成長率（上限） | 点数 |
@@ -239,6 +259,8 @@
 
 ### ⑧ 営業利益率の5年平均
 
+- **詳細仕様:** [operating-margin-scoring.md](../02_design/logic/operating-margin-scoring.md)
+
 - **定義:** 直近5年間の営業利益率の平均値
 
 | 利益率（下限） | 利益率（上限） | 点数 |
@@ -258,6 +280,8 @@
 ---
 
 ### ⑨ MIX係数
+
+- **詳細仕様:** [mix-coefficient-scoring.md](../02_design/logic/mix-coefficient-scoring.md)
 
 - **計算式:** $\text{PER (会社予想)} \times \text{PBR (実績)}$
 
@@ -362,6 +386,23 @@ CSV の各ブロックから以下の値を抽出し、スコアリングを計�
 
 ## 3. 関連ドキュメント
 
-- [dividend-yield-scoring.md](../02_design/logic/dividend-yield-scoring.md) — ⑩ の詳細仕様
+### 指標別の設計書（`docs/02_design/logic/`）
+
+| 指標                | 設計書                                                                                      |
+| :------------------ | :------------------------------------------------------------------------------------------ |
+| ① 増配率            | [dividend-growth-rate-scoring.md](../02_design/logic/dividend-growth-rate-scoring.md)       |
+| ② 連続非減配年数    | [consecutive-years-scoring.md](../02_design/logic/consecutive-years-scoring.md)             |
+| ③ 予想配当性向      | [payout-ratio-scoring.md](../02_design/logic/payout-ratio-scoring.md)                       |
+| ④ EPS 5年CAGR       | [eps-cagr-scoring.md](../02_design/logic/eps-cagr-scoring.md)                               |
+| ⑤ ROE 5年平均       | [roe-scoring.md](../02_design/logic/roe-scoring.md)                                         |
+| ⑥ 配当維持可能年数  | [dividend-sustainability-scoring.md](../02_design/logic/dividend-sustainability-scoring.md) |
+| ⑦ 売上高5年CAGR     | [revenue-cagr-scoring.md](../02_design/logic/revenue-cagr-scoring.md)                       |
+| ⑧ 営業利益率5年平均 | [operating-margin-scoring.md](../02_design/logic/operating-margin-scoring.md)               |
+| ⑨ MIX係数           | [mix-coefficient-scoring.md](../02_design/logic/mix-coefficient-scoring.md)                 |
+| ⑩ 配当利回り        | [dividend-yield-scoring.md](../02_design/logic/dividend-yield-scoring.md)                   |
+
+### その他
+
+- [scoring-source-comparison.md](./scoring-source-comparison.md) — **出典の相違と未決事項**
 - [criteria-tab.md](../02_design/ui/pages/criteria-tab.md) — スコア表を表示する画面
 - [agent-team.md](../00_overview/agent-team.md) — 開発チームの役割定義
