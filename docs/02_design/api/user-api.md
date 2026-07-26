@@ -18,13 +18,13 @@
 
 内部情報（SQL・パス・スタックトレース）を含めない。
 
-| ステータス | code | 意味 |
-|---|---|---|
-| 400 | `invalid_request` | 入力形式不正 |
-| 404 | `not_found` | 対象なし |
-| 409 | `already_exists` | 重複追加 |
-| 502 | `upstream_unavailable` | 外部データ源の障害 |
-| 500 | `internal_error` | 想定外 |
+| ステータス | code                   | 意味               |
+| ---------- | ---------------------- | ------------------ |
+| 400        | `invalid_request`      | 入力形式不正       |
+| 404        | `not_found`            | 対象なし           |
+| 409        | `already_exists`       | 重複追加           |
+| 502        | `upstream_unavailable` | 外部データ源の障害 |
+| 500        | `internal_error`       | 想定外             |
 
 ---
 
@@ -36,16 +36,17 @@
 
 クエリパラメータ:
 
-| 名前 | 型 | 既定 | 説明 |
-|---|---|---|---|
-| `minYield` | number | — | 配当利回りの下限（%） |
-| `maxPayoutRatio` | number | — | 配当性向の上限（%） |
-| `sector` | string | — | 業種 |
-| `sort` | string | `yield_desc` | `yield_desc` / `code_asc` |
-| `page` | int | 1 | |
-| `perPage` | int | 50 | 最大 100 |
+| 名前             | 型     | 既定         | 説明                      |
+| ---------------- | ------ | ------------ | ------------------------- |
+| `minYield`       | number | —            | 配当利回りの下限（%）     |
+| `maxPayoutRatio` | number | —            | 配当性向の上限（%）       |
+| `sector`         | string | —            | 業種                      |
+| `sort`           | string | `yield_desc` | `yield_desc` / `code_asc` |
+| `page`           | int    | 1            |                           |
+| `perPage`        | int    | 50           | 最大 100                  |
 
 レスポンス（200）:
+
 ```json
 {
   "items": [
