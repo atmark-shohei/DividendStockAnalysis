@@ -1,0 +1,44 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build output
+.next/
+out/
+build/
+dist/
+
+# test / coverage
+coverage/
+.vitest/
+
+# env — 絶対にコミットしない
+.env
+.env.*
+!.env.example
+
+# credentials
+*.pem
+*.key
+secrets/
+
+# logs
+*.log
+npm-debug.log*
+logs/
+
+# editor / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code — 個人設定はコミットしない（共有設定 .claude/settings.json はコミットする）
+.claude/settings.local.json
+
+# local data cache（株価データのローカルキャッシュ）
+tmp/
+.cache/
+*.sqlite
+*.db

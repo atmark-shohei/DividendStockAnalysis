@@ -1,0 +1,47 @@
+# Claude が読み込まない対象。トークン節約のため、
+# 「読んでも判断材料にならない大きなファイル」を落とす。
+
+# 依存・成果物
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+
+# ロックファイル（巨大で、読んでも設計判断に使わない）
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# 生成物
+*.min.js
+*.map
+__snapshots__/
+*.generated.*
+
+# 株価データ・バイナリ（件数が多くレビュー対象にならない）
+*.csv
+*.parquet
+*.sqlite
+*.db
+*.zip
+*.png
+*.jpg
+*.pdf
+*.woff
+*.woff2
+
+# ログ・一時
+logs/
+*.log
+tmp/
+.cache/
+
+# 秘密情報（permissions と hooks でも二重に守っているが、ここでも落とす）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
