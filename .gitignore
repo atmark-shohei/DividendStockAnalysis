@@ -9,6 +9,10 @@ out/
 build/
 dist/
 
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
 # test / coverage
 coverage/
 .vitest/

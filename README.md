@@ -47,14 +47,14 @@ DividendStockAnalysis/
 
 ## 開発コマンド
 
-| 目的 | コマンド |
-|---|---|
-| 開発サーバ | `npm run dev` |
-| テスト | `npm test` |
+| 目的       | コマンド            |
+| ---------- | ------------------- |
+| 開発サーバ | `npm run dev`       |
+| テスト     | `npm test`          |
 | 型チェック | `npm run typecheck` |
-| Lint | `npm run lint` |
-| 整形 | `npm run format` |
-| ビルド | `npm run build` |
+| Lint       | `npm run lint`      |
+| 整形       | `npm run format`    |
+| ビルド     | `npm run build`     |
 
 ## 免責
 
