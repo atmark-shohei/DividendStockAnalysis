@@ -4,10 +4,9 @@
 > 対象: [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents) @ `main`
 > （pushed 2026-07-23、MIT、fork でない、archived でない、全342ファイル）
 >
-> **このドキュメントは提案であり、導入記録ではない。** どれを実際に
-> `~/.claude/agents/` へ入れるかは人間が決める。調査のためリポジトリからの
-> 取得は行ったが、書き込み先はジョブの一時ディレクトリのみで、
-> `~/.claude/agents/` には何も置いていない。
+> **2026-07-27: 推奨9体すべての導入が承認され、実施済み。**
+> §1 の表と §6 を参照。`scripts/install.sh` は使わず、§4 の手順に沿って
+> 1体ずつ変換して導入した。
 
 ## 0. 結論（先に読む）
 
@@ -225,9 +224,66 @@ HIGH 判定として出た2件はいずれも**誤検知**だった。
    - 投資判断そのものを推奨する出力を作らない
 7. `/agents` で実際に一覧に出るか確認する。出なければ frontmatter を疑う
 
-## 5. 未解決
+## 6. 導入結果（2026-07-27）
 
-- 採用推奨9体のうち、まだ入れていない7体を実際に入れるか（人間判断）
-- §2 の Skill 6件のうちどれを先に作るか
-- Identity & Access Engineer を入れるかは T-003 / T-004（認証の要否）次第
-- 保留6体はそれぞれ §1.2 の条件が満たされた時点で再評価する
+### 6.1 導入したエージェント（7体）
+
+`~/.claude/agents/` に、§4 の手順どおり1体ずつ変換して配置した。
+既存ファイルがあれば中断する設計にしてあり、上書きは発生していない。
+
+| name                       | model  | tools                                 |
+| :------------------------- | :----- | :------------------------------------ |
+| `software-architect`       | opus   | `Read, Grep, Glob, Write, Edit`       |
+| `identity-access-engineer` | opus   | `Read, Grep, Glob, Write, Edit`       |
+| `data-engineer`            | opus   | `Read, Grep, Glob, Write, Edit`       |
+| `ux-architect`             | sonnet | `Read, Grep, Glob, Write, Edit`       |
+| `technical-writer`         | sonnet | `Read, Grep, Glob, Write, Edit`       |
+| `minimal-change-engineer`  | opus   | `Read, Grep, Glob, Write, Edit, Bash` |
+| `reality-checker`          | sonnet | `Read, Grep, Glob, Bash`              |
+
+上流からの変更点。
+
+- `name:` を kebab-case に変換（上流は全て Title Case）
+- `tools:` を明示（上流は未宣言 ＝ Bash 込みの全ツール継承）
+- `model:` を追加（上流は全て未指定）
+- 本文末尾にプロジェクト固有の制約を追記
+  （銭単位整数 / 無配と `null` の区別 / UTC 保存 / `fetched_at` /
+  投資判断を推奨しない / 破壊的操作は事前確認）＋ 役割ごとの個別指示
+
+`reality-checker` にだけ `Write` / `Edit` を渡していない。判定の独立性が
+この役割の存在意義で、自分で直せると独立性が消えるため。
+
+### 6.2 作成した Skill（7本）
+
+`.claude/skills/<name>/SKILL.md`。§2 の6案に `decide-auth` を追加した
+（`identity-access-engineer` を使う手順が無かったため）。
+
+| Skill               | 使うエージェント                                                             |
+| :------------------ | :--------------------------------------------------------------------------- |
+| `new-screen-spec`   | ux-architect → technical-writer                                              |
+| `impl-from-spec`    | minimal-change-engineer → code-reviewer → reality-checker → technical-writer |
+| `review-spec`       | software-architect ＋ reality-checker → technical-writer                     |
+| `spec-impl-drift`   | repo-explorer ×2 → reality-checker                                           |
+| `import-financials` | data-engineer → minimal-change-engineer → reality-checker                    |
+| `scoring-check`     | repo-explorer → reality-checker                                              |
+| `decide-auth`       | identity-access-engineer → software-architect → technical-writer             |
+
+設計思想は共通で3点。
+
+1. **書く役と判定する役を分ける。** レビュー担当（reality-checker /
+   code-reviewer）は `Write` / `Edit` を持たない。
+2. **文書化の窓口を technical-writer 1箇所に閉じる。** 書式が揺れないため。
+3. **未決事項に触れたら止まる。** T-002（DB）/ T-003・T-004（認証）を
+   前提にした実装や設計を、エージェントに勝手に確定させない。
+
+### 6.3 未使用のエージェント
+
+`product-manager` / `feedback-synthesizer` / `test-runner` はどの Skill
+からも呼んでいない。直接呼び出して使う想定で、手順に組み込む必然性が
+現時点で無いため。
+
+## 7. 未解決
+
+- §2 の Skill 7本のうち、どれから実運用に乗せるか
+- 保留6体（§1.2）はそれぞれの条件が満たされた時点で再評価する
+- `decide-auth` を実行して T-003 / T-004 を決着させる（現在 🔴）
