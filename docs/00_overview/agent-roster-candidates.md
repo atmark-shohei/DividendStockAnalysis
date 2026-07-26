@@ -253,14 +253,19 @@ HIGH 判定として出た2件はいずれも**誤検知**だった。
 `reality-checker` にだけ `Write` / `Edit` を渡していない。判定の独立性が
 この役割の存在意義で、自分で直せると独立性が消えるため。
 
-### 6.2 作成した Skill（7本）
+### 6.2 作成した Skill（8本）
 
-`.claude/skills/<name>/SKILL.md`。§2 の6案に `decide-auth` を追加した
-（`identity-access-engineer` を使う手順が無かったため）。
+`.claude/skills/<name>/SKILL.md`。§2 の6案に2本追加した。
+
+- `decide-auth` — `identity-access-engineer` を使う手順が無かったため
+- `new-logic-spec` — 設計書を**新規作成**する手順が画面（`new-screen-spec`）
+  にしか無く、`src/lib/` に入る計算ロジックの設計書を起こす経路が
+  抜けていたため
 
 | Skill               | 使うエージェント                                                             |
 | :------------------ | :--------------------------------------------------------------------------- |
 | `new-screen-spec`   | ux-architect → technical-writer                                              |
+| `new-logic-spec`    | software-architect → technical-writer → reality-checker                      |
 | `impl-from-spec`    | minimal-change-engineer → code-reviewer → reality-checker → technical-writer |
 | `review-spec`       | software-architect ＋ reality-checker → technical-writer                     |
 | `spec-impl-drift`   | repo-explorer ×2 → reality-checker                                           |
@@ -284,6 +289,10 @@ HIGH 判定として出た2件はいずれも**誤検知**だった。
 
 ## 7. 未解決
 
-- §2 の Skill 7本のうち、どれから実運用に乗せるか
+- 設計書の**新規作成**手順は画面（`new-screen-spec`）とロジック
+  （`new-logic-spec`）の2領域だけ。API（`docs/02_design/api/`）と
+  DB（`docs/02_design/database/`）は T-002 / T-003・T-004 が未決のため
+  保留。決まってから作る
+- §2 の Skill 8本のうち、どれから実運用に乗せるか
 - 保留6体（§1.2）はそれぞれの条件が満たされた時点で再評価する
 - `decide-auth` を実行して T-003 / T-004 を決着させる（現在 🔴）
