@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>銘柄スカウティング - 統合スコアリングエンジン</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Stock Scouting Engine</h1>
+            <p>IRデータ（CSVファイル/TSVテキスト）を解析し、投資スコアリングを実行します。</p>
+        </header>
+
+        <main>
+            <div class="input-section glass-panel">
+                <div class="tabs">
+                    <button class="tab-btn active" data-target="inputTab">データ入力・解析</button>
+                    <button class="tab-btn" data-target="savedTab">保存済み銘柄</button>
+                    <button class="tab-btn" data-target="criteriaTab">評価基準</button>
+                </div>
+
+                <div id="inputTab" class="tab-content active">
+                    <div class="price-input-container glass-panel">
+                        <label for="stockPrice">現在株価 (円):</label>
+                        <input type="number" id="stockPrice" placeholder="例: 2500" min="0">
+                    </div>
+                    <div class="input-grid">
+                        <div class="input-col">
+                            <h3>CSV ファイル (総合指標)</h3>
+                            <div id="dropZone" class="drop-zone">
+                                <div class="drop-zone-content">
+                                    <div class="drop-icon">📄</div>
+                                    <p>ここにCSVファイルをドラッグ＆ドロップ</p>
+                                    <p style="font-size: 0.8rem; color: #94a3b8;">または、クリックしてファイルを選択</p>
+                                    <div id="fileNameDisplay" style="margin-top: 1rem; color: #34d399; font-weight: bold;"></div>
+                                    <input type="file" id="fileInput" accept=".csv" class="hidden">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="input-divider">
+                            <span>OR</span>
+                        </div>
+
+                        <div class="input-col">
+                            <h3>テキストペースト (配当のみ)</h3>
+                            <textarea id="dataInput" placeholder="年度&#10;区分&#10;中間..."></textarea>
+                            <button id="analyzeBtn" class="primary-btn mt-1">解析＆スコアリング実行</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="savedTab" class="tab-content">
+                    <div class="saved-stocks-header">
+                        <h2>Firebase 保存済み銘柄</h2>
+                        <button id="refreshSavedBtn" class="secondary-btn" style="margin-left: 1rem; padding: 0.5rem 1rem;">🔄 更新</button>
+                    </div>
+                    <div id="savedStocksList" class="saved-stocks-grid">
+                        <!-- JSで動的生成 -->
+                        <p style="color: #94a3b8;">読み込み中...</p>
+                    </div>
+                </div>
+
+                <div id="criteriaTab" class="tab-content">
+                    <div class="criteria-header" style="margin-bottom: 2rem; text-align: center;">
+                        <h2>投資銘柄スコアリングシステム 評価基準</h2>
+                        <p style="color: var(--text-muted); margin-top: 0.5rem;">全10個の指標に基づく投資評価ロジックです。「自動計算済」のバッジがある指標は、現在CSV解析時に自動で計算されます。</p>
+                    </div>
+                    <div id="criteriaContainer" class="criteria-grid">
+                        <!-- JSで動的生成 -->
+                    </div>
+                </div>
+            </div>
+
+            <div id="resultsSection" class="results-section hidden">
+                <h2 id="stockNameHeader" class="stock-name"></h2>
+                <div class="score-cards" id="scoreCardsContainer">
+                    <!-- JSで動的生成 -->
+                </div>
+
+                <div class="parsed-data glass-panel">
+                    <h3>抽出データサマリー</h3>
+                    <div class="table-container">
+                        <table id="parsedTable">
+                            <thead>
+                                <tr>
+                                    <th>年度</th>
+                                    <th>配当</th>
+                                    <th>EPS</th>
+                                    <th>ROE</th>
+                                    <th>売上高</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- JSで動的生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script type="module" src="app.js"></script>
+</body>
+</html>
