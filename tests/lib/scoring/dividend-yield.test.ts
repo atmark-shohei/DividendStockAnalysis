@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { parsePriceInput } from '@/lib/input/parse-price';
 import {
   DIVIDEND_YIELD_BANDS,
+  MAX_DIVIDEND_SEN,
+  MAX_PRICE_SEN,
   calculateDividendYield,
   selectAnnualDividend,
 } from '@/lib/scoring/dividend-yield';
@@ -105,10 +107,37 @@ describe('⑩ 配当利回り — 6.2 負の値', () => {
     expect(calculateDividendYield(input(-1000, 50)).unavailableReason).toBe('price-negative');
   });
 
-  it('配当が負なら判定不能。0 点にすると無配と区別できなくなる', () => {
+  // 2026-07-27 決定: 配当が負になるのは制度上ありえない。データの都合で負が
+  // 入ってきたときは無配と同じ 0点にする（③⑤⑥⑨ の「負の値は 0点」と方針を揃える）。
+  it('配当が負なら無配と同じ 0 点。判定不能にはしない', () => {
     const result = calculateDividendYield(input(1000, -50));
+    expect(result.score).toBe(0);
+    expect(result.unavailableReason).toBeNull();
+  });
+
+  it('負の配当でも表示利回りを負にしない（0.00% と出す）', () => {
+    // 画面に「-5.00%」と出ると、利回りが計算できたように見えてしまう
+    expect(calculateDividendYield(input(1000, -50)).yieldHundredthsPercent).toBe(0);
+  });
+
+  it.each([
+    { label: '負の非整数', value: -50.5 },
+    { label: '-Infinity', value: Number.NEGATIVE_INFINITY },
+  ])('$label は 0 点にせず判定不能のまま', ({ value }) => {
+    // 「負だが整数」はデータ不良として 0点。「そもそも数値として壊れている」は
+    // 判定不能。0点に倒す範囲を広げすぎないよう境界を固定しておく
+    const result = calculateDividendYield({
+      priceSen: PRICE_10K_YEN_SEN,
+      dividend: { amountSen: value, source: 'forecast' },
+    });
     expect(result.score).toBeNull();
     expect(result.unavailableReason).toBe('dividend-invalid');
+  });
+
+  it('負の配当と無配は同じ結果になる', () => {
+    expect(calculateDividendYield(input(1000, -50))).toEqual(
+      calculateDividendYield(input(1000, 0)),
+    );
   });
 });
 
@@ -182,21 +211,20 @@ describe('⑩ 配当利回り — 壊れた数値は満点にしない', () => {
   });
 });
 
-describe('⑩ 配当利回り — 積が安全整数を外れる入力を弾く', () => {
-  // オペランドが安全整数でも、判定式が計算する積はそうとは限らない。
-  // 株価 9007199254740991 銭（安全整数ちょうど）は isSafeInteger を通るが、
-  // 550 * それ は 2^53 を超え、float64 の丸めで比較の符号が反転していた。
-  // 実測では 5.25% の判定が 9点、BigInt による厳密計算では 8点だった。
-  const MAX_PRICE_SEN = Math.floor(Number.MAX_SAFE_INTEGER / 550);
-  const MAX_DIVIDEND_SEN = Math.floor(Number.MAX_SAFE_INTEGER / 10_000);
+describe('⑩ 配当利回り — 上限を超える入力を弾く', () => {
+  it('株価の業務上限は 1 株 1,000,000 円', () => {
+    // 2026-07-27 決定。桁の打ち間違いを弾くための業務上の上限
+    expect(MAX_PRICE_SEN).toBe(100_000_000);
+  });
 
-  it('安全整数ではあるが積が溢れる株価は判定不能', () => {
-    const result = calculateDividendYield({
-      priceSen: Number.MAX_SAFE_INTEGER,
-      dividend: { amountSen: 472_877_960_873_902, source: 'forecast' },
-    });
-    expect(result.score).toBeNull();
-    expect(result.unavailableReason).toBe('price-invalid');
+  it('業務上限の株価でも判定式の積が安全整数に収まる', () => {
+    // オペランドが安全整数でも、判定式が計算する積はそうとは限らない。
+    // かつて株価 9007199254740991 銭（安全整数ちょうど）で 550 * それ が 2^53 を超え、
+    // float64 の丸めで比較の符号が反転していた（5.25% が 9点 / 厳密には 8点）。
+    // 業務上限が算術上の安全域より十分小さいことを、上限の変更時に気付けるようにする。
+    const maxThreshold = Math.max(...DIVIDEND_YIELD_BANDS.map((band) => band.minInclusive ?? 0));
+    expect(Number.isSafeInteger(maxThreshold * MAX_PRICE_SEN)).toBe(true);
+    expect(Number.isSafeInteger(MAX_DIVIDEND_SEN * 10_000)).toBe(true);
   });
 
   it('上限ちょうどの株価は通り、1 銭超えると弾かれる', () => {
@@ -206,7 +234,22 @@ describe('⑩ 配当利回り — 積が安全整数を外れる入力を弾く'
         dividend: { amountSen: 1_000, source: 'forecast' },
       }).unavailableReason;
     expect(at(MAX_PRICE_SEN)).toBeNull();
-    expect(at(MAX_PRICE_SEN + 1)).toBe('price-invalid');
+    expect(at(MAX_PRICE_SEN + 1)).toBe('price-too-large');
+  });
+
+  it('上限超と「壊れている」は別の理由コードにする', () => {
+    // §4 は別々のメッセージを出すよう定めている。1 つにまとめると出し分けられない
+    const tooLarge = calculateDividendYield({
+      priceSen: Number.MAX_SAFE_INTEGER,
+      dividend: { amountSen: 1_000, source: 'forecast' },
+    });
+    expect(tooLarge.unavailableReason).toBe('price-too-large');
+    expect(
+      calculateDividendYield({
+        priceSen: Number.NaN,
+        dividend: { amountSen: 1_000, source: 'forecast' },
+      }).unavailableReason,
+    ).toBe('price-invalid');
   });
 
   it('上限ちょうどの配当は通り、1 銭超えると弾かれる', () => {
@@ -267,7 +310,8 @@ describe('⑩ 配当利回り — 判定不能時の戻り値', () => {
 });
 
 describe('⑩ 配当利回り — 採用した配当の出所', () => {
-  // §2.1: 最新の「予想（または修正）」を優先し、無ければ最新の「実績」。
+  // §2.1（2026-07-27 決定）: 取り込んだデータの**最新年度**に予想（または修正）が
+  // あればそれを採用し、最新年度に予想が無い場合のみ最新の実績を採用する。
   const actual2023 = { fiscalYear: 2023, kind: 'actual' as const, annualAmountSen: 4000 };
   const actual2024 = { fiscalYear: 2024, kind: 'actual' as const, annualAmountSen: 4500 };
   const forecast2025 = { fiscalYear: 2025, kind: 'forecast' as const, annualAmountSen: 5000 };
@@ -319,6 +363,43 @@ describe('⑩ 配当利回り — 採用した配当の出所', () => {
 
   it('レコードが空なら null', () => {
     expect(selectAnnualDividend([])).toBeNull();
+  });
+
+  // ここから 2026-07-27 の決定（年度を見る）に対応する分
+  it('最新年度に予想が無ければ、古い年度の予想より最新の実績を採る', () => {
+    // 年度を見ずに予想を優先すると、5年前の予想で利回りを計算してしまう
+    const forecast2019 = { fiscalYear: 2019, kind: 'forecast' as const, annualAmountSen: 9000 };
+    expect(selectAnnualDividend([forecast2019, actual2023, actual2024])).toEqual({
+      amountSen: 4500,
+      source: 'actual',
+    });
+  });
+
+  it('最新年度に予想と実績が並んでいれば予想を採る', () => {
+    const actual2025 = { fiscalYear: 2025, kind: 'actual' as const, annualAmountSen: 4800 };
+    expect(selectAnnualDividend([actual2025, forecast2025])).toEqual({
+      amountSen: 5000,
+      source: 'forecast',
+    });
+  });
+
+  it('最新年度が実績のみなら、その年の実績を採る', () => {
+    const forecast2024 = { fiscalYear: 2024, kind: 'forecast' as const, annualAmountSen: 4700 };
+    const actual2025 = { fiscalYear: 2025, kind: 'actual' as const, annualAmountSen: 4800 };
+    expect(selectAnnualDividend([forecast2024, actual2025])).toEqual({
+      amountSen: 4800,
+      source: 'actual',
+    });
+  });
+
+  it('年度が壊れたレコードは採用しない', () => {
+    // 年度が NaN のレコードが混ざると「最新年度」の判定ごと壊れる
+    expect(
+      selectAnnualDividend([
+        actual2024,
+        { fiscalYear: Number.NaN, kind: 'forecast', annualAmountSen: 9999 },
+      ]),
+    ).toEqual({ amountSen: 4500, source: 'actual' });
   });
 });
 

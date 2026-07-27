@@ -35,14 +35,17 @@ export interface SelectedDividend {
  * 判定できなかった理由。設計書 §4 の表の行と 1 対 1 で対応させる。
  * 「計算できなかった」と「計算した結果が最低点」を区別するために持つ。
  *
- * `price-invalid` と `dividend-invalid` は §4 に無い防御的な分類。
+ * `price-too-large` / `price-invalid` / `dividend-invalid` は原典に無い防御的な分類。
  * 外部データは常に壊れている前提で扱う規約（`.claude/rules/backend.md`）に基づく。
  * 詳細は設計書 §6 の変更点を参照。
+ *
+ * 配当額が負は**理由コードを持たない**。判定不能ではなく 0点（無配と同じ扱い）。
  */
 export type YieldUnavailableReason =
   | 'price-missing'
   | 'price-zero'
   | 'price-negative'
+  | 'price-too-large'
   | 'price-invalid'
   | 'dividend-missing'
   | 'dividend-invalid';
@@ -117,40 +120,66 @@ function pickLatest(
 /**
  * 配当履歴から利回り計算に使う年間配当を選ぶ（§2.1）。
  *
- * 最新の「予想（または修正）」を優先し、無ければ最新の「実績」を使う。
+ * **取り込んだデータの最新年度に「予想（または修正）」があればそれを採用し、
+ * 最新年度に予想が無い場合のみ最新の「実績」を採用する**（2026-07-27 決定）。
+ *
+ * 年度を見ずに予想を一律優先すると、FY2019 の予想が FY2024 の実績を上書きし、
+ * 画面には「予想」とだけ出るのでいつ時点の値か分からなくなる
+ * （`CLAUDE.md`「古いデータを最新として表示しない」に反する）。
+ *
  * 採用元を返すのは、画面に「予想」か「実績」かを併記するため。
  *
  * @returns 使える配当が1件も無ければ `null`
  */
 export function selectAnnualDividend(records: readonly DividendRecord[]): SelectedDividend | null {
-  // 金額が null の年は「データなし」。0 とは違うので採用対象から外す
-  const usable = records.filter((r): r is UsableRecord => r.annualAmountSen !== null);
+  // 金額が null の年は「データなし」。0 とは違うので採用対象から外す。
+  // 年度が壊れているレコードも外す。混ざると「最新年度」の判定ごと壊れる
+  const usable = records.filter(
+    (r): r is UsableRecord => r.annualAmountSen !== null && Number.isSafeInteger(r.fiscalYear),
+  );
+  if (usable.length === 0) return null;
 
-  const forecast = pickLatest(usable, ['forecast', 'revised']);
-  if (forecast !== null) return { amountSen: forecast.annualAmountSen, source: 'forecast' };
+  const latestYear = usable.reduce(
+    (max, record) => (record.fiscalYear > max ? record.fiscalYear : max),
+    Number.NEGATIVE_INFINITY,
+  );
+  const latestForecast = pickLatest(
+    usable.filter((record) => record.fiscalYear === latestYear),
+    ['forecast', 'revised'],
+  );
+  if (latestForecast !== null) {
+    return { amountSen: latestForecast.annualAmountSen, source: 'forecast' };
+  }
 
   const actual = pickLatest(usable, ['actual']);
   if (actual !== null) return { amountSen: actual.annualAmountSen, source: 'actual' };
 
+  // 最新年度のレコードは予想か実績のどちらかなので、通常ここには来ない。
+  // 区分が増えたときに黙って壊れないよう残してある
   return null;
 }
 
-/** 表の最上位の閾値。判定式が扱う積の上限を決めるのに使う。 */
-const MAX_THRESHOLD_HUNDREDTHS = Math.max(
-  ...DIVIDEND_YIELD_BANDS.map((band) => band.minInclusive ?? 0),
-);
+/**
+ * 業務上の株価上限。1株 1,000,000 円（2026-07-27 決定）。
+ *
+ * これを超える株価は日本株には事実上存在しないので、桁の打ち間違いとみなして弾く。
+ * 画面側の入力欄もこの値で範囲検証すること（`.claude/rules/frontend.md`）。
+ */
+export const MAX_PRICE_SEN = 1_000_000 * 100;
 
 /**
- * 判定式 `配当 * 10000` と `閾値 * 株価` が安全整数に収まる上限。
+ * 判定式が扱える配当の上限。`配当 * 10000` が安全整数に収まる範囲。
  *
  * **オペランドが安全整数でも、積は安全整数とは限らない。**
- * `Number.isSafeInteger(priceSen)` を通った値でも `550 * priceSen` は
- * 範囲を超えることがあり、そのとき比較結果が静かに逆転する
+ * `Number.isSafeInteger` を通った値でも積が範囲を超えると比較結果が静かに逆転する
  * （実測: 株価 9007199254740991 銭で 5.25% の判定が 9点 / 厳密には 8点）。
  * 「整数比較だから厳密」という前提を成立させるには、積のほうを縛る必要がある。
+ *
+ * 株価側は業務上限 `MAX_PRICE_SEN` が算術上の安全域よりはるかに小さいので、
+ * 業務上限だけ見れば足りる（`閾値 * 株価` は最大でも 550 * 1e8 = 5.5e10）。
+ * この関係が崩れていないことは `dividend-yield.test.ts` で検証する。
  */
-const MAX_DIVIDEND_SEN = Math.floor(Number.MAX_SAFE_INTEGER / 10_000);
-const MAX_PRICE_SEN = Math.floor(Number.MAX_SAFE_INTEGER / MAX_THRESHOLD_HUNDREDTHS);
+export const MAX_DIVIDEND_SEN = Math.floor(Number.MAX_SAFE_INTEGER / 10_000);
 
 /**
  * 銭として扱える値か。`NaN` / `Infinity` / 小数 / 安全整数の範囲外を弾く。
@@ -179,23 +208,21 @@ export function calculateDividendYield(input: DividendYieldInput): DividendYield
   });
 
   if (priceSen === null) return unavailable('price-missing');
-  // 上限は積の安全域から導いたもので、業務上の株価上限ではない
-  if (!isValidSen(priceSen) || priceSen > MAX_PRICE_SEN) return unavailable('price-invalid');
+  if (!isValidSen(priceSen)) return unavailable('price-invalid');
   // §4 は 0 と負で別のメッセージを出すよう定めているので、理由コードも分ける
   if (priceSen === 0) return unavailable('price-zero');
   if (priceSen < 0) return unavailable('price-negative');
+  if (priceSen > MAX_PRICE_SEN) return unavailable('price-too-large');
 
   if (dividend === null) return unavailable('dividend-missing');
-  // 負の配当は §4 に規定が無い。0点にすると「無配」と区別できなくなるので判定不能にする
-  if (
-    !isValidSen(dividend.amountSen) ||
-    dividend.amountSen < 0 ||
-    dividend.amountSen > MAX_DIVIDEND_SEN
-  ) {
+  if (!isValidSen(dividend.amountSen) || dividend.amountSen > MAX_DIVIDEND_SEN) {
     return unavailable('dividend-invalid');
   }
 
-  const dividendSen = dividend.amountSen;
+  // 配当が負になるのは制度上ありえない。データの都合で負が入ってきたときは
+  // 無配（0円）と同じ扱いにする（2026-07-27 決定。§4 / §6 変更点5）。
+  // 判定不能に倒さないのは、③⑤⑥⑨ の「負の値は 0点」と方針を揃えるため。
+  const dividendSen = Math.max(0, dividend.amountSen);
 
   // 利回り(%) = 配当 / 株価 * 100。閾値は 1/100 % 単位なので
   //   配当 / 株価 * 100 * 100 >= 閾値  <=>  配当 * 10000 >= 閾値 * 株価
