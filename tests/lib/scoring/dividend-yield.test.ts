@@ -220,20 +220,36 @@ describe('⑩ 配当利回り — 積が安全整数を外れる入力を弾く'
     expect(at(MAX_DIVIDEND_SEN + 1)).toBe('dividend-invalid');
   });
 
-  it('通った入力では判定が厳密になる（BigInt と一致する）', () => {
-    // 上限付近でも、float の丸めで区分がずれないこと
-    const priceSen = MAX_PRICE_SEN;
-    const threshold = 525n;
-    for (const delta of [-1, 0, 1]) {
-      const amountSen = Math.floor((priceSen * 525) / 10_000) + delta;
-      const exact =
-        BigInt(amountSen) * 10_000n >= threshold * BigInt(priceSen) ? 'at-or-above' : 'below';
-      const score = calculateDividendYield({
-        priceSen,
-        dividend: { amountSen, source: 'forecast' },
-      }).score;
-      const actual = score !== null && score >= 9 ? 'at-or-above' : 'below';
-      expect(actual).toBe(exact);
+  it('通った入力では全閾値の境界で判定が厳密になる（BigInt と一致する）', () => {
+    // 上限付近でも、float の丸めで区分がずれないこと。
+    // 実装と同じ規約（下限以上・上限未満）を BigInt で組み直して正解とする。
+    const exactPoints = (amountSen: number, priceSen: number): number | null => {
+      const lhs = BigInt(amountSen) * 10_000n;
+      for (const band of DIVIDEND_YIELD_BANDS) {
+        const atOrAboveMin =
+          band.minInclusive === null || lhs >= BigInt(band.minInclusive) * BigInt(priceSen);
+        const belowMax =
+          band.maxExclusive === null || lhs < BigInt(band.maxExclusive) * BigInt(priceSen);
+        if (atOrAboveMin && belowMax) return band.points;
+      }
+      return null;
+    };
+
+    const thresholds = DIVIDEND_YIELD_BANDS.map((band) => band.minInclusive).filter(
+      (t): t is number => t !== null && t > 0,
+    );
+
+    for (const priceSen of [PRICE_10K_YEN_SEN, 12_345_600, MAX_PRICE_SEN]) {
+      for (const threshold of thresholds) {
+        const atThreshold = Math.floor((priceSen * threshold) / 10_000);
+        for (const amountSen of [atThreshold - 1, atThreshold, atThreshold + 1]) {
+          // 上限を超える組み合わせは実装が意図的に弾くので照合対象から外す
+          if (amountSen < 0 || amountSen > MAX_DIVIDEND_SEN) continue;
+          expect(
+            calculateDividendYield({ priceSen, dividend: { amountSen, source: 'forecast' } }).score,
+          ).toBe(exactPoints(amountSen, priceSen));
+        }
+      }
     }
   });
 });
