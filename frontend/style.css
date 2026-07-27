@@ -1,0 +1,152 @@
+/*
+ * 色・余白・フォントサイズはトークン化し、コンポーネントに直値を書かない
+ * （`.claude/rules/frontend.md`）。
+ */
+:root {
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-text: #e2e8f0;
+  --color-muted: #94a3b8;
+  --color-accent: #38bdf8;
+  --color-error: #f87171;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --radius: 0.5rem;
+  --font-size-sm: 0.875rem;
+  --font-size-lg: 1.25rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'Hiragino Sans',
+    'Noto Sans JP',
+    sans-serif;
+  line-height: 1.6;
+}
+
+main {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-3);
+}
+
+section {
+  margin-block: var(--space-4);
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border-radius: var(--radius);
+}
+
+fieldset {
+  border: 1px solid var(--color-muted);
+  border-radius: var(--radius);
+  margin-block: var(--space-3);
+  padding: var(--space-3);
+}
+
+legend {
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+}
+
+label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-1) var(--space-3) var(--space-1) 0;
+  font-size: var(--font-size-sm);
+}
+
+label.inline {
+  flex-direction: row;
+  align-items: center;
+}
+
+input {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-muted);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  color: var(--color-text);
+  min-width: 6rem;
+}
+
+button {
+  padding: var(--space-2) var(--space-3);
+  margin-right: var(--space-2);
+  border: none;
+  border-radius: var(--radius);
+  background: var(--color-accent);
+  color: #0f172a;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* 表は横スクロールさせる。狭い画面で本文ごと横に伸びるのを防ぐ */
+.metric-table,
+.input-table {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+th,
+td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+  text-align: left;
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 判定不能の行。色だけに依存させないため、備考欄に必ず文言を出している */
+.is-unavailable {
+  color: var(--color-muted);
+}
+
+.total {
+  font-size: var(--font-size-lg);
+}
+
+.effective {
+  margin-left: var(--space-2);
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
+.meta,
+.radar-note {
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
+.error {
+  color: var(--color-error);
+}
+
+footer {
+  margin-top: var(--space-4);
+  color: var(--color-muted);
+}

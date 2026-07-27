@@ -142,3 +142,9 @@ $$\text{配当維持可能年数} = \frac{\text{ネットキャッシュ}}{\text
 
 旧実装（[reference/legacy-web/](../../../reference/legacy-web/README.md)）は**再利用しない**（T-008）。
 挙動の記録としてのみ参照する。
+
+## 実装（2026-07-28）
+
+- 判定: `src/domain/scoring/dividend-sustainability.ts`
+- 区分表: `src/domain/scoring/bands.ts` の `DIVIDEND_SUSTAINABILITY_BANDS`
+- テスト: `tests/domain/scoring/dividend-sustainability.test.ts`（§6 の4系統を網羅）

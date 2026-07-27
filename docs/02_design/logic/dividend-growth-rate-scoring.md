@@ -127,3 +127,13 @@ $$\text{CAGR} = \left( \frac{\text{昨年の配当金}}{\text{5年前の配当�
 
 旧実装（[reference/legacy-web/](../../../reference/legacy-web/README.md)）は**再利用しない**（T-008）。
 挙動の記録としてのみ参照する。
+
+## 実装（2026-07-28）
+
+- 判定: `src/domain/scoring/dividend-growth-rate.ts`
+- 区分表: `src/domain/scoring/bands.ts` の `DIVIDEND_GROWTH_RATE_BANDS`
+- テスト: `tests/domain/scoring/dividend-growth-rate.test.ts`（§6 の4系統を網羅）
+
+> ⚠️ 区分表に **0点の行は無い**。「0%以下 → 0点」は §5 の例外処理として
+> **区分表を引く前のガード**で落としている。最下段が `[0%, 2%) → 1点` なので、
+> 0 ちょうどを表に渡すと 1点になってしまうため。

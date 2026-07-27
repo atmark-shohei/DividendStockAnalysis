@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.frontend.tsbuildinfo"
+  },
+  "include": ["frontend/**/*.ts", "frontend/**/*.tsx", "vite.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

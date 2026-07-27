@@ -260,3 +260,9 @@ $$\text{配当利回り (\%)} = \left( \frac{\text{年間配当金}}{\text{現�
 
 判断の全体像は
 [scoring-source-comparison.md](../../01_requirements/scoring-source-comparison.md) にある。
+
+## 実装（2026-07-28）
+
+- 判定: `src/domain/scoring/dividend-yield.ts`
+- 区分表: `src/domain/scoring/bands.ts` の `DIVIDEND_YIELD_BANDS`
+- テスト: `tests/domain/scoring/dividend-yield.test.ts`（§6 の4系統を網羅）

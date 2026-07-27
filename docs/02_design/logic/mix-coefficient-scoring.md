@@ -165,3 +165,9 @@ $$\text{CN-PER} = \text{PER} \times (1 - \text{ネットキャッシュ比率})$
 
 > 再検討の目安は ⑥ の実装後。ネットキャッシュの計算が動いてからのほうが
 > 追加コストを正しく見積もれる。
+
+## 実装（2026-07-28）
+
+- 判定: `src/domain/scoring/mix-coefficient.ts`
+- 区分表: `src/domain/scoring/bands.ts` の `MIX_COEFFICIENT_BANDS`
+- テスト: `tests/domain/scoring/mix-coefficient.test.ts`（§6 の4系統を網羅）

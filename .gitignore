@@ -46,3 +46,6 @@ tmp/
 .cache/
 *.sqlite
 *.db
+
+# Cloudflare Workers のローカル状態（D1 の実体・キャッシュ）
+.wrangler/

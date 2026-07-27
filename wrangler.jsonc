@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dividend-stock-analysis",
+  "main": "src/index.ts",
+  // インストール済みの workerd に合わせる。将来日付にすると wrangler が起動を拒否する
+  "compatibility_date": "2026-07-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  // React アプリ（Vite の出力）。API 以外のパスはここへ流す
+  "assets": {
+    "directory": "./dist/frontend",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dividend-stock-analysis",
+      // ローカル開発では未使用のプレースホルダ。
+      // リモートへ deploy する前に `wrangler d1 create` で採番した ID に差し替える
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "db/migrations",
+    },
+  ],
+}

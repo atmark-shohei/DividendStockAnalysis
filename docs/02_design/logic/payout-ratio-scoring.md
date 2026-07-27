@@ -135,3 +135,9 @@ CSV に `配当性向` 列があればそれを優先してよい（`scoring-req
 
 旧実装（[reference/legacy-web/](../../../reference/legacy-web/README.md)）は**再利用しない**（T-008）。
 挙動の記録としてのみ参照する。
+
+## 実装（2026-07-28）
+
+- 判定: `src/domain/scoring/payout-ratio.ts`
+- 区分表: `src/domain/scoring/bands.ts` の `PAYOUT_RATIO_BANDS`
+- テスト: `tests/domain/scoring/payout-ratio.test.ts`（§6 の4系統を網羅）
