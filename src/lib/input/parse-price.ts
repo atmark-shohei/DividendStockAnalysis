@@ -34,6 +34,10 @@ export type PriceInputResult =
  * 一方で「未入力」と「読めない文字列」は**ここでしか区別できない**ので、
  * 戻り値を判別可能ユニオンにしてある。両方を `null` で返すと、
  * `abc` と入力したユーザーに「株価を入力してください」と誤表示される。
+ *
+ * 既知の緩さ: カンマ**なし**の前置ゼロ（`0123`）は 123 円として通る。
+ * 3桁区切りの前置ゼロ（`0,123`）は弾くので方針が揃っていないが、
+ * カンマ無しは桁の解釈に曖昧さが無いため実害は無いと判断している。
  */
 export function parsePriceInput(raw: string): PriceInputResult {
   const normalized = raw
