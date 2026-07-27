@@ -111,12 +111,22 @@ export function seriesOf(
   );
   if (!Number.isFinite(latestYear)) return [];
 
+  const oldestYear = actuals.reduce(
+    (min, record) => (record.fiscalYear < min ? record.fiscalYear : min),
+    Number.POSITIVE_INFINITY,
+  );
+
   const byYear = new Map<number, FinancialRecord>();
   for (const record of actuals) {
     if (!byYear.has(record.fiscalYear)) byYear.set(record.fiscalYear, record);
   }
 
-  return Array.from({ length: years }, (_, offset) => {
+  // **データが尽きた先まで埋めない。** 埋めると「途中の年度が欠けている」と
+  // 「そこで履歴が終わっている」が区別できなくなり、② 連続非減配年数が
+  // 「判定不能」に倒れてしまう（履歴の末尾は減配でも欠損でもない）。
+  const length = Math.min(years, latestYear - oldestYear + 1);
+
+  return Array.from({ length }, (_, offset) => {
     const record = byYear.get(latestYear - offset);
     return record === undefined ? null : select(record);
   });

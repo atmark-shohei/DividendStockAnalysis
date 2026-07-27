@@ -65,6 +65,33 @@ describe('系列は年度に揃える（添字＝何年前か）', () => {
     const target = company([record(2026, { isForecast: true })]);
     expect(seriesOf(target, (r) => r.epsSen, 5)).toEqual([]);
   });
+
+  it('データが尽きた先まで null で埋めない', () => {
+    // 埋めると「途中の年度が欠けている」と「履歴がそこで終わっている」が
+    // 区別できなくなり、② 連続非減配年数が判定不能に倒れる
+    const target = company([2025, 2024].map((year) => record(year, { epsSen: year })));
+    expect(seriesOf(target, (r) => r.epsSen, 10)).toEqual([2025, 2024]);
+  });
+});
+
+describe('履歴の末尾と欠損の区別（② 連続非減配年数）', () => {
+  const decreasing = (year: number, sen: number) =>
+    record(year, { dividendPerShareSen: sen });
+
+  it('履歴が尽きただけなら、そこまでの年数で採点する', () => {
+    // 6年分すべて非減配 → 5年 → 3点。判定不能ではない
+    const target = company([2025, 2024, 2023, 2022, 2021, 2020].map((y) => decreasing(y, 5_000)));
+    const metric = scoreCompany(target).card.metrics.consecutiveYears;
+    expect(metric.value).toBe(5);
+    expect(metric.score).toBe(3);
+  });
+
+  it('途中の年度が欠けていたら判定不能。欠損を 0 とみなして「減配」にしない', () => {
+    const target = company([2025, 2024, 2022, 2021].map((y) => decreasing(y, 5_000)));
+    const metric = scoreCompany(target).card.metrics.consecutiveYears;
+    expect(metric.score).toBeNull();
+    expect(metric.unavailableReason).toBe('input-missing');
+  });
 });
 
 describe('年度の欠落がスコアに与える影響', () => {
