@@ -8,8 +8,11 @@
  * DOM を触る側は `use-route.ts`。分けてあるのは、ここを素の Node でテストするため。
  */
 
-/** 銘柄コード。4桁数字、または末尾が英字の5桁（handler の `companyCode` と同じ形式） */
-const COMPANY_CODE = /^\d{4}[0-9A-Z]?$/;
+/**
+ * 銘柄コード。4文字固定、先頭3文字は数字・末尾1文字は数字または英大文字
+ * （handler の `companyCode` と同じ形式）。
+ */
+const COMPANY_CODE = /^\d{3}[0-9A-Z]$/;
 
 export type Route =
   { readonly kind: 'list'; readonly selectedCode: string | null } | { readonly kind: 'input' };

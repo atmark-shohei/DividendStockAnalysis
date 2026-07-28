@@ -23,8 +23,13 @@ export interface AppDependencies {
   readonly now: () => Date;
 }
 
-/** 銘柄コードの形式。パスパラメータにも同じ検証をかける */
-const COMPANY_CODE_PATTERN = /^\d{4}[0-9A-Z]?$/;
+/**
+ * 銘柄コードの形式。パスパラメータにも同じ検証をかける。
+ *
+ * 4文字固定。先頭3文字は数字、末尾1文字は数字または英大文字（例: `130A`）。
+ * JPX が 2024 年以降に採番している英字混じりコードに対応する。
+ */
+const COMPANY_CODE_PATTERN = /^\d{3}[0-9A-Z]$/;
 
 export function createApp(dependencies: AppDependencies): Hono {
   const app = new Hono();

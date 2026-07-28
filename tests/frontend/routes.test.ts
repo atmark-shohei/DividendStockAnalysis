@@ -10,7 +10,11 @@ describe('parseRoute', () => {
   const cases: readonly (readonly [name: string, href: string, expected: Route])[] = [
     ['ルートは一覧・選択なし', '/', { kind: 'list', selectedCode: null }],
     ['code 付きは一覧・選択あり', '/?code=7203', { kind: 'list', selectedCode: '7203' }],
-    ['4桁数字＋英字1文字も受ける', '/?code=1301A', { kind: 'list', selectedCode: '1301A' }],
+    [
+      '3桁数字＋末尾英字の4文字コードも受ける',
+      '/?code=130A',
+      { kind: 'list', selectedCode: '130A' },
+    ],
     ['入力画面', '/input', { kind: 'input' }],
     ['入力画面の末尾スラッシュは同じ画面', '/input/', { kind: 'input' }],
     ['入力画面のクエリは無視する', '/input?code=7203', { kind: 'input' }],
@@ -27,11 +31,10 @@ describe('parseRoute', () => {
    * （`src/handler/dto/company-input.ts`）と同じ形式に揃える。**
    * 画面だけが緩いと API が 400 を返し、厳しいと登録済みの銘柄を開けなくなる。
    *
-   * ⚠️ `130A`（3桁数字＋英字の4文字）は JPX が 2024 年以降に採番している実在の形式だが、
-   * 現在の handler の正規表現 `^\d{4}[0-9A-Z]?$` では弾かれる。ここは handler に
-   * 追随させている。handler を直すときは、このテストも一緒に直すこと。
+   * `1301A`（4桁数字＋英字の5文字）は JPX の実際の採番形式ではない
+   * （4文字固定・末尾1文字だけが英字になりうる）ので、5文字コードは弾く。
    */
-  const invalidCodes = ['', '720', '130A', 'abcd', '7203a', '<script>', '7203 ', '７２０３'];
+  const invalidCodes = ['', '720', '1301A', 'abcd', '7203a', '<script>', '7203 ', '７２０３'];
 
   it.each(invalidCodes)('形式不正のコード %j は選択なしにする', (code) => {
     expect(parseRoute(`/?code=${encodeURIComponent(code)}`)).toEqual({

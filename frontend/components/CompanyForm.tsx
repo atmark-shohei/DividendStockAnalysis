@@ -98,8 +98,8 @@ export function CompanyForm({
     setError(null);
 
     const normalizedCode = toHalfWidth(code).toUpperCase();
-    if (!/^\d{4}[0-9A-Z]?$/.test(normalizedCode)) {
-      setError('銘柄コードは4桁の数字（一部英字を含む）で入力してください');
+    if (!/^\d{3}[0-9A-Z]$/.test(normalizedCode)) {
+      setError('銘柄コードは4文字（先頭3桁は数字、末尾1桁は数字か英大文字）で入力してください');
       return;
     }
     if (name.trim() === '') {

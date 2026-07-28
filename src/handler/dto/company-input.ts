@@ -19,11 +19,17 @@ import {
 } from '../../domain/shared/metric-key';
 import { type CompanyScoring } from '../../usecase/score-company';
 
-/** 銘柄コード。4桁数字、または末尾が英字の5桁（例: 130A） */
+/**
+ * 銘柄コード。4文字固定。先頭3文字は数字、末尾1文字は数字または英大文字（例: 130A）。
+ * JPX が 2024 年以降に採番している英字混じりコードに対応する。
+ */
 const companyCode = z
   .string()
   .trim()
-  .regex(/^\d{4}[0-9A-Z]?$/, '銘柄コードは4桁の数字（一部英字を含む）で指定する');
+  .regex(
+    /^\d{3}[0-9A-Z]$/,
+    '銘柄コードは4文字（先頭3桁は数字、末尾1桁は数字か英大文字）で指定する',
+  );
 
 /** 銭。整数のみ。小数を受け取ったら弾く（金額に浮動小数点を使わない） */
 const senValue = z.number().int().safe();
