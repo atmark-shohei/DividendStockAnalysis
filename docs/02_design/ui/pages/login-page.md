@@ -1,7 +1,9 @@
 # ログイン（S-05）
 
-> ステータス: 🔴 **保留 — 認証を導入するかが未決定**
-> パス: `/login` / 実装: `src/app/login/page.tsx`
+> ステータス: 🔴 **保留 — 認証を導入するかが未決定**（[ADR-0005](../../adr/0005-thresholds-fixed-for-now.md) と同じ T-003/T-004 待ち）
+> パス: 未定（`/login` は Next.js 時代の案。実装は React + Vite の SPA へ移行済みで
+> `src/app/login/page.tsx` は削除済み。導入するとしてもクライアントサイドルーティングを
+> 新たに設計する必要がある。[ADR-0001](../../adr/0001-runtime-cloudflare-workers.md)）
 
 ## 前提
 

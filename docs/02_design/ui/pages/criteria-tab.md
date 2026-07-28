@@ -8,6 +8,10 @@
 - **2026-05-05**: 新規作成。要件定義書に基づく10指標のスコア表表示 UI について定義
 - **2026-07-26**: 本リポジトリへ取り込み。参照リンクを更新
 - **2026-07-27**: §2.1「カード一覧と実装状態」を追加。⑩ 配当利回りを自動計算済として掲載（T-047）
+- **2026-07-28**: 軽量DDD移行（[ADR-0001](../../../adr/0001-runtime-cloudflare-workers.md)）により
+  10指標すべてが `src/domain/scoring/` に実装済みになったため §2.1 を更新。
+  この画面（F-31 評価基準タブ）自体は依然として**未実装**。
+  実装先は `src/lib/` ではなく `src/domain/scoring/`（§3 も参照）
 
 ---
 
@@ -32,18 +36,22 @@
 描画する（§3 参照）。表とバッジが二重管理になるのを避けるため、
 実装が進んだらこの表も更新するが、正はあくまでエンジン側。
 
-| #   | カード見出し        | 実装           | 詳細設計                                                                             |
-| :-- | :------------------ | :------------- | :----------------------------------------------------------------------------------- |
-| ①   | 直近5年間の増配率   | 未実装         | [dividend-growth-rate-scoring.md](../../logic/dividend-growth-rate-scoring.md)       |
-| ②   | 連続非減配年数      | 未実装         | [consecutive-years-scoring.md](../../logic/consecutive-years-scoring.md)             |
-| ③   | 予想配当性向        | 未実装         | [payout-ratio-scoring.md](../../logic/payout-ratio-scoring.md)                       |
-| ④   | EPS の5年 CAGR      | 未実装         | [eps-cagr-scoring.md](../../logic/eps-cagr-scoring.md)                               |
-| ⑤   | ROE の5年平均       | 未実装         | [roe-scoring.md](../../logic/roe-scoring.md)                                         |
-| ⑥   | 配当維持可能年数    | 未実装         | [dividend-sustainability-scoring.md](../../logic/dividend-sustainability-scoring.md) |
-| ⑦   | 売上高の5年 CAGR    | 未実装         | [revenue-cagr-scoring.md](../../logic/revenue-cagr-scoring.md)                       |
-| ⑧   | 営業利益率の5年平均 | 未実装         | [operating-margin-scoring.md](../../logic/operating-margin-scoring.md)               |
-| ⑨   | MIX係数             | 未実装         | [mix-coefficient-scoring.md](../../logic/mix-coefficient-scoring.md)                 |
-| ⑩   | **配当利回り**      | **自動計算済** | [dividend-yield-scoring.md](../../logic/dividend-yield-scoring.md)                   |
+| #   | カード見出し        | 実装（エンジン）                                                                                                  | 詳細設計                                                                             |
+| :-- | :------------------ | :---------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------- |
+| ①   | 直近5年間の増配率   | 🟢 自動計算済                                                                                                     | [dividend-growth-rate-scoring.md](../../logic/dividend-growth-rate-scoring.md)       |
+| ②   | 連続非減配年数      | 🟢 自動計算済                                                                                                     | [consecutive-years-scoring.md](../../logic/consecutive-years-scoring.md)             |
+| ③   | 予想配当性向        | 🟢 自動計算済                                                                                                     | [payout-ratio-scoring.md](../../logic/payout-ratio-scoring.md)                       |
+| ④   | EPS の5年 CAGR      | 🟢 自動計算済                                                                                                     | [eps-cagr-scoring.md](../../logic/eps-cagr-scoring.md)                               |
+| ⑤   | ROE の5年平均       | 🟢 自動計算済                                                                                                     | [roe-scoring.md](../../logic/roe-scoring.md)                                         |
+| ⑥   | 配当維持可能年数    | 🟢 自動計算済                                                                                                     | [dividend-sustainability-scoring.md](../../logic/dividend-sustainability-scoring.md) |
+| ⑦   | 売上高の5年 CAGR    | 🟢 自動計算済                                                                                                     | [revenue-cagr-scoring.md](../../logic/revenue-cagr-scoring.md)                       |
+| ⑧   | 営業利益率の5年平均 | 🟢 自動計算済（🟡 金融業の扱いは保留。[operating-margin-scoring.md](../../logic/operating-margin-scoring.md) §7） | [operating-margin-scoring.md](../../logic/operating-margin-scoring.md)               |
+| ⑨   | MIX係数             | 🟢 自動計算済                                                                                                     | [mix-coefficient-scoring.md](../../logic/mix-coefficient-scoring.md)                 |
+| ⑩   | **配当利回り**      | 🟢 自動計算済                                                                                                     | [dividend-yield-scoring.md](../../logic/dividend-yield-scoring.md)                   |
+
+> ⚠️ 「実装（エンジン）」列は `src/domain/scoring/` の計算ロジックの状態。
+> **この評価基準タブ自体（バッジ描画・カードUI）はまだ実装されていない。**
+> エンジンが実装済みでも画面が無ければユーザーには見えない。
 
 **⑩ のカードに固有の表示要件:**
 
@@ -53,13 +61,16 @@
   理由コードごとにメッセージを出し分ける（同 §4 の表）
 - 無配（0円）と判定不能を同じ見た目にしない
 
-## 3. 実装時の注意（本リポジトリ取り込み時に追記）
+## 3. 実装時の注意（2026-07-28 更新: 軽量DDD移行後のパス）
 
 - **スコア表をこの画面にハードコードしない。** 表は
   [scoring-requirements.md](../../../01_requirements/scoring-requirements.md) が正であり、
-  スコアリングエンジンと同一の定義（`src/lib/` の定数）から描画すること。
+  スコアリングエンジンと同一の定義（`src/domain/scoring/bands.ts` の10表。
+  ~~旧: `src/lib/` の定数~~）から描画すること。
   画面とエンジンで表が二重管理になると、片方だけ直して不整合が起きる
-- バッジの「自動計算済／未実装」も手書きせず、エンジンが実装済み指標を返す形にする
+- バッジの「自動計算済／未実装」も手書きせず、`src/domain/shared/metric-key.ts` の
+  `METRIC_KEYS` を基準に、エンジンが返す `MetricScore` の有無から描画する形にする
+  （2026-07-28 時点では10指標全て実装済みなので、バッジは全部「自動計算済」になる）
 - 境界値の解釈（下限以上・上限未満）を画面上にも明記する。
   ユーザーが「20% ちょうどは何点か」を判断できないと表の意味がない
 
