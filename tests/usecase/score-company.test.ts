@@ -75,8 +75,7 @@ describe('系列は年度に揃える（添字＝何年前か）', () => {
 });
 
 describe('履歴の末尾と欠損の区別（② 連続非減配年数）', () => {
-  const decreasing = (year: number, sen: number) =>
-    record(year, { dividendPerShareSen: sen });
+  const decreasing = (year: number, sen: number) => record(year, { dividendPerShareSen: sen });
 
   it('履歴が尽きただけなら、そこまでの年数で採点する', () => {
     // 6年分すべて非減配 → 5年 → 3点。判定不能ではない
