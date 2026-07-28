@@ -8,7 +8,6 @@
 // not worth it when Chrome is already installed on the machine.
 //
 //   node driver.mjs smoke              # start dev server, screenshot, assert, exit
-//   node driver.mjs smoke --prod       # same against `npm run build && npm start`
 //   node driver.mjs repl               # interactive: commands on stdin
 //
 // See .claude/skills/run-dividend-stock-analysis/SKILL.md
@@ -44,9 +43,9 @@ const UNIT = resolve(flag('unit', process.cwd()));
 const OUT = resolve(flag('out', join(UNIT, 'tmp', 'shots')));
 const VERBOSE = has('verbose');
 
-// Ports are resolved at startup, not hardcoded. Next.js silently increments
-// past a busy port, which desynchronises it from whatever URL we then poll —
-// so we find a free one ourselves and pass it explicitly.
+// Ports are resolved at startup, not hardcoded. Some dev servers silently
+// increment past a busy port, which desynchronises them from whatever URL we
+// then poll — so we find a free one ourselves and pass it explicitly.
 let PORT, CDP_PORT, BASE;
 
 const log = (...a) => console.log(...a);
@@ -88,9 +87,10 @@ function findChrome() {
   return found;
 }
 
-// Windows: child.kill() leaves the process tree behind (npm -> node -> next,
-// chrome -> renderers). taskkill /T does not. Resolves only once the process
-// is actually gone, otherwise the caller races it deleting locked files.
+// Windows: child.kill() leaves the process tree behind (npm -> node ->
+// wrangler -> workerd, chrome -> renderers). taskkill /T does not. Resolves
+// only once the process is actually gone, otherwise the caller races it
+// deleting locked files.
 function killTree(child) {
   if (!child || child.exitCode !== null) return Promise.resolve();
   child.stopping = true; // so the exit handler knows this was deliberate
@@ -142,19 +142,14 @@ async function waitForHttp(url, timeoutMs, label) {
 
 // ---------------------------------------------------------------- dev server
 
-async function startServer({ prod }) {
-  const script = prod ? 'start' : 'dev';
-  if (prod) {
-    log(`→ npm run build (production mode requested)`);
-    // Single command string, not (cmd, args[]): shell:true + an args array
-    // triggers DEP0190 in Node 24 because the args are concatenated unescaped.
-    const build = spawn('npm run build', { cwd: UNIT, shell: true, stdio: 'inherit' });
-    const code = await new Promise((r) => build.on('exit', r));
-    if (code !== 0) throw new Error(`npm run build exited ${code}`);
-  }
-
-  log(`→ npm run ${script} (port ${PORT})`);
-  const child = spawn(`npm run ${script} -- --port ${PORT}`, {
+async function startServer() {
+  // `dev` runs `vite build && wrangler dev`, i.e. a real Workers runtime
+  // (workerd) with Assets + D1, not a framework-specific dev mode. There is
+  // no separate "production" server to run locally — `npm run build` only
+  // produces a `wrangler deploy --dry-run` bundle, it does not serve it — so
+  // there is nothing for a `--prod` flag to start.
+  log(`→ npm run dev (port ${PORT})`);
+  const child = spawn(`npm run dev -- --port ${PORT}`, {
     cwd: UNIT,
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -174,7 +169,7 @@ async function startServer({ prod }) {
     }
   });
 
-  await waitForHttp(BASE, 90_000, `next ${script} server`);
+  await waitForHttp(BASE, 90_000, 'wrangler dev server');
   log(`   server ready at ${BASE}`);
   return child;
 }
@@ -371,7 +366,7 @@ async function smoke() {
   };
 
   try {
-    server = await startServer({ prod: has('prod') });
+    server = await startServer();
     cdp = await Cdp.launch();
 
     log(`→ GET ${BASE}/`);
@@ -392,12 +387,6 @@ async function smoke() {
       /投資判断|免責/.test(bodyText),
       /投資判断|免責/.test(bodyText) ? 'found' : `body was: ${bodyText.slice(0, 120)}`,
     );
-
-    const errors = await cdp.evaluate(
-      `document.body.innerText.includes('Application error') ||
-       document.body.innerText.includes('Unhandled Runtime Error')`,
-    );
-    check('no Next.js error overlay', errors === false);
 
     const shot = await cdp.screenshot('home');
     check('screenshot written', shot.bytes > 5000, `${shot.file} (${shot.bytes} bytes)`);
@@ -432,7 +421,7 @@ const replHelp = () => `commands:
 async function repl() {
   let server, cdp;
   try {
-    if (!has('no-serve')) server = await startServer({ prod: has('prod') });
+    if (!has('no-serve')) server = await startServer();
     cdp = await Cdp.launch();
     await cdp.goto(`${BASE}/`);
     log(replHelp());

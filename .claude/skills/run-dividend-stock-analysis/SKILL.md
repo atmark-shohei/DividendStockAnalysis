@@ -1,17 +1,19 @@
 ---
 name: run-dividend-stock-analysis
-description: Build, run, screenshot and drive the DividendStockAnalysis Next.js app. Use when asked to start the app, run the dev server, build it, run its tests, take a screenshot of a page, click or type into the UI, or check that a page renders.
+description: Build, run, screenshot and drive the DividendStockAnalysis Cloudflare Workers app. Use when asked to start the app, run the dev server, build it, run its tests, take a screenshot of a page, click or type into the UI, or check that a page renders.
 ---
 
-Next.js 15 (App Router) app. An agent drives it with
+Cloudflare Workers app (Hono + D1 + a React/Vite SPA served via Workers
+Assets). An agent drives it with
 `.claude/skills/run-dividend-stock-analysis/driver.mjs` — a zero-dependency
 Chrome DevTools Protocol harness that starts the dev server, launches headless
 Chrome, and exposes navigate / click / type / eval / screenshot. It boots the
 server itself, so there is nothing to start beforehand and nothing left running
 afterwards.
 
-All paths below are relative to the repo root. **Verified 2026-07-26 on Windows
-11, PowerShell 5.1, Node v24.18.0, npm 11.16.0.** Commands are PowerShell.
+All paths below are relative to the repo root. **Verified 2026-07-28 on Windows
+11, PowerShell 5.1 / Git Bash, Node v24.18.0, npm 11.16.0, wrangler 4.114.0.**
+Commands are PowerShell unless noted.
 
 ## Prerequisites
 
@@ -36,14 +38,16 @@ $env:CHROME_PATH = 'C:\path\to\chrome.exe'
 machine and are not needed — the driver speaks CDP directly using Node's
 built-in `fetch` and `WebSocket`, and the REPL is driven by piping stdin.
 
+Run `npm run db:migrate` at least once before driving the app — `npm run dev`
+does not apply D1 migrations itself, and an un-migrated local DB makes every
+API call fail.
+
 ## Setup
 
 ```powershell
 npm install
+npm run db:migrate   # applies db/migrations to the local D1 database
 ```
-
-Exits 0. It prints `npm warn allow-scripts` for `sharp` and `unrs-resolver`;
-that is npm 11 noise, not a failure — see Gotchas.
 
 ## Build
 
@@ -51,12 +55,17 @@ that is npm 11 noise, not a failure — see Gotchas.
 npm run build
 ```
 
-Produces two static routes (`/` and `/_not-found`), ~103 kB first-load JS.
+Runs `vite build` (SPA into `dist/frontend/`) then `wrangler deploy --dry-run
+--outdir dist/worker`. This validates the Worker bundle but does **not** start
+a server — there is no local "production server" command for this app (see
+Gotchas). To exercise the app, use `npm run dev` (below), which already runs
+against a real Workers runtime (workerd) via `wrangler dev`.
 
 ## Run (agent path)
 
-**One command, start to finish.** Boots `next dev`, drives a real headless
-Chrome, asserts, screenshots, tears everything down:
+**One command, start to finish.** Boots `npm run dev` (`vite build && wrangler
+dev`), drives a real headless Chrome, asserts, screenshots, tears everything
+down:
 
 ```powershell
 node .claude/skills/run-dividend-stock-analysis/driver.mjs smoke
@@ -69,21 +78,13 @@ Verified output — exit code 0:
    server ready at http://127.0.0.1:3000
 → launching chrome.exe headless (CDP 9222)
 → GET http://127.0.0.1:3000/
-   PASS  page has a title — "DividendStockAnalysis"
+   PASS  page has a title — "高配当銘柄スコアリング"
    PASS  html lang is ja — "ja"
-   PASS  body is not empty — 219 chars
+   PASS  body is not empty — 143 chars
    PASS  disclaimer text is present — found
-   PASS  no Next.js error overlay
-   PASS  screenshot written — ...\tmp\shots\home.png (47033 bytes)
+   PASS  screenshot written — ...\tmp\shots\home.png (40292 bytes)
 
 SMOKE PASS
-```
-
-Against a production build instead of the dev server (runs `npm run build`
-first, then `npm run start`):
-
-```powershell
-node .claude/skills/run-dividend-stock-analysis/driver.mjs smoke --prod
 ```
 
 ### Interactive: pipe commands to the REPL
@@ -96,28 +97,20 @@ It prints `READY` once the page is loaded:
 text h1
 eval document.querySelectorAll('h2').length
 ss home
-goto /no-such-page
+goto /input
 text body
-ss notfound
+ss input-page
 quit
 '@ | node .claude/skills/run-dividend-stock-analysis/driver.mjs repl
 ```
 
-Verified output — exit code 0 (banner elided):
-
-```
-READY
-DividendStockAnalysis
-1
-OK ...\tmp\shots\home.png (47033 bytes)
-OK http://127.0.0.1:3000/no-such-page
-404
-This page could not be found.
-OK ...\tmp\shots\notfound.png (9224 bytes)
-```
-
 > The closing `'@` of a PowerShell here-string **must be at column 0**.
 > Indenting it is a parse error.
+
+The app has two screens (`docs/02_design/ui/screen-list.md`): `/` (saved
+companies + selected scoring result) and `/input` (data-entry form only).
+Selection state lives in the URL (`/?code=7203`), not in component state — a
+plain `goto` reaches either screen directly.
 
 | command             | what it does                                           |
 | ------------------- | ------------------------------------------------------ |
@@ -146,33 +139,38 @@ Screenshots land in `tmp/shots/` — already covered by `.gitignore`.
 ## Run (human path)
 
 ```powershell
-npm run dev      # → http://localhost:3000 — Ctrl-C to stop
+npm run dev      # → http://127.0.0.1:8787 (vite build + wrangler dev) — Ctrl-C to stop
+npm run dev:web  # → Vite only, HMR, no Worker/D1 behind it
 ```
 
 ## Test
 
 ```powershell
-npm test                 # vitest run — 1 file, 3 tests
-npm test -- smoke        # single file by pattern
-npm run typecheck        # tsc --noEmit
+npm test                 # vitest run — 19 files, 414 tests
+npm test -- <pattern>    # single file/suite by pattern
+npm run typecheck        # tsc --noEmit (worker + frontend tsconfig)
 npm run lint             # eslint .
 npm run format:check     # prettier --check .
 ```
 
-All five exit 0 as of 2026-07-26. `driver.mjs` is inside the lint and prettier
+All four exit 0 as of 2026-07-28. `driver.mjs` is inside the lint and prettier
 scope and passes both — keep it that way if you edit it.
 
 ## Gotchas
 
-- **A stranded `next dev` silently hijacks the next run.** On Windows
-  `child.kill()` kills the `npm` wrapper but leaves `node next dev` holding the
-  port; the following run then polls the _old_ server and reports success for
-  code that was never loaded. The driver uses `taskkill /PID <pid> /T /F` and
-  waits for the exit event. If you write your own launcher, do the same. Check
-  with `Get-NetTCPConnection -LocalPort 3000 -State Listen`.
-- **Next.js silently increments past a busy port.** Ask for 3000 while it is
-  taken and you get 3001 — while your script still polls 3000. The driver picks
-  a free port itself and passes it explicitly, so the URL always matches.
+- **There is no `--prod` mode.** The old Next.js version of this skill had
+  `smoke --prod` to run against a built server. This project has no local
+  "production server" command — `npm run build` only produces a
+  `wrangler deploy --dry-run` bundle, it does not serve it. `npm run dev`
+  already runs the real Workers runtime (workerd via `wrangler dev`), so
+  there is nothing a `--prod` flag would add.
+- **A stranded dev server silently hijacks the next run.** On Windows
+  `child.kill()` kills the `npm` wrapper but leaves the `wrangler`/`workerd`
+  process tree holding the port; the following run then polls the _old_
+  server and reports success for code that was never loaded. The driver uses
+  `taskkill /PID <pid> /T /F` and waits for the exit event. If you write your
+  own launcher, do the same. Check with
+  `Get-NetTCPConnection -LocalPort 3000 -State Listen`.
 - **`Page.navigate` does not reject on failure.** It resolves with an
   `errorText` field. Ignoring it turns `ERR_CONNECTION_REFUSED` into a mystery
   30-second `readyState` timeout. The driver checks `errorText`.
@@ -187,12 +185,9 @@ scope and passes both — keep it that way if you edit it.
   will attach to your real profile instead.
 - **`spawn(cmd, args[], { shell: true })` triggers `DEP0190` on Node 24.** Pass
   a single command string instead.
-- **Next dev logs `Cross origin request detected from 127.0.0.1`.** The driver
-  uses `127.0.0.1` while Next advertises `localhost`. Harmless; silence it with
-  `allowedDevOrigins` in `next.config.ts` if it bothers you.
-- **`npm install` prints `npm warn allow-scripts` for `sharp` and
-  `unrs-resolver`.** npm 11 declines to run their install scripts until
-  approved. Build, dev server and tests all work without approving them.
+- **`npm run dev` fails against an un-migrated D1 database.** Run
+  `npm run db:migrate` once per checkout (see Prerequisites); API calls 500
+  otherwise.
 
 ## Troubleshooting
 
