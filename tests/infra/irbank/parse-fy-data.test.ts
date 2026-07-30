@@ -34,6 +34,13 @@ function recordOf(imported: ImportedFinancials, fiscalYear: number) {
   return found;
 }
 
+/** 1株配当は `dividends` にしか無い（ADR-0009 で `records` から外した） */
+function dividendOf(imported: ImportedFinancials, fiscalYear: number) {
+  const found = imported.dividends.find((entry) => entry.fiscalYear === fiscalYear);
+  if (found === undefined) throw new Error(`${String(fiscalYear)} 年度の配当が無い`);
+  return found;
+}
+
 // --- 合成データ（実物から派生させた最小形） -------------------------------
 
 const PERFORMANCE_COLUMNS = ['売上高', '営業利益', '経常利益', '純利益', 'EPS', 'ROE', 'ROA'];
@@ -123,9 +130,20 @@ describe('実物の4銘柄が取り込める', () => {
   it.each(CODES)('%s の金額はすべて安全整数（銭）', (code) => {
     const imported = parsed(code);
     for (const entry of imported.records) {
-      for (const value of [entry.epsSen, entry.revenueSen, entry.dividendPerShareSen]) {
+      for (const value of [entry.epsSen, entry.revenueSen]) {
         if (value !== null) expect(Number.isSafeInteger(value)).toBe(true);
       }
+    }
+    for (const entry of imported.dividends) {
+      if (entry.annualAmountSen !== null) {
+        expect(Number.isSafeInteger(entry.annualAmountSen)).toBe(true);
+      }
+    }
+  });
+
+  it.each(CODES)('%s の records は1株配当を持たない（ADR-0009 で dividends へ一本化）', (code) => {
+    for (const entry of parsed(code).records) {
+      expect(entry).not.toHaveProperty('dividendPerShareSen');
     }
   });
 
@@ -159,7 +177,7 @@ describe('9433 NTT — 円の生値が銭になる', () => {
     const forecast = recordOf(imported, 2027);
     expect(forecast.isForecast).toBe(true);
     expect(forecast.epsSen).toBeNull();
-    expect(forecast.dividendPerShareSen).toBe(8400);
+    expect(dividendOf(imported, 2027).annualAmountSen).toBe(8400);
   });
 
   it('⑨ 用の最新実績 EPS / BPS は予想を混ぜない', () => {
@@ -225,7 +243,7 @@ describe('1301 極洋 — 実績4期＋予想1期', () => {
     const forecast = recordOf(imported, 2027);
     expect(forecast.isForecast).toBe(true);
     expect(forecast.epsSen).toBe(60620); // 606.2
-    expect(forecast.dividendPerShareSen).toBe(16000); // 160
+    expect(dividendOf(imported, 2027).annualAmountSen).toBe(16000); // 160
   });
 });
 
@@ -240,7 +258,7 @@ describe('§3.1 同じ列で number / 数値文字列 / "-" が混在する', ()
       },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
-    expect(result.value.records.map((entry) => entry.dividendPerShareSen)).toEqual([6750, 6750]);
+    expect(result.value.dividends.map((entry) => entry.annualAmountSen)).toEqual([6750, 6750]);
   });
 
   it('"-" は null。**無配 0 円とは別物**', () => {
@@ -251,13 +269,13 @@ describe('§3.1 同じ列で number / 数値文字列 / "-" が混在する', ()
       },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
-    expect(result.value.records.map((entry) => entry.dividendPerShareSen)).toEqual([null, 0]);
+    expect(result.value.dividends.map((entry) => entry.annualAmountSen)).toEqual([null, 0]);
   });
 
   it('読めない文字列は null にして診断に残す（捨てない）', () => {
     const result = parseDocument({ dividend: { '2026/03': dividendRow('N/A') } });
     if (!result.ok) throw new Error('取り込みに失敗した');
-    expect(result.value.records[0]?.dividendPerShareSen).toBeNull();
+    expect(result.value.dividends[0]?.annualAmountSen).toBeNull();
     expect(result.value.diagnostics).toContainEqual({
       block: '配当',
       fiscalYearKey: '2026/03',
@@ -274,7 +292,7 @@ describe('§3.4 銭への変換', () => {
   it('小数第3位以下は四捨五入し、丸めたことを記録する', () => {
     const result = parseDocument({ dividend: { '2026/03': dividendRow('1.005') } });
     if (!result.ok) throw new Error('取り込みに失敗した');
-    expect(result.value.records[0]?.dividendPerShareSen).toBe(101);
+    expect(result.value.dividends[0]?.annualAmountSen).toBe(101);
     expect(result.value.diagnostics.map((entry) => entry.reason)).toContain('rounded');
   });
 
@@ -343,7 +361,7 @@ describe('§3.3 予想の判別', () => {
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
     expect(result.value.dividends[0]?.kind).toBe('forecast');
-    expect(result.value.records[0]?.dividendPerShareSen).toBe(8400);
+    expect(result.value.dividends[0]?.annualAmountSen).toBe(8400);
   });
 
   it('配列の行は実績', () => {
@@ -410,7 +428,7 @@ describe('§3.2 ブロックをまたぐときは添字ではなく年度で突�
     if (!result.ok) throw new Error('取り込みに失敗した');
     expect(result.value.records.map((entry) => entry.fiscalYear)).toEqual([2026, 2027]);
     expect(recordOf(result.value, 2027).epsSen).toBeNull();
-    expect(recordOf(result.value, 2027).dividendPerShareSen).toBe(5000);
+    expect(dividendOf(result.value, 2027).annualAmountSen).toBe(5000);
   });
 });
 
@@ -518,7 +536,6 @@ describe('§5.3 前年比が ±80% を超えたら診断に記録する（除外
       },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
-    expect(result.value.records.map((entry) => entry.dividendPerShareSen)).toEqual([10000, 18100]);
     expect(result.value.records.map((entry) => entry.epsSen)).toEqual([10000, 18100]);
     expect(result.value.dividends.map((entry) => entry.annualAmountSen)).toEqual([10000, 18100]);
   });

@@ -58,18 +58,24 @@ companies 1 ──< financial_records
 
 ### financial_records — 年度別の財務レコード（生データ）
 
-| カラム                   | 型      | 制約                          | 説明                          |
-| ------------------------ | ------- | ----------------------------- | ----------------------------- |
-| company_code             | text    | NOT NULL, FK → companies.code |                               |
-| fiscal_year              | integer | NOT NULL                      | 決算年度                      |
-| is_forecast              | integer | NOT NULL                      | 予想なら1、実績なら0          |
-| eps_sen                  | integer |                               | 1株利益（銭）                 |
-| roe_percent              | real    |                               | 自己資本利益率（%）           |
-| revenue_sen              | integer |                               | 売上高（銭）                  |
-| operating_margin_percent | real    |                               | 営業利益率（%）               |
-| dividend_per_share_sen   | integer |                               | 1株配当（銭）。**分割調整後** |
+| カラム                   | 型      | 制約                          | 説明                 |
+| ------------------------ | ------- | ----------------------------- | -------------------- |
+| company_code             | text    | NOT NULL, FK → companies.code |                      |
+| fiscal_year              | integer | NOT NULL                      | 決算年度             |
+| is_forecast              | integer | NOT NULL                      | 予想なら1、実績なら0 |
+| eps_sen                  | integer |                               | 1株利益（銭）        |
+| roe_percent              | real    |                               | 自己資本利益率（%）  |
+| revenue_sen              | integer |                               | 売上高（銭）         |
+| operating_margin_percent | real    |                               | 営業利益率（%）      |
 
 PK: `(company_code, fiscal_year, is_forecast)`。同一年度でも予想と実績は別行。
+
+> ✅ **2026-07-31 訂正。** `dividend_per_share_sen` 列は削除した
+> （[ADR-0009](../../adr/0009-dividend-single-source.md)）。1株配当は
+> `dividend_records.annual_amount_sen` のみが保持する。②連続非減配年数が
+> 18年前まで遡る「配当履歴」の関心事であって財務諸表の1項目ではないこと、
+> 二重管理は取得元が分かれると必ず食い違うことが理由。①②③はいずれも
+> `dividend_records` を読む。マイグレーション: `db/migrations/0002_even_odin.sql`。
 
 ### dividend_records — 配当履歴（生データ、⑩ が使う）
 

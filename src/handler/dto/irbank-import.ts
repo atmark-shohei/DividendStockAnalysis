@@ -19,7 +19,11 @@ export interface IrBankRecordView {
   readonly roePercent: number | null;
   readonly revenueSen: number | null;
   readonly operatingMarginPercent: number | null;
-  readonly dividendPerShareSen: number | null;
+}
+
+export interface IrBankDividendView {
+  readonly fiscalYear: number;
+  readonly annualAmountSen: number | null;
 }
 
 export interface IrBankImportResponse {
@@ -32,6 +36,8 @@ export interface IrBankImportResponse {
   readonly latestActualEpsSen: number | null;
   /** ⑨ PBR 用 */
   readonly latestActualBpsSen: number | null;
+  /** 年度別データの「1株配当」欄はここから埋める。`records` は保有しない（ADR-0009） */
+  readonly dividends: readonly IrBankDividendView[];
   /** 読み取れなかった値。**捨てない**（`.claude/rules/backend.md`） */
   readonly diagnostics: readonly ImportDiagnostic[];
   /**
@@ -51,11 +57,14 @@ export function toIrBankImportResponse(imported: ImportedFinancials): IrBankImpo
       roePercent: record.roePercent,
       revenueSen: record.revenueSen,
       operatingMarginPercent: record.operatingMarginPercent,
-      dividendPerShareSen: record.dividendPerShareSen,
     })),
     latestForecastEpsSen: imported.latestForecastEpsSen,
     latestActualEpsSen: imported.latestActualEpsSen,
     latestActualBpsSen: imported.latestActualBpsSen,
+    dividends: imported.dividends.map((entry) => ({
+      fiscalYear: entry.fiscalYear,
+      annualAmountSen: entry.annualAmountSen,
+    })),
     diagnostics: imported.diagnostics,
     cellWarnings: resolveCellWarnings(imported.diagnostics),
   };

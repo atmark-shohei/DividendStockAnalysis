@@ -13,7 +13,12 @@ import {
   latestForecastRecord,
   seriesOf,
 } from '../domain/company/company';
-import { type DividendSource, selectAnnualDividend } from '../domain/company/dividend-record';
+import {
+  type DividendSource,
+  actualDividendSeries,
+  selectAnnualDividend,
+  selectLatestForecastDividend,
+} from '../domain/company/dividend-record';
 import { calculateConsecutiveYears } from '../domain/scoring/consecutive-years';
 import { calculateDividendGrowthRate } from '../domain/scoring/dividend-growth-rate';
 import { calculateDividendSustainability } from '../domain/scoring/dividend-sustainability';
@@ -66,7 +71,8 @@ export interface CompanyScoring {
 
 export function scoreCompany(company: Company): CompanyScoring {
   // 年度に揃えた系列を作る。添字がそのまま「何年前か」になる（欠損年は null）
-  const dividendSeries = seriesOf(company, (record) => record.dividendPerShareSen, SERIES_YEARS);
+  // ①② の配当は `DividendRecord` から取る（ADR-0009）
+  const dividendSeries = actualDividendSeries(company.dividends, SERIES_YEARS);
   const epsSeries = seriesOf(company, (record) => record.epsSen, SERIES_YEARS);
   const roeSeries = seriesOf(company, (record) => record.roePercent, SERIES_YEARS);
   const revenueSeries = seriesOf(company, (record) => record.revenueSen, SERIES_YEARS);
@@ -74,6 +80,14 @@ export function scoreCompany(company: Company): CompanyScoring {
 
   const forecast = latestForecastRecord(company);
   const selectedDividend = selectAnnualDividend(company.dividends);
+
+  // ③ は予想EPSと予想配当が別の型に分かれたので年度で結合する。**揃わなければ
+  // 両方 null。** 古い年度へ落とすと「今期予想EPS ÷ 前期の予想配当」になる（ADR-0009）
+  const forecastDividend = selectLatestForecastDividend(company.dividends);
+  const forecastYearsMatch =
+    forecast !== null &&
+    forecastDividend !== null &&
+    forecast.fiscalYear === forecastDividend.fiscalYear;
 
   const yieldResult = calculateDividendYield({
     priceSen: company.priceSen,
@@ -88,8 +102,8 @@ export function scoreCompany(company: Company): CompanyScoring {
     }),
     consecutiveYears: calculateConsecutiveYears({ dividendHistory: dividendSeries }),
     payoutRatio: calculatePayoutRatio({
-      forecastDividend: forecast?.dividendPerShareSen ?? null,
-      forecastEps: forecast?.epsSen ?? null,
+      forecastDividend: forecastYearsMatch ? forecastDividend.amountSen : null,
+      forecastEps: forecastYearsMatch ? forecast.epsSen : null,
     }),
     epsCagr: calculateEpsCagr({ epsHistory: epsSeries }),
     roeAverage: calculateRoeAverage({ roeHistory: roeSeries }),

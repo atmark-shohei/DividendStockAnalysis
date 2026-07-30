@@ -28,6 +28,7 @@ import {
 const THIS_YEAR = new Date().getFullYear();
 
 type ImportedRecord = Parameters<typeof mergeRowsWithImport>[1][number];
+type ImportedDividend = Parameters<typeof mergeRowsWithImport>[2][number];
 type YearRow = Parameters<typeof mergeRowsWithImport>[0][number];
 
 function actual(fiscalYear: number, values: Partial<ImportedRecord> = {}): ImportedRecord {
@@ -38,9 +39,13 @@ function actual(fiscalYear: number, values: Partial<ImportedRecord> = {}): Impor
     roePercent: null,
     revenueSen: null,
     operatingMarginPercent: null,
-    dividendPerShareSen: null,
     ...values,
   };
+}
+
+/** 1株配当は `records` ではなく `dividends` から来る（ADR-0009） */
+function dividend(fiscalYear: number, annualAmountSen: number | null): ImportedDividend {
+  return { fiscalYear, annualAmountSen };
 }
 
 function row(fiscalYear: number, values: Partial<YearRow> = {}): YearRow {
@@ -76,8 +81,8 @@ describe('toYearRow', () => {
         roePercent: 13.93,
         revenueSen: 607_191_500_000_000,
         operatingMarginPercent: 18.101785021694145,
-        dividendPerShareSen: 8000,
       }),
+      8000,
     );
     expect(row).toEqual({
       fiscalYear: '2026',
@@ -92,10 +97,10 @@ describe('toYearRow', () => {
   });
 
   it('データなしは空欄。0 にしない（無配 0 円と区別する）', () => {
-    const row = toYearRow(actual(2025));
+    const row = toYearRow(actual(2025), null);
     expect(row.epsYen).toBe('');
     expect(row.dividendYen).toBe('');
-    expect(toYearRow(actual(2025, { dividendPerShareSen: 0 })).dividendYen).toBe('0');
+    expect(toYearRow(actual(2025), 0).dividendYen).toBe('0');
   });
 });
 
@@ -109,6 +114,7 @@ describe('mergeRowsWithImport', () => {
     const result = mergeRowsWithImport(
       [row(2019, { epsYen: '100' })],
       [actual(2020, { epsSen: 5000 })],
+      [],
     );
 
     expect(result.rows.map((merged) => [merged.fiscalYear, merged.epsYen])).toEqual([
@@ -121,6 +127,7 @@ describe('mergeRowsWithImport', () => {
     const result = mergeRowsWithImport(
       [row(2019, { epsYen: '100' })],
       [actual(2019, { revenueSen: 50_000 })],
+      [],
     );
 
     expect(result.rows[0]?.epsYen).toBe('100');
@@ -132,6 +139,7 @@ describe('mergeRowsWithImport', () => {
     const result = mergeRowsWithImport(
       [row(2019, { epsYen: '100' })],
       [actual(2019, { epsSen: 12000 })],
+      [],
     );
 
     expect(result.rows[0]?.epsYen).toBe('120');
@@ -142,17 +150,22 @@ describe('mergeRowsWithImport', () => {
     const result = mergeRowsWithImport(
       [...defaultRows(), row(2018, { dividendYen: '50' })],
       recentActuals(),
+      [],
     );
 
     expect(result.rows.at(-1)).toEqual(row(2018, { dividendYen: '50' }));
   });
 
   it('同じ年度の行を2つ作らない', () => {
-    const result = mergeRowsWithImport(defaultRows(), [
-      { ...actual(THIS_YEAR + 1, { dividendPerShareSen: 8400 }), isForecast: true },
-      actual(THIS_YEAR, { epsSen: 18359 }),
-      actual(THIS_YEAR - 6, { epsSen: 12000 }),
-    ]);
+    const result = mergeRowsWithImport(
+      defaultRows(),
+      [
+        { ...actual(THIS_YEAR + 1), isForecast: true },
+        actual(THIS_YEAR, { epsSen: 18359 }),
+        actual(THIS_YEAR - 6, { epsSen: 12000 }),
+      ],
+      [dividend(THIS_YEAR + 1, 8400)],
+    );
 
     const years = result.rows.map((merged) => merged.fiscalYear);
     expect(new Set(years).size).toBe(years.length);
@@ -162,6 +175,7 @@ describe('mergeRowsWithImport', () => {
     const result = mergeRowsWithImport(
       [row(THIS_YEAR - 1), row(THIS_YEAR + 1, { isForecast: true })],
       [actual(THIS_YEAR), actual(THIS_YEAR - 6)],
+      [],
     );
 
     expect(result.rows[0]?.isForecast).toBe(true);
@@ -172,20 +186,18 @@ describe('mergeRowsWithImport', () => {
   });
 
   it('2回続けて取り込んでも1回目と同じ結果になる（冪等）', () => {
-    const records = [
-      { ...actual(THIS_YEAR + 1, { dividendPerShareSen: 8400 }), isForecast: true },
-      ...recentActuals(),
-    ];
+    const records = [{ ...actual(THIS_YEAR + 1), isForecast: true }, ...recentActuals()];
+    const dividends = [dividend(THIS_YEAR + 1, 8400)];
 
-    const first = mergeRowsWithImport(defaultRows(), records);
-    const second = mergeRowsWithImport(first.rows, records);
+    const first = mergeRowsWithImport(defaultRows(), records, dividends);
+    const second = mergeRowsWithImport(first.rows, records, dividends);
 
     expect(second.rows).toEqual(first.rows);
     expect(second.overwrittenCount).toBe(0);
   });
 
   it('既存が空行だけなら取り込んだ6年ぶんが入り、上書きは 0 件', () => {
-    const result = mergeRowsWithImport(defaultRows(), recentActuals());
+    const result = mergeRowsWithImport(defaultRows(), recentActuals(), []);
 
     expect(result.rows).toHaveLength(7);
     expect(result.rows.filter((merged) => merged.epsYen === '100')).toHaveLength(6);
@@ -193,16 +205,22 @@ describe('mergeRowsWithImport', () => {
   });
 
   it('予想の取り込み値は予想行に入る', () => {
-    const result = mergeRowsWithImport(defaultRows(), [
-      { ...actual(THIS_YEAR + 1, { dividendPerShareSen: 8400 }), isForecast: true },
-    ]);
+    const result = mergeRowsWithImport(
+      defaultRows(),
+      [{ ...actual(THIS_YEAR + 1), isForecast: true }],
+      [dividend(THIS_YEAR + 1, 8400)],
+    );
 
     expect(result.rows[0]?.isForecast).toBe(true);
     expect(result.rows[0]?.dividendYen).toBe('84');
   });
 
   it('予想年度が実績として来たら、行を増やさずその行を実績にする（§5.5-5）', () => {
-    const result = mergeRowsWithImport(defaultRows(), [actual(THIS_YEAR + 1, { epsSen: 18359 })]);
+    const result = mergeRowsWithImport(
+      defaultRows(),
+      [actual(THIS_YEAR + 1, { epsSen: 18359 })],
+      [],
+    );
 
     expect(result.rows).toHaveLength(7);
     expect(result.rows[0]?.fiscalYear).toBe(String(THIS_YEAR + 1));

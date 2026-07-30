@@ -109,7 +109,6 @@ export class D1CompanyRepository implements CompanyRepository {
             roePercent: record.roePercent,
             revenueSen: record.revenueSen,
             operatingMarginPercent: record.operatingMarginPercent,
-            dividendPerShareSen: record.dividendPerShareSen,
           })),
         ),
       );
@@ -191,7 +190,6 @@ export class D1CompanyRepository implements CompanyRepository {
           roePercent: record.roePercent,
           revenueSen: record.revenueSen,
           operatingMarginPercent: record.operatingMarginPercent,
-          dividendPerShareSen: record.dividendPerShareSen,
         })),
       dividends: [...dividends]
         .sort((a, b) => b.fiscalYear - a.fiscalYear)

@@ -104,6 +104,9 @@
 
 リクエストボディ（`analyzeCompanyRequest`。抜粋。全項目は `company-input.ts` 参照）:
 
+> ✅ **2026-07-31 訂正。** `records[]` に 1株配当は無い。1株配当は
+> `dividends[]` にのみ載せる（[ADR-0009](../../adr/0009-dividend-single-source.md)）。
+
 ```json
 {
   "code": "9433",
@@ -115,8 +118,7 @@
       "epsSen": 30000,
       "roePercent": 15.2,
       "revenueSen": 500000000000,
-      "operatingMarginPercent": 18.5,
-      "dividendPerShareSen": 14500
+      "operatingMarginPercent": 18.5
     }
   ],
   "dividends": [{ "fiscalYear": 2025, "kind": "actual", "annualAmountSen": 14500 }],
@@ -133,15 +135,15 @@
 
 主なバリデーション（zod。`company-input.ts`）:
 
-| 項目             | 制約                                         |
-| ---------------- | -------------------------------------------- |
+| 項目             | 制約                                                            |
+| ---------------- | --------------------------------------------------------------- |
 | `code`           | 4文字固定。先頭3桁は数字、末尾1桁は数字か英大文字（例: `130A`） |
-| `name`           | 1〜100文字                                   |
-| `records`        | 最大60件                                     |
-| `dividends`      | 最大60件                                     |
-| 金額系フィールド | 整数のみ（安全整数）。小数は弾く             |
-| 比率系フィールド | 有限の実数（`NaN`/`Infinity` は弾く）        |
-| `priceSen`       | `0` 〜 `MAX_PRICE_SEN`（1株1,000,000円相当） |
+| `name`           | 1〜100文字                                                      |
+| `records`        | 最大60件                                                        |
+| `dividends`      | 最大60件                                                        |
+| 金額系フィールド | 整数のみ（安全整数）。小数は弾く                                |
+| 比率系フィールド | 有限の実数（`NaN`/`Infinity` は弾く）                           |
+| `priceSen`       | `0` 〜 `MAX_PRICE_SEN`（1株1,000,000円相当）                    |
 
 `records`/`dividends` は受信後に年度**降順**へ並べ替えてからドメインへ渡す
 （並べ替えは handler の責務。ドメインは「降順で来る」ことを前提にしてよい）。

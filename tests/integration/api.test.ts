@@ -45,7 +45,6 @@ function samplePayload(overrides: Partial<AnalyzeCompanyRequest> = {}): AnalyzeC
         roePercent: null,
         revenueSen: null,
         operatingMarginPercent: null,
-        dividendPerShareSen: 6_000,
       },
       ...years.map((fiscalYear, index) => ({
         fiscalYear,
@@ -55,7 +54,6 @@ function samplePayload(overrides: Partial<AnalyzeCompanyRequest> = {}): AnalyzeC
         roePercent: 15,
         revenueSen: 1_000_000_000 - index * 50_000_000,
         operatingMarginPercent: 20,
-        dividendPerShareSen: 6_000 - index * 400,
       })),
     ],
     dividends: [

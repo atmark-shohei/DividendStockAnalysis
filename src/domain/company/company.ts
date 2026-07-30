@@ -28,8 +28,6 @@ export interface FinancialRecord {
   readonly revenueSen: number | null;
   /** 営業利益率（%）。CSV に列があればこちらを使う */
   readonly operatingMarginPercent: number | null;
-  /** 1株配当（銭）。**分割調整後**の値（`scoring-requirements.md` §2.2） */
-  readonly dividendPerShareSen: number | null;
 }
 
 /** ⑥ が使う貸借対照表の項目。年度をまたがないので会社直下に持つ */
@@ -75,7 +73,7 @@ export interface Company {
   readonly name: string;
   /** 年度降順の財務レコード */
   readonly records: readonly FinancialRecord[];
-  /** 年度降順の配当履歴。⑩ の採用判定に使う */
+  /** 年度降順の配当履歴。**1株配当の唯一の保持先**（ADR-0009）。①②③⑩ が使う */
   readonly dividends: readonly DividendRecord[];
   readonly balanceSheet: BalanceSheetSnapshot;
   readonly multiples: MarketMultiples;

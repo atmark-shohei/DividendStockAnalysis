@@ -62,7 +62,6 @@ const SAMPLE: ImportedFinancials = {
       roePercent: 13.93,
       revenueSen: 607_191_500_000_000,
       operatingMarginPercent: 18.1,
-      dividendPerShareSen: 8_000,
     },
   ],
   dividends: [{ fiscalYear: 2026, kind: 'actual', annualAmountSen: 8_000 }],
@@ -87,6 +86,18 @@ describe('GET /api/irbank/:code', () => {
     expect(body.records).toHaveLength(1);
     expect(body.latestForecastEpsSen).toBeNull();
     expect(body.latestActualEpsSen).toBe(18_359);
+  });
+
+  it('1株配当は records ではなく dividends で返す（ADR-0009）', async () => {
+    const response = await app(stubSource(ok(SAMPLE))).request('/api/irbank/9433');
+
+    const body = (await response.json()) as {
+      records: Record<string, unknown>[];
+      dividends: { fiscalYear: number; annualAmountSen: number | null }[];
+    };
+    expect(body.dividends).toEqual([{ fiscalYear: 2026, annualAmountSen: 8_000 }]);
+    // 二重管理に戻っていないことを機械的に確かめる
+    expect(body.records[0]).not.toHaveProperty('dividendPerShareSen');
   });
 
   it('要求した銘柄コードをそのまま FinancialSource へ渡す', async () => {

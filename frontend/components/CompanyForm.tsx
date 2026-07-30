@@ -71,6 +71,8 @@ const THIS_YEAR = new Date().getFullYear();
 const DEFAULT_ROWS = 6;
 
 type ImportedRecord = IrBankImportResponse['records'][number];
+/** 1株配当は `records` ではなくこちらから来る（ADR-0009） */
+type IrBankDividendView = IrBankImportResponse['dividends'][number];
 /** 診断をどのセルの話かに解決したもの。**判定は domain 側**（`import-review.ts` §3.2） */
 type CellWarning = IrBankImportResponse['cellWarnings'][number];
 type YearRowField = NonNullable<CellWarning['field']>;
@@ -206,7 +208,7 @@ export function shouldShowConfirmation(
   return hasUnconfirmedWarnings(warnings) && !awaitingConfirmation;
 }
 
-export function toYearRow(record: ImportedRecord): YearRow {
+export function toYearRow(record: ImportedRecord, dividendAnnualAmountSen: number | null): YearRow {
   return {
     fiscalYear: String(record.fiscalYear),
     isForecast: record.isForecast,
@@ -214,7 +216,7 @@ export function toYearRow(record: ImportedRecord): YearRow {
     roePercent: ratioToEditableText(record.roePercent),
     revenueYen: senToEditableText(record.revenueSen),
     operatingMarginPercent: ratioToEditableText(record.operatingMarginPercent),
-    dividendYen: senToEditableText(record.dividendPerShareSen),
+    dividendYen: senToEditableText(dividendAnnualAmountSen),
   };
 }
 
@@ -256,8 +258,15 @@ export interface MergeRowsWithImportResult {
 export function mergeRowsWithImport(
   existingRows: readonly YearRow[],
   records: readonly ImportedRecord[],
+  dividends: readonly IrBankDividendView[],
 ): MergeRowsWithImportResult {
-  const importedByYear = new Map(records.map((record) => [record.fiscalYear, toYearRow(record)]));
+  const dividendByYear = new Map(dividends.map((d) => [d.fiscalYear, d.annualAmountSen]));
+  const importedByYear = new Map(
+    records.map((record) => [
+      record.fiscalYear,
+      toYearRow(record, dividendByYear.get(record.fiscalYear) ?? null),
+    ]),
+  );
   let overwrittenCount = 0;
 
   const mergedRows = existingRows.map((existing) => {
@@ -419,7 +428,7 @@ export function CompanyForm({
     try {
       const result = await api.importFromIrBank(normalizedCode);
       setCode(normalizedCode);
-      const merged = mergeRowsWithImport(rows, result.records);
+      const merged = mergeRowsWithImport(rows, result.records, result.dividends);
       setRows(merged.rows);
       setImportedForecastEpsSen(result.latestForecastEpsSen);
       setImportedEpsSen(result.latestActualEpsSen);
@@ -547,7 +556,6 @@ export function CompanyForm({
         roePercent,
         revenueSen,
         operatingMarginPercent,
-        dividendPerShareSen,
       });
       dividends.push({
         fiscalYear,

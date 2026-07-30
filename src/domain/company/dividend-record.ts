@@ -37,6 +37,12 @@ export interface SelectedDividend {
   readonly source: DividendSource;
 }
 
+/** ③ が予想EPSと年度を突き合わせるための予想配当（`docs/adr/0009-dividend-single-source.md`） */
+export interface ForecastDividend {
+  readonly fiscalYear: number;
+  readonly amountSen: number;
+}
+
 /**
  * 業務上の株価上限。1株 1,000,000 円（2026-07-27 決定）。
  *
@@ -116,4 +122,63 @@ export function selectAnnualDividend(records: readonly DividendRecord[]): Select
   // 最新年度のレコードは予想か実績のどちらかなので、通常ここには来ない。
   // 区分が増えたときに黙って壊れないよう残してある
   return null;
+}
+
+/**
+ * 実績配当（`kind === 'actual'`）を**年度に揃えて**年度降順で取り出す。①② が使う。
+ *
+ * 規則は `company.ts` の `seriesOf` と同じ（最新の実績年度から1年刻みで枠を作り、
+ * 無い年は `null`。データが尽きた先までは埋めない）。
+ * **単に `map()` すると欠損年で添字が詰まり、① の「5年前」が実際には7年前になる。**
+ *
+ * @param years 枠の長さ。指標が必要とする年数より短くしない
+ */
+export function actualDividendSeries(
+  dividends: readonly DividendRecord[],
+  years: number,
+): (number | null)[] {
+  const actuals = dividends.filter((record) => record.kind === 'actual');
+  if (actuals.length === 0) return [];
+
+  const latestYear = actuals.reduce(
+    (max, record) => (record.fiscalYear > max ? record.fiscalYear : max),
+    Number.NEGATIVE_INFINITY,
+  );
+  if (!Number.isFinite(latestYear)) return [];
+
+  const oldestYear = actuals.reduce(
+    (min, record) => (record.fiscalYear < min ? record.fiscalYear : min),
+    Number.POSITIVE_INFINITY,
+  );
+
+  const byYear = new Map<number, DividendRecord>();
+  for (const record of actuals) {
+    if (!byYear.has(record.fiscalYear)) byYear.set(record.fiscalYear, record);
+  }
+
+  const length = Math.min(years, latestYear - oldestYear + 1);
+  return Array.from({ length }, (_, offset) => {
+    const record = byYear.get(latestYear - offset);
+    return record === undefined ? null : record.annualAmountSen;
+  });
+}
+
+/**
+ * 予想配当（`forecast` / `revised`）のうち最新年度のものを返す。修正を優先する。
+ *
+ * ③ 予想配当性向が、予想EPSの年度と突き合わせるために年度も一緒に返す
+ * （ADR-0009「決定した結合規則」）。年度を見ずに割ると
+ * 「今期予想EPS ÷ 別年度の予想配当」になり、配当性向が静かに誤る。
+ *
+ * @returns 使える予想配当が1件も無ければ `null`
+ */
+export function selectLatestForecastDividend(
+  records: readonly DividendRecord[],
+): ForecastDividend | null {
+  const usable = records.filter(
+    (r): r is UsableRecord => r.annualAmountSen !== null && Number.isSafeInteger(r.fiscalYear),
+  );
+  const latest = pickLatest(usable, ['forecast', 'revised']);
+  if (latest === null) return null;
+  return { fiscalYear: latest.fiscalYear, amountSen: latest.annualAmountSen };
 }

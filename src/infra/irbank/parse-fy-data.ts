@@ -394,13 +394,13 @@ export function parseFyData(
 
   const records: FinancialRecord[] = [];
   const dividends: DividendRecord[] = [];
+  /** 前年比の桁チェック用。1株配当は `dividends` にしか無い（ADR-0009） */
+  const dividendSenByYear = new Map<number, number | null>();
 
   for (const fiscalYear of fiscalYears) {
     const performanceRow = performance.get(fiscalYear);
     const dividendRow = dividend.get(fiscalYear);
 
-    // 一株配当は records と dividends の両方で使う。**読むのは1回だけ**にして
-    // 診断が二重に出るのを防ぐ
     const dividendPerShareSen =
       dividendRow === undefined
         ? null
@@ -428,10 +428,10 @@ export function parseFyData(
           : ratioAt(reader, BLOCK_PERFORMANCE, performanceRow, COLUMN_ROE),
       revenueSen,
       operatingMarginPercent: deriveOperatingMarginPercent(operatingIncomeSen, revenueSen),
-      dividendPerShareSen,
     });
 
     if (dividendRow !== undefined) {
+      dividendSenByYear.set(fiscalYear, dividendPerShareSen);
       dividends.push({
         fiscalYear,
         // IRバンクは修正を別行にしないので `revised` は生成されない（§3.3）
@@ -473,8 +473,8 @@ export function parseFyData(
         BLOCK_DIVIDEND,
         dividendRow,
         COLUMN_DIVIDEND_PER_SHARE,
-        previous.dividendPerShareSen,
-        current.dividendPerShareSen,
+        dividendSenByYear.get(previous.fiscalYear) ?? null,
+        dividendSenByYear.get(current.fiscalYear) ?? null,
       );
     }
   }

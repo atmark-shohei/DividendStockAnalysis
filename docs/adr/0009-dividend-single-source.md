@@ -1,6 +1,6 @@
 # ADR-0009: 配当の二重管理を解消し `DividendRecord` に一本化する
 
-- ステータス: ✅ 採用（実装は未着手）
+- ステータス: ✅ 採用・実装済み（2026-07-31）
 - 日付: 2026-07-31
 - 関連: [market-data-source.md](../02_design/logic/market-data-source.md)、
   [dividend-yield-scoring.md](../02_design/logic/dividend-yield-scoring.md) §2.1、

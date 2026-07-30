@@ -44,7 +44,6 @@ const financialRecordInput = z.object({
   roePercent: nullableRatio,
   revenueSen: nullableSen,
   operatingMarginPercent: nullableRatio,
-  dividendPerShareSen: nullableSen,
 });
 
 const dividendRecordInput = z.object({

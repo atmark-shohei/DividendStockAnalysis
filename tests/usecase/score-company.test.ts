@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Company, FinancialRecord } from '@/domain/company/company';
 import { seriesOf } from '@/domain/company/company';
+import type { DividendRecord } from '@/domain/company/dividend-record';
 import { scoreCompany } from '@/usecase/score-company';
 
 /**
@@ -17,17 +18,24 @@ function record(fiscalYear: number, overrides: Partial<FinancialRecord> = {}): F
     roePercent: 15,
     revenueSen: 1_000_000,
     operatingMarginPercent: 20,
-    dividendPerShareSen: 5_000,
     ...overrides,
   };
 }
 
-function company(records: readonly FinancialRecord[]): Company {
+/** ①②③ の入力は `DividendRecord` 側にある（ADR-0009） */
+function actualDividend(fiscalYear: number, annualAmountSen: number | null): DividendRecord {
+  return { fiscalYear, kind: 'actual', annualAmountSen };
+}
+
+function company(
+  records: readonly FinancialRecord[],
+  dividends: readonly DividendRecord[] = [],
+): Company {
   return {
     code: '9999',
     name: 'テスト',
     records,
-    dividends: [],
+    dividends,
     balanceSheet: {
       currentAssetsSen: null,
       investmentSecuritiesSen: null,
@@ -75,38 +83,39 @@ describe('系列は年度に揃える（添字＝何年前か）', () => {
 });
 
 describe('履歴の末尾と欠損の区別（② 連続非減配年数）', () => {
-  const decreasing = (year: number, sen: number) => record(year, { dividendPerShareSen: sen });
+  const flat = (years: readonly number[]) =>
+    company(
+      years.map((year) => record(year)),
+      years.map((year) => actualDividend(year, 5_000)),
+    );
 
   it('履歴が尽きただけなら、そこまでの年数で採点する', () => {
     // 6年分すべて非減配 → 5年 → 3点。判定不能ではない
-    const target = company([2025, 2024, 2023, 2022, 2021, 2020].map((y) => decreasing(y, 5_000)));
-    const metric = scoreCompany(target).card.metrics.consecutiveYears;
+    const metric = scoreCompany(flat([2025, 2024, 2023, 2022, 2021, 2020])).card.metrics
+      .consecutiveYears;
     expect(metric.value).toBe(5);
     expect(metric.score).toBe(3);
   });
 
   it('途中の年度が欠けていたら判定不能。欠損を 0 とみなして「減配」にしない', () => {
-    const target = company([2025, 2024, 2022, 2021].map((y) => decreasing(y, 5_000)));
-    const metric = scoreCompany(target).card.metrics.consecutiveYears;
+    const metric = scoreCompany(flat([2025, 2024, 2022, 2021])).card.metrics.consecutiveYears;
     expect(metric.score).toBeNull();
     expect(metric.unavailableReason).toBe('input-missing');
   });
 });
 
 describe('年度の欠落がスコアに与える影響', () => {
+  const doubling = (years: readonly number[]) =>
+    company(
+      years.map((year) => record(year)),
+      years.map((year) => actualDividend(year, 6_400 / 2 ** (2025 - year))),
+    );
+
   /** 6年ぶん連続、配当は毎年 2倍に増える会社 */
-  const contiguous = company(
-    [2025, 2024, 2023, 2022, 2021, 2020].map((year, index) =>
-      record(year, { dividendPerShareSen: 6_400 / 2 ** index }),
-    ),
-  );
+  const contiguous = doubling([2025, 2024, 2023, 2022, 2021, 2020]);
 
   /** 上と同じだが、2022年のレコードだけ欠けている */
-  const withGap = company(
-    [2025, 2024, 2023, 2021, 2020].map((year) =>
-      record(year, { dividendPerShareSen: 6_400 / 2 ** (2025 - year) }),
-    ),
-  );
+  const withGap = doubling([2025, 2024, 2023, 2021, 2020]);
 
   it('連続していれば ① は 5年前と比較する', () => {
     const metric = scoreCompany(contiguous).card.metrics.dividendGrowthRate;
@@ -123,12 +132,69 @@ describe('年度の欠落がスコアに与える影響', () => {
   });
 
   it('5年前そのものが欠けていれば判定不能。0 を返さない', () => {
-    const missingBase = company(
-      [2025, 2024, 2023, 2022, 2021].map((year) =>
-        record(year, { dividendPerShareSen: 6_400 / 2 ** (2025 - year) }),
+    const metric = scoreCompany(doubling([2025, 2024, 2023, 2022, 2021])).card.metrics
+      .dividendGrowthRate;
+    expect(metric.score).toBeNull();
+    expect(metric.unavailableReason).toBe('input-missing');
+  });
+});
+
+/**
+ * ③ 予想配当性向の年度突き合わせ（`docs/adr/0009-dividend-single-source.md`
+ * 「決定した結合規則」の受入基準）。
+ *
+ * 一本化で予想EPSが `FinancialRecord`、予想配当が `DividendRecord` と別の型に
+ * 分かれたため、年度で結合する。**揃わなければ判定不能。古い年度へ落とさない。**
+ */
+describe('③ 予想配当性向は予想EPSと予想配当の年度が揃ったときだけ採点する', () => {
+  const forecastEps = (fiscalYear: number, epsSen: number) =>
+    record(fiscalYear, { isForecast: true, epsSen });
+  const forecastDividend = (
+    fiscalYear: number,
+    annualAmountSen: number,
+    kind: 'forecast' | 'revised' = 'forecast',
+  ): DividendRecord => ({ fiscalYear, kind, annualAmountSen });
+
+  const payoutRatioOf = (target: Company) => scoreCompany(target).card.metrics.payoutRatio;
+
+  it('予想EPSと予想配当が同じ年度で揃えばその年度で採点する', () => {
+    const metric = payoutRatioOf(
+      company([forecastEps(2027, 30_000)], [forecastDividend(2027, 9_000)]),
+    );
+    // 90円 ÷ 300円 = 30%
+    expect(metric.value).toBeCloseTo(30, 6);
+    expect(metric.score).not.toBeNull();
+  });
+
+  it('予想配当が1年古ければ判定不能。その年度へ落とさない', () => {
+    const metric = payoutRatioOf(
+      company([forecastEps(2027, 30_000)], [forecastDividend(2026, 9_000)]),
+    );
+    expect(metric.score).toBeNull();
+    expect(metric.unavailableReason).toBe('input-missing');
+  });
+
+  it('予想EPSが1年古ければ判定不能', () => {
+    const metric = payoutRatioOf(
+      company([forecastEps(2026, 30_000)], [forecastDividend(2027, 9_000)]),
+    );
+    expect(metric.score).toBeNull();
+    expect(metric.unavailableReason).toBe('input-missing');
+  });
+
+  it('同一年度に予想と修正が並んだら修正を採る', () => {
+    const metric = payoutRatioOf(
+      company(
+        [forecastEps(2027, 30_000)],
+        [forecastDividend(2027, 9_000), forecastDividend(2027, 12_000, 'revised')],
       ),
     );
-    const metric = scoreCompany(missingBase).card.metrics.dividendGrowthRate;
+    // 修正の 120円 ÷ 300円 = 40%（予想のままなら 30% になる）
+    expect(metric.value).toBeCloseTo(40, 6);
+  });
+
+  it('予想がどちらも無ければ判定不能', () => {
+    const metric = payoutRatioOf(company([record(2026)], [actualDividend(2026, 9_000)]));
     expect(metric.score).toBeNull();
     expect(metric.unavailableReason).toBe('input-missing');
   });

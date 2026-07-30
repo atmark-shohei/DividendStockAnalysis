@@ -74,13 +74,16 @@ GET https://f.irbank.net/files/{code}/fy-data-all.json
 | `records[].roePercent`             | 業績.ROE                                                     |
 | `records[].revenueSen`             | 業績.売上高                                                  |
 | `records[].operatingMarginPercent` | 業績.営業利益 ÷ 業績.売上高（§3.5）                          |
-| `records[].dividendPerShareSen`    | 配当.一株配当                                                |
 | `dividends[].annualAmountSen`      | 配当.一株配当                                                |
 | `multiples.pbr`                    | 財務.BPS（実績）と株価から算出（§3.5）                       |
 | `multiples.per`                    | 業績.EPS（**予想優先**・無ければ実績）と株価から算出（§3.5） |
 
 `balanceSheet`（⑥ が使う流動資産・投資有価証券・負債総額・前期末配当総額）に
 対応する列は**この JSON に無い**。§6 参照。
+
+> ✅ **2026-07-31 訂正。** 以前は `records[].dividendPerShareSen` にも
+> 同じ値を積んでいたが削除した（[ADR-0009](../../adr/0009-dividend-single-source.md)）。
+> **1株配当は `dividends[]` にのみ載る。** ①②③はいずれも `dividends` を読む。
 
 ## 3. 正規化ロジック
 

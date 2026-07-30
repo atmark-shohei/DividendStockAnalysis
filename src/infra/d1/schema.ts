@@ -51,8 +51,6 @@ export const financialRecords = sqliteTable(
     roePercent: real('roe_percent'),
     revenueSen: integer('revenue_sen'),
     operatingMarginPercent: real('operating_margin_percent'),
-    /** 1株配当（銭）。**分割調整後** */
-    dividendPerShareSen: integer('dividend_per_share_sen'),
   },
   (table) => [
     // 同じ会社・同じ年度・同じ区分は1行だけ。二重取り込みを DB で防ぐ
