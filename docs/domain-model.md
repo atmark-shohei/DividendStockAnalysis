@@ -70,6 +70,10 @@ classDiagram
 > handler の DTO 変換で完了させ、domain では並べ替えない。両方でやると
 > どちらが正か分からなくなる。
 
+> ⚠️ **上の図は現状であり、`FinancialRecord.dividendPerShareSen` は廃止が決定済み**
+> （[ADR-0009](./adr/0009-dividend-single-source.md)。実装は未着手）。
+> 配当は `DividendRecord` に一本化する。新しくこの図に沿って実装しないこと。
+
 ## 3. スコアリング
 
 ```mermaid
@@ -144,10 +148,11 @@ type MetricScore<R extends string = UnavailableReason> =
 
 ## 5. 未決・残課題
 
-| 項目                                | 状態                                                        |
-| ----------------------------------- | ----------------------------------------------------------- |
-| 認証（`UserScoringPolicy` ほか）    | 🔴 未決。[ADR-0005](./adr/0005-thresholds-fixed-for-now.md) |
-| `Sen` の branding を集約まで通す    | 🟡 部分。[ADR-0004](./adr/0004-sen-branding-scope.md)       |
-| TSV/CSV の取り込み（F-01〜F-04）    | 🔴 未着手。現在はフォーム入力                               |
-| 株式分割・決算期変更の吸収（T-035） | 🔴 未決。どの層で調整するか                                 |
-| ⑧ 金融業の扱い                      | 🟡 保留。現状は `null` になり総合点で 10点分不利            |
+| 項目                                                                        | 状態                                                                              |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 認証（`UserScoringPolicy` ほか）                                            | 🔴 未決。[ADR-0005](./adr/0005-thresholds-fixed-for-now.md)                       |
+| `Sen` の branding を集約まで通す                                            | 🟡 部分。[ADR-0004](./adr/0004-sen-branding-scope.md)                             |
+| TSV/CSV の取り込み（F-01〜F-04）                                            | 🔴 未着手。現在はフォーム入力                                                     |
+| 株式分割・決算期変更の吸収（T-035）                                         | 🔴 未決。どの層で調整するか                                                       |
+| 配当の二重管理（`FinancialRecord.dividendPerShareSen` と `DividendRecord`） | ✅ 解消を決定。[ADR-0009](./adr/0009-dividend-single-source.md)。**実装は未着手** |
+| ⑧ 金融業の扱い                                                              | 🟡 保留。現状は `null` になり総合点で 10点分不利                                  |
