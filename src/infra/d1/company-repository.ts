@@ -9,7 +9,7 @@ import { type DrizzleD1Database, drizzle } from 'drizzle-orm/d1';
 import { type BatchItem } from 'drizzle-orm/batch';
 import { eq } from 'drizzle-orm';
 
-import { type Company } from '../../domain/company/company';
+import { type Company, type PbrSource, type PerSource } from '../../domain/company/company';
 import {
   type CompanyRepository,
   type CompanySummary,
@@ -30,6 +30,18 @@ const DIVIDEND_KINDS: readonly DividendRecordKind[] = ['forecast', 'revised', 'a
 /** DB の文字列を配当区分に戻す。未知の値は取り込みの不具合なので `null` を返して捨てる */
 function toDividendKind(raw: string): DividendRecordKind | null {
   return DIVIDEND_KINDS.includes(raw as DividendRecordKind) ? (raw as DividendRecordKind) : null;
+}
+
+const PER_SOURCES: readonly PerSource[] = ['forecast-eps', 'actual-eps', 'manual'];
+const PBR_SOURCES: readonly PbrSource[] = ['actual-bps', 'manual'];
+
+/** DB の文字列を PER の出所に戻す。未知の値・`null` は `null`（出所不明扱い） */
+function toPerSource(raw: string | null): PerSource | null {
+  return raw !== null && PER_SOURCES.includes(raw as PerSource) ? (raw as PerSource) : null;
+}
+
+function toPbrSource(raw: string | null): PbrSource | null {
+  return raw !== null && PBR_SOURCES.includes(raw as PbrSource) ? (raw as PbrSource) : null;
 }
 
 export class D1CompanyRepository implements CompanyRepository {
@@ -53,7 +65,9 @@ export class D1CompanyRepository implements CompanyRepository {
           name: company.name,
           priceSen: company.priceSen,
           per: company.multiples.per,
+          perSource: company.multiples.perSource,
           pbr: company.multiples.pbr,
+          pbrSource: company.multiples.pbrSource,
           currentAssetsSen: company.balanceSheet.currentAssetsSen,
           investmentSecuritiesSen: company.balanceSheet.investmentSecuritiesSen,
           totalLiabilitiesSen: company.balanceSheet.totalLiabilitiesSen,
@@ -68,7 +82,9 @@ export class D1CompanyRepository implements CompanyRepository {
             name: company.name,
             priceSen: company.priceSen,
             per: company.multiples.per,
+            perSource: company.multiples.perSource,
             pbr: company.multiples.pbr,
+            pbrSource: company.multiples.pbrSource,
             currentAssetsSen: company.balanceSheet.currentAssetsSen,
             investmentSecuritiesSen: company.balanceSheet.investmentSecuritiesSen,
             totalLiabilitiesSen: company.balanceSheet.totalLiabilitiesSen,
@@ -196,7 +212,12 @@ export class D1CompanyRepository implements CompanyRepository {
         totalLiabilitiesSen: row.totalLiabilitiesSen,
         previousDividendTotalSen: row.previousDividendTotalSen,
       },
-      multiples: { per: row.per, pbr: row.pbr },
+      multiples: {
+        per: row.per,
+        perSource: toPerSource(row.perSource),
+        pbr: row.pbr,
+        pbrSource: toPbrSource(row.pbrSource),
+      },
       priceSen: row.priceSen,
       fetchedAt: row.fetchedAt,
     };

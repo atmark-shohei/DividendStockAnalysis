@@ -4,3 +4,5 @@ coverage/
 package-lock.json
 next-env.d.ts
 reference/
+# 外部データ源から取得した実物のサンプル。整形すると「取得したそのもの」でなくなる
+tests/fixtures/

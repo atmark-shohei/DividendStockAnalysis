@@ -19,7 +19,11 @@ export const companies = sqliteTable('companies', {
   /** ユーザーが手入力した現在株価（銭） */
   priceSen: integer('price_sen'),
   per: real('per'),
+  /** 'forecast-eps' | 'actual-eps' | 'manual'。`per` が NULL なら NULL */
+  perSource: text('per_source'),
   pbr: real('pbr'),
+  /** 'actual-bps' | 'manual'。`pbr` が NULL なら NULL */
+  pbrSource: text('pbr_source'),
   currentAssetsSen: integer('current_assets_sen'),
   investmentSecuritiesSen: integer('investment_securities_sen'),
   totalLiabilitiesSen: integer('total_liabilities_sen'),

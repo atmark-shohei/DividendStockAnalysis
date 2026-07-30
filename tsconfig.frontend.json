@@ -6,6 +6,6 @@
     "jsx": "react-jsx",
     "tsBuildInfoFile": "./node_modules/.cache/tsconfig.frontend.tsbuildinfo"
   },
-  "include": ["frontend/**/*.ts", "frontend/**/*.tsx", "vite.config.ts"],
+  "include": ["frontend/**/*.ts", "frontend/**/*.tsx", "vite.config.ts", "tests/**/*.test.tsx"],
   "exclude": ["node_modules", "dist"]
 }

@@ -3,7 +3,7 @@ import type { CompanySummary } from '@/domain/company/company-repository';
 import type { ScoringResponse } from '../api';
 import { MetricTable } from '../components/MetricTable';
 import { ScoreRadar } from '../components/ScoreRadar';
-import { dividendSourceText, formatFetchedAt } from '../format';
+import { dividendSourceText, formatFetchedAt, multipleSourceText } from '../format';
 
 /**
  * 保存済み銘柄の一覧と、選択中の銘柄の解析結果（`/` と `/?code=...`）。
@@ -121,6 +121,12 @@ function ScoringBody({ selected }: { readonly selected: Selection }) {
         採用した配当: {dividendSourceText(selected.scoring.dividendSource)} ／ 入力日時:{' '}
         {formatFetchedAt(selected.scoring.fetchedAt)}
       </p>
+      {(selected.scoring.perSource !== null || selected.scoring.pbrSource !== null) && (
+        <p className="meta">
+          PER: {multipleSourceText(selected.scoring.perSource)} ／ PBR:{' '}
+          {multipleSourceText(selected.scoring.pbrSource)}
+        </p>
+      )}
       <ScoreRadar metrics={selected.scoring.metrics} />
       <MetricTable metrics={selected.scoring.metrics} />
     </>

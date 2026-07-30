@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { type FinancialSource } from '@/domain/company/financial-source';
 import { createApp } from '@/handler/app';
 import { D1CompanyRepository } from '@/infra/d1/company-repository';
 import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/company-input';
@@ -15,9 +16,17 @@ import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/compa
 
 const FIXED_NOW = new Date('2026-07-28T00:00:00.000Z');
 
+/** このテストファイルは IRバンク取り込みを対象にしないので、呼ばれたら落とす */
+const unusedFinancialSource: FinancialSource = {
+  fetchByCode: () => {
+    throw new Error('このテストで FinancialSource が呼ばれるのは想定外');
+  },
+};
+
 function app() {
   return createApp({
     repository: new D1CompanyRepository(env.DB),
+    financialSource: unusedFinancialSource,
     now: () => FIXED_NOW,
   });
 }
@@ -63,7 +72,7 @@ function samplePayload(overrides: Partial<AnalyzeCompanyRequest> = {}): AnalyzeC
       totalLiabilitiesSen: 0,
       previousDividendTotalSen: 250_000,
     },
-    multiples: { per: 9, pbr: 1 },
+    multiples: { per: 9, perSource: 'manual', pbr: 1, pbrSource: 'manual' },
     // 株価 1,000 円、予想配当 60 円 → 利回り 6.00% → 10点
     priceSen: 100_000,
     ...overrides,
@@ -119,7 +128,7 @@ describe('POST /api/companies', () => {
 
   it('判定不能の指標は score も value も null で返る。0 にしない（§0.5）', async () => {
     const payload = samplePayload({
-      multiples: { per: null, pbr: null },
+      multiples: { per: null, perSource: null, pbr: null, pbrSource: null },
     });
     const body = (await (await post(payload)).json()) as ScoringResponse;
     const mix = body.metrics.find((metric) => metric.key === 'mixCoefficient');
@@ -138,6 +147,35 @@ describe('POST /api/companies', () => {
       .bind('9433')
       .first<{ price_sen: number }>();
     expect(stored?.price_sen).toBe(100_001);
+  });
+
+  it('⑨ PER/PBR の出所が D1 を往復し、詳細取得の応答にも出る（2026-07-29 追加）', async () => {
+    await post(
+      samplePayload({
+        multiples: { per: 9, perSource: 'forecast-eps', pbr: 1, pbrSource: 'actual-bps' },
+      }),
+    );
+
+    const stored = await env.DB.prepare(
+      'SELECT per_source, pbr_source FROM companies WHERE code = ?',
+    )
+      .bind('9433')
+      .first<{ per_source: string; pbr_source: string }>();
+    expect(stored?.per_source).toBe('forecast-eps');
+    expect(stored?.pbr_source).toBe('actual-bps');
+
+    const body = (await (await app().request('/api/companies/9433')).json()) as ScoringResponse;
+    expect(body.perSource).toBe('forecast-eps');
+    expect(body.pbrSource).toBe('actual-bps');
+  });
+
+  it('PER/PBR が null なら出所も null（データなしと混同しない）', async () => {
+    const payload = samplePayload({
+      multiples: { per: null, perSource: null, pbr: null, pbrSource: null },
+    });
+    const body = (await (await post(payload)).json()) as ScoringResponse;
+    expect(body.perSource).toBeNull();
+    expect(body.pbrSource).toBeNull();
   });
 
   it('入力が不正なら 400。内部情報は返さない', async () => {

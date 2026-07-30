@@ -41,12 +41,32 @@ export interface BalanceSheetSnapshot {
   readonly previousDividendTotalSen: number | null;
 }
 
+/**
+ * PER の出所。**予想EPS・実績EPSのどちらで算出したか、または手入力かを区別する。**
+ *
+ * 「会社予想PER」を名乗る以上、予想EPSが取れるなら優先する
+ * （`docs/adr/0008-frontend-domain-runtime-import.md` の未解決事項を2026-07-29 決着）。
+ * 実績EPSで代用した場合と手入力の場合を画面で区別できるようにするため、
+ * ⑩ の `DividendSource` と同じ発想で出所を型に持たせる。
+ */
+export type PerSource = 'forecast-eps' | 'actual-eps' | 'manual';
+
+/**
+ * PBR の出所。BPS には IRバンクの取り込みで予想の区別が無い（財務ブロックに
+ * 予想行が現れない）ため、`forecast-bps` は無い。
+ */
+export type PbrSource = 'actual-bps' | 'manual';
+
 /** ⑨ が使う市場指標 */
 export interface MarketMultiples {
-  /** PER（会社予想）。倍 */
+  /** PER（会社予想。ただし予想EPSが無ければ実績EPSで代用）。倍 */
   readonly per: number | null;
+  /** `per` が `null` なら `null`。**出所を保存後も追跡する** */
+  readonly perSource: PerSource | null;
   /** PBR（実績）。倍 */
   readonly pbr: number | null;
+  /** `pbr` が `null` なら `null` */
+  readonly pbrSource: PbrSource | null;
 }
 
 export interface Company {

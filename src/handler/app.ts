@@ -11,14 +11,23 @@
 import { Hono } from 'hono';
 
 import { type CompanyRepository } from '../domain/company/company-repository';
+import { type FinancialSource } from '../domain/company/financial-source';
 import { analyzeCompany } from '../usecase/analyze-company';
+import { importFromIrBank } from '../usecase/import-from-irbank';
 import { deleteCompany, getCompanyScoring, listCompanies } from '../usecase/read-companies';
 import { analyzeCompanyRequest, toCompany, toScoringResponse } from './dto/company-input';
+import {
+  isExternalFactor,
+  toIrBankErrorResponse,
+  toIrBankImportResponse,
+} from './dto/irbank-import';
 import { parsePriceInput } from './dto/price-input';
 
 export interface AppDependencies {
   /** リポジトリは**インターフェースで**受け取る。D1 を直接は知らない */
   readonly repository: CompanyRepository;
+  /** IRバンク取り込み。**インターフェースで**受け取り、fetch の詳細を知らない */
+  readonly financialSource: FinancialSource;
   /** 現在時刻。テストから固定できるように注入する */
   readonly now: () => Date;
 }
@@ -72,6 +81,29 @@ export function createApp(dependencies: AppDependencies): Hono {
     const company = toCompany(parsed.data, fetchedAt);
     const scoring = await analyzeCompany(dependencies.repository, company, dependencies.now);
     return context.json(toScoringResponse(scoring), 201);
+  });
+
+  /**
+   * IRバンクから財務データを取り込む。**保存はしない**（設計書 §1）。
+   *
+   * `code` の形式検証は `importFromIrBank` の先（`IrBankFinancialSource`）が行う。
+   * 形式違いでもネットワークへ問い合わせずに `invalid-code` を返すので、
+   * ここで同じ正規表現を重複させない。
+   */
+  app.get('/api/irbank/:code', async (context) => {
+    const code = context.req.param('code');
+    const result = await importFromIrBank(dependencies.financialSource, code);
+
+    if (!result.ok) {
+      if (isExternalFactor(result.error)) {
+        // 外部要因の失敗はサーバー側にだけ詳細を残す（`.claude/rules/backend.md`）
+        console.error('irbank import failed', result.error.kind);
+      }
+      const { body, status } = toIrBankErrorResponse(result.error);
+      return context.json(body, status);
+    }
+
+    return context.json(toIrBankImportResponse(result.value));
   });
 
   app.get('/api/companies/:code', async (context) => {

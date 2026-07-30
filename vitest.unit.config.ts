@@ -10,7 +10,9 @@ export default defineProject({
   },
   test: {
     name: 'unit',
-    include: ['tests/**/*.test.ts'],
+    // `.tsx` は React コンポーネントのモジュールから import するテストだけ
+    // （型チェックは `tsconfig.frontend.json` 側。JSX は書かない）
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     exclude: ['tests/integration/**'],
     environment: 'node',
   },

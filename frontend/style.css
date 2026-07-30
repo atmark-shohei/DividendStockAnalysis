@@ -9,6 +9,7 @@
   --color-muted: #94a3b8;
   --color-accent: #38bdf8;
   --color-error: #f87171;
+  --color-warning: #fbbf24;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 1rem;
@@ -170,6 +171,20 @@ td {
 
 .error {
   color: var(--color-error);
+}
+
+/*
+ * 取り込みの警告。**色だけで意味を表さない**（`.claude/rules/frontend.md`）。
+ * 文言側に ⚠ を必ず付けている（`CompanyForm.tsx`）。
+ */
+.warning {
+  color: var(--color-warning);
+  font-size: var(--font-size-sm);
+  white-space: normal;
+}
+
+input[aria-invalid='true'] {
+  border-color: var(--color-warning);
 }
 
 footer {

@@ -34,7 +34,7 @@ function company(records: readonly FinancialRecord[]): Company {
       totalLiabilitiesSen: null,
       previousDividendTotalSen: null,
     },
-    multiples: { per: null, pbr: null },
+    multiples: { per: null, perSource: null, pbr: null, pbrSource: null },
     priceSen: null,
     fetchedAt: '2026-07-28T00:00:00.000Z',
   };

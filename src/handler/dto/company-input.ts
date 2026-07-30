@@ -64,7 +64,13 @@ export const analyzeCompanyRequest = z.object({
     totalLiabilitiesSen: nullableSen,
     previousDividendTotalSen: nullableSen,
   }),
-  multiples: z.object({ per: nullableRatio, pbr: nullableRatio }),
+  multiples: z.object({
+    per: nullableRatio,
+    /** `per` の出所。`per` が null なら null にする（画面側で揃える） */
+    perSource: z.enum(['forecast-eps', 'actual-eps', 'manual']).nullable(),
+    pbr: nullableRatio,
+    pbrSource: z.enum(['actual-bps', 'manual']).nullable(),
+  }),
   /**
    * 株価（銭）。**業務上限は 1株 1,000,000 円**。
    * 画面側にも同じ範囲検証を置くが、外から直接叩かれる経路もあるのでここでも見る。
@@ -109,6 +115,10 @@ export interface ScoringResponse {
   readonly effectiveMetricCount: number;
   readonly totalMetricCount: number;
   readonly dividendSource: 'forecast' | 'actual' | null;
+  /** ⑨ PER の出所。予想EPS / 実績EPS / 手入力のどれで算出したか。§3.5 */
+  readonly perSource: 'forecast-eps' | 'actual-eps' | 'manual' | null;
+  /** ⑨ PBR の出所 */
+  readonly pbrSource: 'actual-bps' | 'manual' | null;
   readonly fetchedAt: string;
   readonly metrics: readonly MetricView[];
 }
@@ -126,6 +136,8 @@ export function toScoringResponse(scoring: CompanyScoring): ScoringResponse {
     effectiveMetricCount: scoring.card.effectiveMetricCount,
     totalMetricCount: scoring.card.totalMetricCount,
     dividendSource: scoring.dividendSource,
+    perSource: scoring.perSource,
+    pbrSource: scoring.pbrSource,
     fetchedAt: scoring.fetchedAt,
     metrics: METRIC_KEYS.map((key) => {
       const metric = scoring.card.metrics[key];

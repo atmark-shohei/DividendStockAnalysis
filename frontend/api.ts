@@ -6,9 +6,10 @@
  */
 
 import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/company-input';
+import type { IrBankImportResponse } from '@/handler/dto/irbank-import';
 import type { CompanySummary } from '@/domain/company/company-repository';
 
-export type { AnalyzeCompanyRequest, ScoringResponse };
+export type { AnalyzeCompanyRequest, ScoringResponse, IrBankImportResponse };
 
 /** 失敗しうる外部呼び出しは必ず結果を検査する（`.claude/rules/coding-style.md`） */
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
@@ -43,6 +44,11 @@ export async function listCompanies(): Promise<readonly CompanySummary[]> {
 
 export function getCompany(code: string): Promise<ScoringResponse> {
   return request<ScoringResponse>(`/api/companies/${encodeURIComponent(code)}`);
+}
+
+/** IRバンクから財務データを取り込む。**保存はしない**（結果はフォームの初期値にするだけ） */
+export function importFromIrBank(code: string): Promise<IrBankImportResponse> {
+  return request<IrBankImportResponse>(`/api/irbank/${encodeURIComponent(code)}`);
 }
 
 export async function deleteCompany(code: string): Promise<void> {

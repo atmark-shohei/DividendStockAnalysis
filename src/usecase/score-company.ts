@@ -6,7 +6,13 @@
  * 書かない」）。ここに `if (value > threshold)` が現れたら設計を間違えている。
  */
 
-import { type Company, latestForecastRecord, seriesOf } from '../domain/company/company';
+import {
+  type Company,
+  type PbrSource,
+  type PerSource,
+  latestForecastRecord,
+  seriesOf,
+} from '../domain/company/company';
 import { type DividendSource, selectAnnualDividend } from '../domain/company/dividend-record';
 import { calculateConsecutiveYears } from '../domain/scoring/consecutive-years';
 import { calculateDividendGrowthRate } from '../domain/scoring/dividend-growth-rate';
@@ -50,6 +56,10 @@ export interface CompanyScoring {
   readonly card: ScoreCard;
   /** ⑩ が採用した配当の出所。画面に「予想」「実績」を併記するため */
   readonly dividendSource: DividendSource | null;
+  /** ⑨ PER の出所。保存済みの値をそのまま通す（採点では算出しない） */
+  readonly perSource: PerSource | null;
+  /** ⑨ PBR の出所 */
+  readonly pbrSource: PbrSource | null;
   /** 入力（解析）した日時。画面に必ず出す（`CLAUDE.md`） */
   readonly fetchedAt: string;
 }
@@ -101,5 +111,11 @@ export function scoreCompany(company: Company): CompanyScoring {
     dividendYield: dividendYieldToMetricScore(yieldResult),
   });
 
-  return { card, dividendSource: yieldResult.dividendSource, fetchedAt: company.fetchedAt };
+  return {
+    card,
+    dividendSource: yieldResult.dividendSource,
+    perSource: company.multiples.perSource,
+    pbrSource: company.multiples.pbrSource,
+    fetchedAt: company.fetchedAt,
+  };
 }
