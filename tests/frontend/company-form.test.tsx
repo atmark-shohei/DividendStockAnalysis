@@ -6,10 +6,14 @@ import {
   dropEditedWarnings,
   fillBlankMultiples,
   hasUnconfirmedWarnings,
+  marketDiagnosticText,
+  mergeDividendYears,
   mergeRowsWithImport,
+  resolveImportedPriceYen,
   rowlessWarningText,
   rowlessWarnings,
   shouldShowConfirmation,
+  splitEventText,
   toYearRow,
   warningsForCell,
 } from '../../frontend/components/CompanyForm';
@@ -229,6 +233,133 @@ describe('mergeRowsWithImport', () => {
   });
 });
 
+/**
+ * Yahoo由来の年度別配当のマージ（`docs/02_design/ui/pages/market-data-import.md` §5.2・§7）。
+ *
+ * `mergeRowsWithImport` と違い、業績データを伴わない年度の配当も新規行として追加できる。
+ * `null`（判定不能）と `0`（無配）を混同しない検証が本テストの核心
+ * （`.claude/rules/frontend.md`「データなしを0と表示しない」）。
+ */
+type MarketDividendYear = Parameters<typeof mergeDividendYears>[1][number];
+
+function marketDividend(fiscalYear: number, annualAmountSen: number | null): MarketDividendYear {
+  return { fiscalYear, annualAmountSen };
+}
+
+describe('mergeDividendYears', () => {
+  it('既存行と同じ年度・既存が空欄なら値が入り overwrittenCount は 0 のまま', () => {
+    const result = mergeDividendYears(
+      [row(2025, { dividendYen: '' })],
+      [marketDividend(2025, 5000)],
+    );
+
+    expect(result.rows[0]?.dividendYen).toBe('50');
+    expect(result.overwrittenCount).toBe(0);
+  });
+
+  it('既存の手入力を上書きし overwrittenCount が1増える', () => {
+    const result = mergeDividendYears(
+      [row(2025, { dividendYen: '100' })],
+      [marketDividend(2025, 5000)],
+    );
+
+    expect(result.rows[0]?.dividendYen).toBe('50');
+    expect(result.overwrittenCount).toBe(1);
+  });
+
+  it('業績データの無い古い年度は業績欄が空のまま新規行として追加される', () => {
+    const result = mergeDividendYears([row(2025)], [marketDividend(2000, 3000)]);
+
+    expect(result.rows.map((merged) => merged.fiscalYear)).toContain('2000');
+    expect(result.rows.find((merged) => merged.fiscalYear === '2000')).toEqual(
+      row(2000, { dividendYen: '30' }),
+    );
+  });
+
+  it('annualAmountSen: null（判定不能）は空文字。0にしない', () => {
+    const result = mergeDividendYears([], [marketDividend(2010, null)]);
+
+    expect(result.rows[0]?.dividendYen).toBe('');
+  });
+
+  it('annualAmountSen: 0（無配）は "0"。空文字にしない（null と 0 の区別が本テストの核心）', () => {
+    const result = mergeDividendYears([], [marketDividend(2010, 0)]);
+
+    expect(result.rows[0]?.dividendYen).toBe('0');
+  });
+
+  it('配当が0件なら既存行は変化せず overwrittenCount は 0', () => {
+    const existing = [row(2025, { dividendYen: '100' })];
+    const result = mergeDividendYears(existing, []);
+
+    expect(result.rows).toEqual(existing);
+    expect(result.overwrittenCount).toBe(0);
+  });
+
+  it('判定不能（null）は既存の手入力を消さない（手入力を破壊しないという既存方針の回帰）', () => {
+    const result = mergeDividendYears(
+      [row(2025, { dividendYen: '100' })],
+      [marketDividend(2025, null)],
+    );
+
+    expect(result.rows[0]?.dividendYen).toBe('100');
+    expect(result.overwrittenCount).toBe(0);
+  });
+
+  it('同じ年度の行を2つ作らない', () => {
+    const result = mergeDividendYears(
+      [row(2025, { dividendYen: '100' })],
+      [marketDividend(2025, 5000)],
+    );
+
+    const years = result.rows.map((merged) => merged.fiscalYear);
+    expect(new Set(years).size).toBe(years.length);
+  });
+});
+
+/**
+ * 株式分割・併合イベントの表示（同設計書 §5.3）。参考情報であることを文言側で示す。
+ */
+describe('splitEventText', () => {
+  it('numerator > denominator は分割', () => {
+    expect(splitEventText({ date: '2025-03-28', numerator: 100, denominator: 1 })).toBe(
+      '2025-03-28: 100株 / 1株（分割）',
+    );
+  });
+
+  it('numerator < denominator は併合', () => {
+    expect(splitEventText({ date: '2024-01-10', numerator: 1, denominator: 10 })).toBe(
+      '2024-01-10: 1株 / 10株（併合）',
+    );
+  });
+
+  it('numerator === denominator は変化なし', () => {
+    expect(splitEventText({ date: '2025-06-01', numerator: 1, denominator: 1 })).toBe(
+      '2025-06-01: 1株 / 1株（変化なし）',
+    );
+  });
+});
+
+/**
+ * 市場データ取り込みの診断表示（同設計書 §5.5）。IRバンクと同じ「1件ずつ列挙」パターン
+ * （`rowlessWarningText` 参照）を、`CellWarning` を持たない `ImportDiagnostic` に適用する。
+ */
+describe('marketDiagnosticText', () => {
+  it('⚠記号と理由の文言・元の値を必ず添える（色だけで表現しない）', () => {
+    const text = marketDiagnosticText({
+      block: '配当',
+      fiscalYearKey: '2026/03',
+      column: '一株配当',
+      reason: 'rounded',
+      raw: '0.745833',
+    });
+
+    expect(text).toContain('⚠');
+    expect(text).toContain('小数第3位以下を丸めました');
+    expect(text).toContain('0.745833');
+  });
+});
+
 describe('fillBlankMultiples', () => {
   // 9433 の実データ: 株価 1500 円 / EPS 183.59 円 / BPS 1333.5 円（予想EPSなし）
   const importedActualOnly = {
@@ -319,6 +450,39 @@ describe('fillBlankMultiples', () => {
         latestActualBpsSen: -100,
       }),
     ).toEqual({ per: '', perSource: null, pbr: '', pbrSource: null });
+  });
+});
+
+/**
+ * `resolveImportedPriceYen`: 取り込んだ株価を株価欄へ反映するかどうかの判定
+ * （`docs/02_design/ui/pages/market-data-import.md` §5.1）。
+ *
+ * `handleMarketDataImport` は `await` 完了後に `priceYenRef.current`（ref から読んだ
+ * 最新値）をこの関数へ渡す（fe-review-round2.md 指摘#1: 関数型 `setState` の
+ * コールバック内代入を直後に読むパターンを ref 経由の読み出しへ置き換えた）。
+ * ref の更新自体（`useEffect` 内の1行代入）は React の再レンダーに依存するため
+ * 純粋関数として切り出せない。ここではその手前の「空欄かどうかで埋めるか決める」
+ * 判定ロジックだけを検証する。
+ */
+describe('resolveImportedPriceYen', () => {
+  it('株価欄が空欄で、取り込んだ株価があれば埋める', () => {
+    expect(resolveImportedPriceYen('', 150000)).toBe('1500'); // 150000銭 = 1500円
+  });
+
+  it('株価欄が空欄でも、取り込んだ株価が取得できなければ（null）空欄のまま', () => {
+    expect(resolveImportedPriceYen('', null)).toBe('');
+  });
+
+  it('株価欄に既に手入力があれば、取り込んだ株価があっても上書きしない', () => {
+    expect(resolveImportedPriceYen('1234.50', 150000)).toBe('1234.50');
+  });
+
+  it('株価欄に既に手入力があり、取り込んだ株価も取得できなければそのまま', () => {
+    expect(resolveImportedPriceYen('1234.50', null)).toBe('1234.50');
+  });
+
+  it('取り込んだ株価が 0円（境界値）でも空欄なら埋める（null との混同に注意）', () => {
+    expect(resolveImportedPriceYen('', 0)).toBe('0');
   });
 });
 

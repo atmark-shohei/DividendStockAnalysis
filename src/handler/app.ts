@@ -12,8 +12,10 @@ import { Hono } from 'hono';
 
 import { type CompanyRepository } from '../domain/company/company-repository';
 import { type FinancialSource } from '../domain/company/financial-source';
+import { type MarketDataSource } from '../domain/company/market-data-source';
 import { analyzeCompany } from '../usecase/analyze-company';
 import { importFromIrBank } from '../usecase/import-from-irbank';
+import { importMarketData } from '../usecase/import-market-data';
 import { deleteCompany, getCompanyScoring, listCompanies } from '../usecase/read-companies';
 import { analyzeCompanyRequest, toCompany, toScoringResponse } from './dto/company-input';
 import {
@@ -21,6 +23,12 @@ import {
   toIrBankErrorResponse,
   toIrBankImportResponse,
 } from './dto/irbank-import';
+import {
+  fiscalYearEndMonthQuery,
+  isExternalFactor as isMarketDataExternalFactor,
+  toMarketDataErrorResponse,
+  toMarketDataImportResponse,
+} from './dto/market-data-import';
 import { parsePriceInput } from './dto/price-input';
 
 export interface AppDependencies {
@@ -28,6 +36,8 @@ export interface AppDependencies {
   readonly repository: CompanyRepository;
   /** IRバンク取り込み。**インターフェースで**受け取り、fetch の詳細を知らない */
   readonly financialSource: FinancialSource;
+  /** Yahoo からの市場データ取り込み。**インターフェースで**受け取る */
+  readonly marketDataSource: MarketDataSource;
   /** 現在時刻。テストから固定できるように注入する */
   readonly now: () => Date;
 }
@@ -104,6 +114,40 @@ export function createApp(dependencies: AppDependencies): Hono {
     }
 
     return context.json(toIrBankImportResponse(result.value));
+  });
+
+  /**
+   * Yahoo Finance から株価・配当履歴・株式分割を取り込む。**保存はしない**（設計書 §1.2）。
+   *
+   * `fiscalYearEndMonth` は IRバンク取り込み（`GET /api/irbank/:code`）が返した値を
+   * フロントがそのままクエリで渡す想定（設計書 §8-4。2本のエンドポイントに分ける方式）。
+   * 未指定なら配当の年度集計をせず、株価・分割イベントだけを返す。
+   */
+  app.get('/api/market-data/:code', async (context) => {
+    const code = context.req.param('code');
+    const rawFiscalYearEndMonth = context.req.query('fiscalYearEndMonth');
+
+    let fiscalYearEndMonth: number | null = null;
+    if (rawFiscalYearEndMonth !== undefined) {
+      const parsed = fiscalYearEndMonthQuery.safeParse(rawFiscalYearEndMonth);
+      if (!parsed.success) {
+        return context.json({ error: 'fiscalYearEndMonth は 1〜12 の整数で指定する' }, 400);
+      }
+      fiscalYearEndMonth = parsed.data;
+    }
+
+    const result = await importMarketData(dependencies.marketDataSource, code, fiscalYearEndMonth);
+
+    if (!result.ok) {
+      if (isMarketDataExternalFactor(result.error)) {
+        // 外部要因の失敗はサーバー側にだけ詳細を残す（`.claude/rules/backend.md`）
+        console.error('market data import failed', result.error.kind);
+      }
+      const { body, status } = toMarketDataErrorResponse(result.error);
+      return context.json(body, status);
+    }
+
+    return context.json(toMarketDataImportResponse(result.value));
   });
 
   app.get('/api/companies/:code', async (context) => {

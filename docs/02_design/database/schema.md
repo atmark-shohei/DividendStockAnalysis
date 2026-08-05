@@ -126,6 +126,21 @@ interface CompanyRepository {
 
 一覧表示（`listSummaries`）は明細を持たない要約専用クエリで、N+1 を避ける。
 
+### 明細の一括 INSERT はバインド変数の上限で分割する（2026-08-05 追加）
+
+`save()` は明細（`financial_records` / `dividend_records` / `transformed_metrics`）を
+「全消し→入れ直し」で書く。このとき **D1 は1文あたりのバインド変数を100個までしか受け付けない**
+（超えると `D1_ERROR: too many SQL variables: SQLITE_ERROR`）。1文にまとめて INSERT すると
+実測で `dividend_records` は26件・`financial_records` は15件で落ちた。
+
+そのため `D1_MAX_BOUND_PARAMETERS`（= 100）と各行の列数から1文あたりの行数を割り算で求め、
+複数文に分割して `db.batch()` に渡す（`src/infra/d1/company-repository.ts`）。
+`db.batch()` は分割後も1トランザクションなので、取り込み失敗で既存データを壊さない
+（`non-functional.md`）性質は変わらない。
+
+API の契約は `records` / `dividends` とも最大60件（`company-api.md`）で、この分割により
+60件でも保存できる。Yahoo 取り込みは配当が20〜28年ぶん入るため、この上限に日常的に接近する。
+
 ## 計算とスコアの再現性
 
 **詳細表示は保存済みの生データ（`financial_records`/`dividend_records`）から毎回採点し直す**

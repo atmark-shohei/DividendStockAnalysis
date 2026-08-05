@@ -1,7 +1,8 @@
 # 銘柄・スコアリング API 仕様
 
-> ステータス: 🟢 実装済み（2026-07-28）
-> 実装: `src/handler/app.ts` / DTO: `src/handler/dto/company-input.ts`, `src/handler/dto/price-input.ts`
+> ステータス: 🟢 実装済み（2026-07-28。IRバンク・Yahoo取り込みの契約記載は2026-08-04追加）
+> 実装: `src/handler/app.ts` / DTO: `src/handler/dto/company-input.ts`, `src/handler/dto/price-input.ts`,
+> `src/handler/dto/irbank-import.ts`, `src/handler/dto/market-data-import.ts`
 
 ## 共通仕様
 
@@ -28,13 +29,15 @@
 }
 ```
 
-| ステータス | 用途                                     |
-| ---------- | ---------------------------------------- |
-| 200 / 201  | 成功                                     |
-| 204        | 削除成功（本文なし）                     |
-| 400        | 入力形式不正（zod） / 銘柄コード形式不正 |
-| 404        | 対象なし                                 |
-| 500        | 想定外のサーバーエラー                   |
+| ステータス | 用途                                                                                |
+| ---------- | ----------------------------------------------------------------------------------- |
+| 200 / 201  | 成功                                                                                |
+| 204        | 削除成功（本文なし）                                                                |
+| 400        | 入力形式不正（zod） / 銘柄コード形式不正                                            |
+| 404        | 対象なし                                                                            |
+| 422        | `GET /api/irbank/:code` 固有。検証を通った決算年度が1件も無かった                   |
+| 500        | 想定外のサーバーエラー                                                              |
+| 502        | `GET /api/irbank/:code` / `GET /api/market-data/:code` 固有。外部データ源の取得失敗 |
 
 ---
 
@@ -97,6 +100,133 @@
   ]
 }
 ```
+
+## GET /api/irbank/:code
+
+IRバンクから財務データを取り込む。**保存はしない。**
+実装: `src/handler/app.ts` / DTO: `src/handler/dto/irbank-import.ts`
+
+パスパラメータ:
+
+| 項目   | 制約                                                                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `code` | 4文字固定。先頭3桁は数字、末尾1桁は数字か英大文字（例: `130A`）。形式検証は `importFromIrBank` の先（`IrBankFinancialSource`）が行う |
+
+レスポンス（200）— `IrBankImportResponse`:
+
+```json
+{
+  "code": "9433",
+  "records": [
+    {
+      "fiscalYear": 2025,
+      "isForecast": false,
+      "epsSen": 30000,
+      "roePercent": 15.2,
+      "revenueSen": 500000000000,
+      "operatingMarginPercent": 18.5
+    }
+  ],
+  "latestForecastEpsSen": 32000,
+  "latestActualEpsSen": 30000,
+  "latestActualBpsSen": 133350,
+  "dividends": [{ "fiscalYear": 2025, "annualAmountSen": 14500 }],
+  "fiscalYearEndMonth": 3,
+  "diagnostics": [
+    {
+      "block": "業績",
+      "fiscalYearKey": "2026/03",
+      "column": "EPS",
+      "reason": "rounded",
+      "raw": "300.005"
+    }
+  ],
+  "cellWarnings": [
+    {
+      "fiscalYear": 2026,
+      "fiscalYearKey": "2026/03",
+      "field": "epsYen",
+      "column": "EPS",
+      "reason": "rounded",
+      "valueKept": true,
+      "raw": "300.005"
+    }
+  ]
+}
+```
+
+> ✅ **2026-08-03 追加。** `records[]` に1株配当は無い（[ADR-0009](../../adr/0009-dividend-single-source.md)）。
+> 1株配当は `dividends[]` から取る。`fiscalYearEndMonth` は Yahoo 取り込み
+> （`GET /api/market-data/:code`）へフロントがそのままクエリで渡す想定（設計書 §8-4）。
+> 決算年度キーの月がちょうど1つに定まらない場合（0個または決算期変更の疑いで2個以上）は `null`。
+> `diagnostics` は捨てずに残す生の取得診断、`cellWarnings` は取り込んだ時点で
+> handler 側が画面のセルに解決したもの（`docs/02_design/logic/import-review.md` §3.2）。
+
+エラー:
+
+| ステータス | `kind`                                                                             | 意味                                                                                                              |
+| ---------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| 400        | `invalid-code`                                                                     | 銘柄コードの形式が不正                                                                                            |
+| 404        | `source-not-found`                                                                 | 指定された銘柄のデータが見つからない                                                                              |
+| 422        | `no-usable-year`                                                                   | 検証を通った決算年度が1件も無かった                                                                               |
+| 502        | `source-unreachable` / `malformed-response` / `unexpected-shape` / `code-mismatch` | IRバンクからのデータ取得に失敗（文言:「IRバンクからのデータ取得に失敗しました。時間をおいて再試行してください」） |
+
+---
+
+## GET /api/market-data/:code
+
+Yahoo Finance から株価・配当履歴・株式分割イベントを取り込む。**保存はしない。**
+実装: `src/handler/app.ts` / DTO: `src/handler/dto/market-data-import.ts`
+
+パスパラメータ:
+
+| 項目   | 制約                                                            |
+| ------ | --------------------------------------------------------------- |
+| `code` | 4文字固定。先頭3桁は数字、末尾1桁は数字か英大文字（例: `130A`） |
+
+クエリパラメータ:
+
+| 項目                 | 制約                                                                                                                                                                    |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fiscalYearEndMonth` | 任意。1〜12 の整数。未指定なら配当の年度集計をせず、株価・分割イベントだけ返す。`GET /api/irbank/:code` が返した `fiscalYearEndMonth` をそのまま渡す想定（設計書 §8-4） |
+
+レスポンス（200）— `MarketDataImportResponse`:
+
+```json
+{
+  "code": "9433",
+  "name": "KDDI CORP",
+  "priceSen": 425000,
+  "priceAsOf": "2026-08-01T06:00:00.000Z",
+  "splits": [{ "date": "2020-09-29", "numerator": 3, "denominator": 1 }],
+  "dividendRecords": [{ "fiscalYear": 2025, "annualAmountSen": 14500 }],
+  "dividendAggregated": true,
+  "diagnostics": [],
+  "dividendDiagnostics": []
+}
+```
+
+| フィールド            | 意味                                                                                     |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| `name`                | **英語表記のみ。** 取れなければ `null`（画面側の表示制御はFEの責務）                     |
+| `priceSen`            | 銭単位の整数。取れなければ `null`                                                        |
+| `priceAsOf`           | 株価の観測時刻。UTC の ISO 8601。取れなければ `null`。JST 変換は表示層で行う             |
+| `splits`              | 株式分割・併合イベント。参考情報。**この機能では自動反映・スコアリングへの利用はしない** |
+| `dividendRecords`     | 決算年度に集計した配当。`dividendAggregated: false` のときは常に空配列                   |
+| `dividendAggregated`  | 配当の年度集計を実行したか。`fiscalYearEndMonth` クエリが未指定のときは `false`          |
+| `diagnostics`         | 取得時のパース診断。**捨てない**                                                         |
+| `dividendDiagnostics` | 配当の年度集計時の診断（丸め・安全整数超過）。**捨てない**                               |
+
+エラー:
+
+| ステータス | `kind`                                                           | 意味                                                                                              |
+| ---------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 400        | `invalid-code`                                                   | 銘柄コードの形式が不正                                                                            |
+| 400        | `invalid-fiscal-year-end-month`                                  | `fiscalYearEndMonth` の指定が不正（zod で1〜12に絞るため通常は届かない防御的分岐）                |
+| 404        | `source-not-found`                                               | 指定された銘柄のデータが見つからない                                                              |
+| 502        | `source-unreachable` / `malformed-response` / `unexpected-shape` | 市場データの取得に失敗（文言:「市場データの取得に失敗しました。時間をおいて再試行してください」） |
+
+---
 
 ## POST /api/companies
 

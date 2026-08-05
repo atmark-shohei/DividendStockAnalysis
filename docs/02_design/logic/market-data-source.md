@@ -46,14 +46,45 @@ GET https://query1.finance.yahoo.com/v8/finance/chart/{code}.T
 
 ### 2.1. 取得できたもの（9433 / 7203 / 8306 / 1301 で確認）
 
-| 項目                      | 結果                                                          |
-| :------------------------ | :------------------------------------------------------------ |
-| `meta.longName`           | ✅ ただし**英語名のみ**（`KDDI Corporation`）。日本語名は無い |
-| `meta.regularMarketPrice` | ✅ 3,051（円）                                                |
-| `meta.regularMarketTime`  | ✅ Unix 秒。**観測時刻が取れる**（§3.3）                      |
-| `events.dividends`        | ✅ **21〜28年ぶん**（9433 は 2000年〜、7203 は 1999年〜）     |
-| `events.splits`           | ✅ 日付＋`numerator`/`denominator`                            |
-| User-Agent                | ✅ **UA なしで HTTP 200**。Workers の既定 fetch で叩ける      |
+| 項目                      | 結果                                                                 |
+| :------------------------ | :------------------------------------------------------------------- |
+| `meta.longName`           | ✅ ただし**英語名のみ**（`KDDI Corporation`）。日本語名は無い        |
+| `meta.regularMarketPrice` | ✅ 3,051（円）                                                       |
+| `meta.regularMarketTime`  | ✅ Unix 秒。**観測時刻が取れる**（§3.3）                             |
+| `events.dividends`        | ✅ **21〜28年ぶん**（9433 は 2000年〜、7203 は 1999年〜）            |
+| `events.splits`           | ✅ 日付＋`numerator`/`denominator`                                   |
+| User-Agent                | ✅ UA なしで HTTP 200 ⚠️ **2026-08-04 に再現しなくなった**（§2.1.1） |
+
+#### 2.1.1. User-Agent の再計測（2026-08-04）
+
+**2026-07-30 の「UA なしで 200」は 2026-08-04 時点で再現しない。**
+上表の行は当時の計測記録としてそのまま残し、ここに現在の事実を書く。
+
+`wrangler dev`（workerd）上で `GET /api/market-data/9433` が 502 になり、
+サーバーログは `market data import failed source-unreachable`、応答時間 109ms
+（タイムアウト5秒・リトライ待機1秒を経ていない速さ）。§5.1 の「429 を受けたら
+即座に諦める」パスを通っていた。
+
+ローカルのエコーサーバーで各ランタイムの送信ヘッダーを実測した結果:
+
+| ランタイム              | 送信ヘッダー                                                                               | Yahoo の応答 |
+| :---------------------- | :----------------------------------------------------------------------------------------- | :----------- |
+| Node fetch（undici）    | accept, accept-language, sec-fetch-mode, **user-agent: node**, accept-encoding, connection | **200**      |
+| workerd（wrangler dev） | accept, cf-worker（**User-Agent を一切送らない**）                                         | **429**      |
+
+workerd 上で User-Agent だけを変えた検証（銘柄 9433）:
+
+| 条件                                         | 結果                    |
+| :------------------------------------------- | :---------------------- |
+| UA 無し                                      | **429**                 |
+| `user-agent: node`                           | **200**（30,487 bytes） |
+| `user-agent: DividendStockAnalysis/1.0`      | 200（30,487 bytes）     |
+| `user-agent: node` + Node 同等の付随ヘッダー | 200                     |
+
+**結論: workerd の fetch は User-Agent を送らず、Yahoo の WAF が UA 無しの
+リクエストを 429 で拒否する。** UA を付ければ 200 が返るので、認証要求でも
+恒常的なレート制限でもない（ADR-0010 の見直しトリガーには該当しない）。
+実装は `user-agent: node` を送る（§5）。
 
 ### 2.2. 取得できないもの
 
@@ -208,17 +239,14 @@ IRバンクの `"-"`（不明）と違い、**この経路では「イベント�
   0 は無配を意味し、① のゼロ除算・② の減配判定を引き起こす。
   1銭未満の配当は「無配」ではないので、0 に丸めてはいけない
 
-> 🟡 **`amountYen: number`（円・小数）を domain の型に置くことについて。**
-> `CLAUDE.md`・`.claude/rules/backend.md` は「浮動小数点で金額計算をしない」と定めており、
-> IRバンク経路は「数値文字列のまま小数点をずらす。`parseFloat` を経由しない」を
-> 実装している（[irbank-json-import.md](./irbank-json-import.md) §3.4）。
-> **本経路だけ規約が違う状態になる。**
->
-> 実害の期待値は小さい（実測の6桁小数なら誤差は 1e-14 銭のオーダーで、
-> 合算は年2〜4回）。一方で**ポートの型は後から変えるのが最も高くつく**。
-> infra 側でレスポンス本文から数値リテラルを文字列のまま拾い、スケール済み整数
-> （例: 1/10000 円）で公開すれば §3.4 の順序はそのまま保てる。
-> **どちらにするかは実装着手前に決めること**（§8-9）。
+> ✅ **`amountYen: number`（円・小数）を domain の型に置くかは決着済み**（2026-08-03・
+> §8-9・案B採用）。`CLAUDE.md`・`.claude/rules/backend.md` の「浮動小数点で金額計算を
+> しない」に従い、`DividendPayment.amountYenText: string`（数値リテラルの文字列。
+> **未検証・未変換のまま**）を採用した。infra 側（`parse-chart.ts`）がレスポンス本文
+> （テキスト）から数値リテラルを文字列のまま正規表現で抜き出し、`JSON.parse` の
+> 丸め誤差（Yahoo の `number` は double）を経由させない。数値への変換・銭への丸めは
+> 決算年度への集計時（`toFiscalYearDividends`）に行う（§3.4 の順序どおり）。
+> 詳細・決定理由は §8-9 を参照。
 
 ### 3.5. 分割イベント
 
@@ -240,12 +268,19 @@ IRバンクの `"-"`（不明）と違い、**この経路では「イベント�
 `src/domain/company/market-data-source.ts`。**素TS。HTTP も Yahoo も現れない。**
 
 ```ts
-/** 1回ぶんの配当。決算年度への集計前の生データ */
+/**
+ * 1回ぶんの配当。決算年度への集計前の生データ。
+ *
+ * `amountYenText` は数値ではなく**数値リテラルの文字列**（例: `"0.745833"`）。
+ * `JSON.parse` を経由すると Yahoo の `number`（double）が丸め誤差を持つため、
+ * infra 側がレスポンス本文から文字列のまま抜き出す（§3.4・§8-9・案B採用）。
+ * 数値への変換・銭への丸めは決算年度への集計時（`toFiscalYearDividends`）に行う。
+ */
 export interface DividendPayment {
   /** 権利落ち日。`YYYY-MM-DD`（UTC の日付成分。§3.1） */
   readonly exDividendDate: string;
-  /** 円。分割調整済み。小数を含む（§3.4） */
-  readonly amountYen: number;
+  /** 円の金額を表す数値リテラルの文字列。分割調整済み（§3.4） */
+  readonly amountYenText: string;
 }
 
 export interface SplitEvent {
@@ -266,6 +301,7 @@ export interface MarketData {
   readonly priceAsOf: string | null;
   /** 権利落ち日の昇順。**決算年度への集計はここではしない**（§4.2） */
   readonly dividendPayments: readonly DividendPayment[];
+  /** スコアリング・自動反映には使わない。参考情報として画面へ表示するために保持する（§8-17） */
   readonly splits: readonly SplitEvent[];
   readonly diagnostics: readonly ImportDiagnostic[];
 }
@@ -294,13 +330,25 @@ export interface MarketDataSource {
 `src/domain/company/dividend-fiscal-year.ts`。**ネットワークを知らない。**
 
 ```ts
+/** ドメインは throw しない。決算月が使えない形なら集計せずエラーを返す */
+export type DividendFiscalYearError = { readonly kind: 'invalid-fiscal-year-end-month' };
+
+export interface FiscalYearDividends {
+  readonly records: readonly DividendRecord[];
+  readonly diagnostics: readonly ImportDiagnostic[];
+}
+
+/**
+ * @param payments 権利落ち日の昇順である必要はない
+ * @param fiscalYearEndMonth 決算月（1〜12の整数）。IRバンクの年度キーから導出したもの
+ * @param asOf 取得時点。**呼び出し側が渡す。**関数内で `Date.now()` を読まない
+ *   （§7.1「取得時点は引数で渡す」。テストできなくなるのを避ける）
+ */
 export function toFiscalYearDividends(
   payments: readonly DividendPayment[],
   fiscalYearEndMonth: number,
-): {
-  readonly records: readonly DividendRecord[];
-  readonly diagnostics: readonly ImportDiagnostic[];
-};
+  asOf: Date,
+): Result<FiscalYearDividends, DividendFiscalYearError>;
 ```
 
 集計をポートから外に出す理由は2つ。
@@ -351,8 +399,12 @@ GET https://query1.finance.yahoo.com/v8/finance/chart/{code}.T
 - ティッカーは `{code}.T`（東証）。銘柄コードの形式検証は `fy-data-client.ts` と同じ
   `^\d{3}[0-9A-Z]$`
 - タイムアウト 5秒、リトライは**1回だけ**（既存と同じ。`.claude/rules/backend.md`）
-- **User-Agent を詐称しない。** UA 無しで 200 が返ることを実測済み（§2.1）。
-  ブラウザを騙る文字列を送ると、規約違反の意図があると解釈されうる
+- **User-Agent は `node` を送る。** ブラウザを騙る文字列は使わない（規約違反の意図が
+  あると解釈されうる）。
+  - 2026-07-30 時点は UA 無しで 200 が返っていたため「UA を付けない」と定めていた（§2.1）
+  - **2026-08-04 の再計測でこれは成り立たなくなった。** workerd の fetch は
+    User-Agent を一切送らず、Yahoo の WAF が UA 無しのリクエストを 429 で拒否する。
+    UA を `node` にすると 200 が返る（§2.1.1）
 
 ### 5.1. レート制限
 
@@ -472,6 +524,14 @@ yfinance 利用者から `Too Many Requests`（429）の報告がある。本仕
       JST の表記にする（`2026-07-30T06:30:00Z` → `2026年7月30日 15:30`）
 - [ ] 同関数は `null` を受けたら「取得時刻不明」相当を返す（空文字にしない）
 
+> ✅ **`dividendAggregated` フィールド**（2026-08-03 決着。ユーザー確定事項）。
+> `fiscalYearEndMonth` が `null`（IRバンク未実施のまま Yahoo だけを実行した）ときは
+> 配当集計をスキップし、`GET /api/market-data/:code` の応答に `dividendAggregated: false`
+> を返す（`true` なら集計を実行した）。FE 側はこの値で
+> 「決算月が未取得のため、配当の年度集計は行われませんでした」を通知する
+> （`src/usecase/import-market-data.ts` の `MarketDataImportResult.dividendAggregated`、
+> `src/handler/dto/market-data-import.ts` の `MarketDataImportResponse.dividendAggregated`）。
+
 > **DOM を組み立てるテストは書けない**（`@testing-library/react` 未導入。
 > `tests/frontend/company-form.test.tsx` 冒頭）。したがって「画面に出る」ことは
 > 直接検証せず、`import-review.md` §7.4 と同じく**表示を決める純粋関数**で検証する。
@@ -491,9 +551,13 @@ yfinance 利用者から `Too Many Requests`（429）の報告がある。本仕
 3. ✅ **③ の予想EPS × 予想配当の年度結合**（2026-07-31 決着）。
    [ADR-0009](../../adr/0009-dividend-single-source.md) の「決定した結合規則」を参照。
    **最新の予想年度で両方が揃わなければ判定不能に倒す。古い年度へフォールバックしない**
-4. 🟡 **2つの取り込みの実行順。** Yahoo は決算月を IRバンクに依存するので
-   「IRバンク → Yahoo」になる。Yahoo だけを実行したときは配当の集計をせず株価だけ
-   入れる（§7.4）。エンドポイントの形状（1本にまとめるか2本に分けるか）は未決
+4. ✅ **2つの取り込みの実行順とエンドポイントの形状**（2026-08-03 決着）。
+   Yahoo は決算月を IRバンクに依存するので「IRバンク → Yahoo」になる。
+   エンドポイントは**2本に分ける**（`GET /api/irbank/:code` と
+   `GET /api/market-data/:code`）。`fiscalYearEndMonth` は IRバンク取り込みが
+   返した値を、フロントがそのまま `GET /api/market-data/:code` のクエリで渡す
+   （`src/handler/app.ts` の実装コメントに明記済み）。Yahoo だけを実行したとき
+   （`fiscalYearEndMonth` 未指定）は配当の集計をせず株価だけ入れる（§7.4）
 5. 🟡 **決算期変更（変則決算）は扱わない。** §3.2 の規則は決算月を**単一スカラー**で
    受け取るため、決算月を変えた企業を表現できない。移行期の変則決算（例: 9か月）は
    12か月枠に収まらず、隣接年度と重複または空白になる。
@@ -506,16 +570,33 @@ yfinance 利用者から `Too Many Requests`（429）の報告がある。本仕
    [import-review.md](./import-review.md) §5.5 の規則2（「取り込みが `null` のセルは
    既存を残す」）と組み合わさると**新旧基準が同じ系列に混在する**。
    「市場データ取り込み時は配当を全年度置換する」等の規則が要る
-7. 🟡 **`ImportDiagnostic` に入れる値が未定義。** `block` は `'配当'` / `'株価'` を
-   使うと決めたが、`fiscalYearKey`（定義は「元のキー `2026/03`」）と `column` に
-   何を入れるかが未定。`resolveField`（`import-review.ts:58-67`）は
-   `block='配当'` × `column='一株配当'` を `dividendYen` に解決するので、
-   **Yahoo 由来の警告が IRバンク由来のセル警告と区別できない**
+7. ✅ **`ImportDiagnostic` に入れる値**（2026-08-03 決着）。`block` は `'配当'` /
+   `'株価'`。`column` は `'配当明細'`（配当。集計前の1エントリ単位であることを示す。
+   決算年度集計後の `'年間配当'`（`dividend-fiscal-year.ts`）とは別名にして区別する）
+   / `'株価'`（株価。複数列が無いため `block` と同じ固定文字列）。`fiscalYearKey` は
+   取り込み元・段階によって次の3パターンに分かれる（`financial-source.ts` の
+   `ImportDiagnostic.fiscalYearKey` コメントと表現を揃えている）。
+   - `column='配当明細'`（集計前・パース診断・`parse-chart.ts`）: 権利落ち日
+     （`YYYY-MM-DD`。読めなければ `'unknown'`）
+   - `column='年間配当'`（集計後・`dividend-fiscal-year.ts`）: 集計後の決算年度そのもの
+     （例: `'2001'`。権利落ち日でも `'unknown'` でもない）
+   - `column='株価'`: 決算年度に紐付かないため常に `'unknown'`
+
+   `resolveField`（`import-review.ts:58-67`）は `block='配当'` × `column='一株配当'`
+   （IRバンクの1回ごとの単価）しか `dividendYen` に解決しないため、
+   **Yahoo 由来の警告（`column='配当明細'`/`'年間配当'`/`'株価'`）は
+   IRバンク由来のセル警告と区別できないことを前提に、行外の警告として表示する**
+   （区別できないこと自体を問題とせず、行外警告に倒すことをここで決定した）
+
 8. 🟡 **`priceAsOf` をスキーマまで通すか。** 本仕様は取り込み画面での提示までとし、
    `companies` テーブルには保存しない（§3.3）。したがって
    [import-review.md](./import-review.md) §8-3 は塞がらない
-9. 🟡 **金額を float で持つか整数で持つか**（§3.4 の囲み）。ポートの型なので
-   実装着手前に決めること
+9. ✅ **金額を float で持つか整数で持つか**（2026-08-03 決着。案B採用）。
+   `DividendPayment.amountYenText` に**未検証の文字列のまま**持ち、決算年度への集計時
+   （`toFiscalYearDividends`）にマイクロ円スケール（1/1,000,000円の整数）へ変換してから
+   銭へ丸める。`JSON.parse` を経由すると Yahoo の `number`（double）が丸め誤差を持つため、
+   infra 側（`parse-chart.ts`）がレスポンス本文（テキスト）から数値リテラルを文字列のまま
+   正規表現で抜き出す（`.claude/rules/backend.md` 「浮動小数点で金額計算をしない」）
 10. 🟡 **`dividend_records` の主キー衝突。** `(code, fiscalYear, kind)`
     （`schema.ts:75`）なので、同一年度の `'actual'` が IRバンクと Yahoo で衝突する。
     突き合わせ（下記11）を「人が判断」に倒すとしても、**保存時にどちらを書くかは
@@ -536,8 +617,10 @@ yfinance 利用者から `Too Many Requests`（429）の報告がある。本仕
     という既知の限界を解消しうる。急変した年度と分割日を突き合わせ、
     **「これは分割です」と断定できる**ようになる。本仕様の範囲外（段階2）
 16. 🟢 **株価の履歴は取らない**（§1.2）。将来チャート表示をするなら再検討
-17. 🟢 **`splits` に本仕様内の消費者がいない。** 同じリクエストで取れるのでコストは
-    無いが、「この段階では保持のみ・利用しない」（用途は上記15）と明記しておく
+17. ✅ **`splits` の扱い**（2026-08-03 決着。ユーザー確定事項）。
+    **参考表示のみ許可する。** スコアリング・自動反映には使わない（用途は上記15）。
+    `GET /api/market-data/:code` の応答に `splits` を含め、画面へ表示するためだけに
+    保持する。将来の自動反映（分割検知・急変判定への活用）はこの決定の対象外
 
 ## 9. 実装（予定）
 

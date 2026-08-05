@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ratioToEditableText, senToEditableText } from '../../frontend/format';
+import { formatPriceAsOf, ratioToEditableText, senToEditableText } from '../../frontend/format';
 
 /**
  * IRバンク取り込みのプレフィル変換。
@@ -25,6 +25,29 @@ describe('senToEditableText', () => {
 
   it('負の値も往復する', () => {
     expect(senToEditableText(-12_345)).toBe('-123.45');
+  });
+});
+
+/**
+ * 株価の観測時刻表示（`docs/02_design/logic/market-data-source.md` §7.4）。
+ * `formatFetchedAt`（保存時刻）とは別関数。`priceAsOf` は Yahoo が返した観測時刻そのもので、
+ * `null`（取れなかった）を受けたときの文言も違う。
+ */
+describe('formatPriceAsOf', () => {
+  it('UTC を JST に変換する', () => {
+    expect(formatPriceAsOf('2026-07-30T06:30:00Z')).toBe('2026/7/30 15:30:00（JST）');
+  });
+
+  it('日をまたぐ境界（UTC 15:00 → JST 翌日 0:00）', () => {
+    expect(formatPriceAsOf('2026-07-30T15:00:00Z')).toBe('2026/7/31 0:00:00（JST）');
+  });
+
+  it('null は「取得時刻不明」（空文字にしない）', () => {
+    expect(formatPriceAsOf(null)).toBe('取得時刻不明');
+  });
+
+  it('不正な文字列は「取得時刻不明」', () => {
+    expect(formatPriceAsOf('not-a-date')).toBe('取得時刻不明');
   });
 });
 

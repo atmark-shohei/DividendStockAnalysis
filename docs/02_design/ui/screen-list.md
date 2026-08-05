@@ -105,4 +105,6 @@
 
 - [pages/criteria-tab.md](./pages/criteria-tab.md) — F-31 の詳細設計（実装状況の記述が
   古いままなので次に触るときに更新すること）
+- [pages/market-data-import.md](./pages/market-data-import.md) — F-30 に追加した
+  Yahoo Finance 取り込みボタンの詳細設計（2026-08-03 追加）
 - [company-api.md](../api/company-api.md) — この画面が呼ぶ API

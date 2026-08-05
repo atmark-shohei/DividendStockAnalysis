@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { type FinancialSource } from '@/domain/company/financial-source';
+import { type MarketDataSource } from '@/domain/company/market-data-source';
 import { createApp } from '@/handler/app';
 import { D1CompanyRepository } from '@/infra/d1/company-repository';
 import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/company-input';
@@ -23,10 +24,18 @@ const unusedFinancialSource: FinancialSource = {
   },
 };
 
+/** このテストファイルは Yahoo 取り込みを対象にしないので、呼ばれたら落とす */
+const unusedMarketDataSource: MarketDataSource = {
+  fetchByCode: () => {
+    throw new Error('このテストで MarketDataSource が呼ばれるのは想定外');
+  },
+};
+
 function app() {
   return createApp({
     repository: new D1CompanyRepository(env.DB),
     financialSource: unusedFinancialSource,
+    marketDataSource: unusedMarketDataSource,
     now: () => FIXED_NOW,
   });
 }
@@ -286,5 +295,73 @@ describe('GET /api/health', () => {
     const response = await app().request('/api/health');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: 'ok' });
+  });
+});
+
+/**
+ * `AppDependencies` に `marketDataSource` を追加したことによる結線の回帰確認。
+ * **実ネットワークは叩かない**（`.claude/rules/backend.md`）。スタブを注入するだけ。
+ * 計算そのものは `tests/domain/company/dividend-fiscal-year.test.ts` /
+ * `tests/handler/market-data-import.test.ts` で尽くしてある。
+ */
+describe('GET /api/market-data/:code', () => {
+  function appWithMarketData(marketDataSource: MarketDataSource) {
+    return createApp({
+      repository: new D1CompanyRepository(env.DB),
+      financialSource: unusedFinancialSource,
+      marketDataSource,
+      now: () => FIXED_NOW,
+    });
+  }
+
+  it('結線されている。スタブの結果がそのまま応答に出る', async () => {
+    const stub: MarketDataSource = {
+      fetchByCode: () =>
+        Promise.resolve({
+          ok: true,
+          value: {
+            code: '9433',
+            name: 'KDDI Corporation',
+            priceSen: 290_300,
+            priceAsOf: '2026-08-03T06:30:00.000Z',
+            dividendPayments: [],
+            splits: [],
+            diagnostics: [],
+          },
+        }),
+    };
+    const response = await appWithMarketData(stub).request('/api/market-data/9433');
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as { code: string; dividendAggregated: boolean };
+    expect(body.code).toBe('9433');
+    // fiscalYearEndMonth 未指定なので集計は行われない
+    expect(body.dividendAggregated).toBe(false);
+  });
+
+  it('保存しない。リポジトリに一切触れない', async () => {
+    const stub: MarketDataSource = {
+      fetchByCode: () =>
+        Promise.resolve({
+          ok: true,
+          value: {
+            code: '9433',
+            name: null,
+            priceSen: null,
+            priceAsOf: null,
+            dividendPayments: [],
+            splits: [],
+            diagnostics: [],
+          },
+        }),
+    };
+    const before = await env.DB.prepare('SELECT COUNT(*) AS count FROM companies').first<{
+      count: number;
+    }>();
+    await appWithMarketData(stub).request('/api/market-data/9433');
+    const after = await env.DB.prepare('SELECT COUNT(*) AS count FROM companies').first<{
+      count: number;
+    }>();
+    expect(after?.count).toBe(before?.count);
   });
 });

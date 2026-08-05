@@ -1,11 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { type PbrSource, type PerSource } from '@/domain/company/company';
 import { deriveMarketMultiples } from '@/domain/company/market-multiples';
 
-import type { AnalyzeCompanyRequest, IrBankImportResponse } from '../api';
+import type { AnalyzeCompanyRequest, IrBankImportResponse, MarketDataImportResponse } from '../api';
 import * as api from '../api';
-import { multipleSourceText, ratioToEditableText, senToEditableText } from '../format';
+import {
+  formatPriceAsOf,
+  multipleSourceText,
+  ratioToEditableText,
+  senToEditableText,
+} from '../format';
 
 /**
  * 銘柄データの入力フォーム。
@@ -76,6 +81,16 @@ type IrBankDividendView = IrBankImportResponse['dividends'][number];
 /** 診断をどのセルの話かに解決したもの。**判定は domain 側**（`import-review.ts` §3.2） */
 type CellWarning = IrBankImportResponse['cellWarnings'][number];
 type YearRowField = NonNullable<CellWarning['field']>;
+
+/** Yahoo由来の年度別配当。業績データを伴わない（`docs/02_design/ui/pages/market-data-import.md` §5.2） */
+type MarketDataDividendYear = MarketDataImportResponse['dividendRecords'][number];
+type MarketDataSplitView = MarketDataImportResponse['splits'][number];
+/**
+ * 市場データ取り込みの取得診断。IRバンクの `CellWarning` と違い、画面のセルへは解決しない
+ * （`field`・`valueKept` を持たない）。`rowlessWarningText` と同じ「1件ずつ列挙」の
+ * 体裁で表の外に出す（同設計書 §5.5）。
+ */
+type MarketDataDiagnostic = MarketDataImportResponse['diagnostics'][number];
 
 /** 行そのものが落ちたことを示す列名（`src/infra/irbank/parse-fy-data.ts` と同じ値） */
 const ROW_LEVEL_COLUMNS = new Set(['年度', '備考']);
@@ -294,6 +309,102 @@ export function mergeRowsWithImport(
   };
 }
 
+export interface MergeDividendYearsResult {
+  readonly rows: readonly YearRow[];
+  /** 手入力を取り込み値で置き換えたセル数。呼び出し側が通知に使う */
+  readonly overwrittenCount: number;
+}
+
+/**
+ * Yahoo由来の年度別配当（業績データを伴わない）を既存行にマージする。
+ * `docs/02_design/ui/pages/market-data-import.md` §5.2 / §7。
+ *
+ * `mergeRowsWithImport` と違い、対応する `records`（業績）が無い年度でも
+ * 配当だけの行を新規追加する（Yahooの配当がIRバンクの業績データより古い年度まで
+ * 遡るため。`market-data-source.md` §2.2）。「手入力を破壊しない・行の同一性は
+ * 年度だけで決める」という設計方針は `mergeRowsWithImport` と同じ。
+ *
+ * `annualAmountSen: null`（判定不能。丸めた結果0銭になった場合、または銭換算が
+ * 安全整数を超えた場合。`src/domain/company/dividend-fiscal-year.ts` の
+ * `toFiscalYearDividends`。同設計書 §3.4）は `senToEditableText` で空文字になり、
+ * 既存の手入力を上書きしない
+ * （`mergeRowsWithImport` が空文字の取り込み値をスキップするのと同じ扱い）。
+ * `annualAmountSen: 0`（無配）は `'0'` として通常どおり反映する。
+ * **`null` と `0` を混同しない**（`.claude/rules/frontend.md`）。
+ */
+export function mergeDividendYears(
+  existingRows: readonly YearRow[],
+  dividendYears: readonly MarketDataDividendYear[],
+): MergeDividendYearsResult {
+  const dividendByYear = new Map(
+    dividendYears.map((entry) => [entry.fiscalYear, entry.annualAmountSen]),
+  );
+  let overwrittenCount = 0;
+
+  const mergedRows = existingRows.map((existing) => {
+    const amountSen = dividendByYear.get(fiscalYearOf(existing));
+    if (amountSen === undefined) return existing;
+
+    const value = senToEditableText(amountSen);
+    // 判定不能（空文字）は手入力を消さない（`mergeRowsWithImport` と同じ方針）
+    if (value === '') return existing;
+    if (existing.dividendYen !== '' && existing.dividendYen !== value) overwrittenCount += 1;
+    return { ...existing, dividendYen: value };
+  });
+
+  const existingYears = new Set(existingRows.map(fiscalYearOf));
+  const addedRows = [...dividendByYear]
+    .filter(([fiscalYear]) => !existingYears.has(fiscalYear))
+    .map(([fiscalYear, amountSen]) => ({
+      ...emptyRow(fiscalYear),
+      dividendYen: senToEditableText(amountSen),
+    }));
+
+  return {
+    rows: [...mergedRows, ...addedRows].sort(byForecastThenYearDesc),
+    overwrittenCount,
+  };
+}
+
+/**
+ * 株式分割・併合イベントの表示文言。**参考情報であり自動反映されない**
+ * （同設計書 §5.3）。`splitRatio` の文字列はパースせず、数値の比較だけで向きを決める
+ * （`market-data-source.md` §3.5。文字列は分割・併合で向きが逆になり取り違える）。
+ */
+export function splitEventText(split: MarketDataSplitView): string {
+  const ratio = split.numerator / split.denominator;
+  const kind = ratio > 1 ? '分割' : ratio < 1 ? '併合' : '変化なし';
+  return `${split.date}: ${String(split.numerator)}株 / ${String(split.denominator)}株（${kind}）`;
+}
+
+/**
+ * 市場データ取り込みの診断1件の文言。**捨てない・件数に潰さない**
+ * （`.claude/rules/backend.md`・同設計書 §5.5）。`rowlessWarningText` と同じ体裁で
+ * 表の外に列挙する。`ImportDiagnostic['reason']` は `CellWarning['reason']` と同じ型なので
+ * 既存の `warningReasonText` をそのまま再利用する。
+ */
+export function marketDiagnosticText(diagnostic: MarketDataDiagnostic): string {
+  return `⚠ ${diagnostic.block}（${diagnostic.fiscalYearKey}・${diagnostic.column}）: ${warningReasonText(diagnostic.reason)}（元の値: ${diagnostic.raw}）`;
+}
+
+/**
+ * 取り込んだ株価を株価欄へ反映するかどうかの判定。**空欄のときだけ埋める。手入力は
+ * 破壊しない**（`docs/02_design/ui/pages/market-data-import.md` §5.1）。
+ *
+ * 呼び出し側（`handleMarketDataImport`）は `await` 完了後に `priceYenRef.current`
+ * （state の最新値。同期的に読めることが保証される ref）を `currentPriceYen` として渡す
+ * （fe-review-round2.md 指摘#1: 関数型 `setState` のコールバック内代入を直後に読む
+ * パターンは信頼できないため、ref 経由の読み出しに変更した）。
+ * React の state を知らない純粋関数にしてある（`fillBlankMultiples` と同じ方針）。
+ */
+export function resolveImportedPriceYen(
+  currentPriceYen: string,
+  importedPriceSen: number | null,
+): string {
+  if (importedPriceSen === null || currentPriceYen !== '') return currentPriceYen;
+  return senToEditableText(importedPriceSen);
+}
+
 export interface FillBlankMultiplesResult {
   readonly per: string;
   /** `per` を新しく埋めたときだけ非 `null`。既存値を触らなかった場合は `null` */
@@ -349,10 +460,37 @@ export function CompanyForm({
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [priceYen, setPriceYen] = useState('');
+  /**
+   * `priceYen` の最新値を同期的に読むための ref（`await` を挟むハンドラ用）。
+   * `setState` の関数型アップデータの中で外側の変数へ副作用として代入し直後に読む
+   * パターンは、React が呼び出し直後の同期読み出しを保証しないため信頼できない
+   * （fe-review-round2.md 指摘#1）。commit のたびに `useEffect` で同期させ、
+   * `handleImport`/`handleMarketDataImport` は `await` 完了後にこの ref を読んでから
+   * 非関数型で `setPriceYen(resolvedValue)` する。
+   */
+  const priceYenRef = useRef(priceYen);
+  useEffect(() => {
+    priceYenRef.current = priceYen;
+  }, [priceYen]);
   const [per, setPer] = useState('');
   const [perSource, setPerSource] = useState<PerSource | null>(null);
   const [pbr, setPbr] = useState('');
   const [pbrSource, setPbrSource] = useState<PbrSource | null>(null);
+  /**
+   * `per`/`pbr` の最新値を同期的に読むための ref。`priceYenRef` と同じ理由
+   * （fe-review-round3.md 指摘#2）。以前は `setPer`/`setPbr` の関数型アップデータの
+   * 中で `current`（最新値）を読みつつ `setPerSource`/`setPbrSource` を副作用として
+   * 呼んでおり、React のアップデータ純粋性契約に反していた。ref で最新値を読めば、
+   * `fillMultiplesIfEmpty` はアップデータを使わずに判定を完結できる。
+   */
+  const perRef = useRef(per);
+  useEffect(() => {
+    perRef.current = per;
+  }, [per]);
+  const pbrRef = useRef(pbr);
+  useEffect(() => {
+    pbrRef.current = pbr;
+  }, [pbr]);
   const [currentAssetsYen, setCurrentAssetsYen] = useState('');
   const [investmentSecuritiesYen, setInvestmentSecuritiesYen] = useState('');
   const [totalLiabilitiesYen, setTotalLiabilitiesYen] = useState('');
@@ -361,6 +499,11 @@ export function CompanyForm({
     emptyRow(THIS_YEAR + 1, true),
     ...Array.from({ length: DEFAULT_ROWS }, (_, index) => emptyRow(THIS_YEAR - index)),
   ]);
+  /** `rows` の最新値を同期的に読むための ref。`priceYenRef` と同じ理由（同上コメント参照） */
+  const rowsRef = useRef(rows);
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
   const [error, setError] = useState<string | null>(null);
   /**
    * 確認待ちか（同設計書 §5.6）。**フラグだけを持ち、ペイロードは持たない。**
@@ -377,34 +520,68 @@ export function CompanyForm({
   const [importedForecastEpsSen, setImportedForecastEpsSen] = useState<number | null>(null);
   const [importedEpsSen, setImportedEpsSen] = useState<number | null>(null);
   const [importedBpsSen, setImportedBpsSen] = useState<number | null>(null);
+  /**
+   * `importedForecastEpsSen`/`importedEpsSen`/`importedBpsSen` の最新値を同期的に
+   * 読むための ref。`priceYenRef`/`rowsRef` と同じ理由（fe-review-round3.md 指摘#1）。
+   * `handleImport` がこの3値を更新した直後に `handleMarketDataImport` の `await` が
+   * 完了すると、`handleMarketDataImport` の closure は起動時点の古い値のまま
+   * `fillMultiplesIfEmpty` を呼んでしまう。commit のたびに `useEffect` で同期させ、
+   * `await` 完了後はこの ref から読む。
+   */
+  const importedMultiplesRef = useRef({
+    forecastEpsSen: importedForecastEpsSen,
+    epsSen: importedEpsSen,
+    bpsSen: importedBpsSen,
+  });
+  useEffect(() => {
+    importedMultiplesRef.current = {
+      forecastEpsSen: importedForecastEpsSen,
+      epsSen: importedEpsSen,
+      bpsSen: importedBpsSen,
+    };
+  }, [importedForecastEpsSen, importedEpsSen, importedBpsSen]);
+  /**
+   * IRバンク取り込みが返した決算月。Yahoo 取り込みへそのまま渡す
+   * （`docs/02_design/ui/pages/market-data-import.md` §3）。未実施なら `null`
+   * （配当の年度集計をせず株価・分割イベントだけ入る）。
+   */
+  const [fiscalYearEndMonth, setFiscalYearEndMonth] = useState<number | null>(null);
 
-  /** 判定は `fillBlankMultiples`（純粋関数）に置き、ここは state への反映だけ */
+  /** IRバンクとは別系統の state（`.claude/rules/frontend.md`。片方の失敗が他方を巻き込まない） */
+  const [marketImporting, setMarketImporting] = useState(false);
+  const [marketImportError, setMarketImportError] = useState<string | null>(null);
+  const [marketImportNotice, setMarketImportNotice] = useState<string | null>(null);
+  const [marketSplits, setMarketSplits] = useState<readonly MarketDataSplitView[]>([]);
+  const [marketDiagnostics, setMarketDiagnostics] = useState<readonly MarketDataDiagnostic[]>([]);
+
+  /**
+   * 判定は `fillBlankMultiples`（純粋関数）に置き、ここは state への反映だけ。
+   *
+   * 以前は `setPer`/`setPbr` の関数型アップデータの中で `setPerSource`/`setPbrSource`
+   * を副作用として呼んでいたが、React はアップデータ関数を純粋関数として扱うことを
+   * 要求しており契約違反だった（fe-review-round3.md 指摘#2。StrictMode 開発ビルドでは
+   * アップデータが2回呼ばれ、副作用も2回走る）。`per`/`pbr` は `perRef`/`pbrRef`
+   * （`priceYenRef` と同じ理由で `await` を挟むハンドラでも最新値を読める ref）から
+   * 読み、判定をアップデータの外で一度だけ完結させてから非関数型で確定する。
+   */
   const fillMultiplesIfEmpty = (
     priceRaw: string,
     forecastEpsSen: number | null,
     epsSen: number | null,
     bpsSen: number | null,
   ) => {
-    const filled = (currentPer: string, currentPbr: string) =>
-      fillBlankMultiples({
-        priceYen: priceRaw,
-        per: currentPer,
-        pbr: currentPbr,
-        latestForecastEpsSen: forecastEpsSen,
-        latestActualEpsSen: epsSen,
-        latestActualBpsSen: bpsSen,
-      });
-    // 各欄は自分の**最新**の値だけを見る（取り込み中に手入力された値を消さない）
-    setPer((current) => {
-      const result = filled(current, pbr);
-      if (result.perSource !== null) setPerSource(result.perSource);
-      return result.per;
+    const result = fillBlankMultiples({
+      priceYen: priceRaw,
+      per: perRef.current,
+      pbr: pbrRef.current,
+      latestForecastEpsSen: forecastEpsSen,
+      latestActualEpsSen: epsSen,
+      latestActualBpsSen: bpsSen,
     });
-    setPbr((current) => {
-      const result = filled(per, current);
-      if (result.pbrSource !== null) setPbrSource(result.pbrSource);
-      return result.pbr;
-    });
+    setPer(result.per);
+    if (result.perSource !== null) setPerSource(result.perSource);
+    setPbr(result.pbr);
+    if (result.pbrSource !== null) setPbrSource(result.pbrSource);
   };
 
   const handleImport = async () => {
@@ -428,13 +605,19 @@ export function CompanyForm({
     try {
       const result = await api.importFromIrBank(normalizedCode);
       setCode(normalizedCode);
-      const merged = mergeRowsWithImport(rows, result.records, result.dividends);
+      // `rows` は待機開始時点の closure 値なので、`await` 完了時点の最新値
+      // （`rowsRef.current`）を基準にマージしてから非関数型で確定する
+      // （fe-review-round2.md 指摘#1。取り込み待機中の手入力を破壊しない）
+      const merged = mergeRowsWithImport(rowsRef.current, result.records, result.dividends);
       setRows(merged.rows);
       setImportedForecastEpsSen(result.latestForecastEpsSen);
       setImportedEpsSen(result.latestActualEpsSen);
       setImportedBpsSen(result.latestActualBpsSen);
+      // Yahoo 取り込みの配当年度集計に使う（同設計書 §3）
+      setFiscalYearEndMonth(result.fiscalYearEndMonth);
+      // `priceYen` も同じ理由で ref から読む（fe-review-round2.md 指摘#2）
       fillMultiplesIfEmpty(
-        priceYen,
+        priceYenRef.current,
         result.latestForecastEpsSen,
         result.latestActualEpsSen,
         result.latestActualBpsSen,
@@ -451,6 +634,82 @@ export function CompanyForm({
       setImportError(cause instanceof Error ? cause.message : '取り込みに失敗しました');
     } finally {
       setImporting(false);
+    }
+  };
+
+  /**
+   * Yahoo Finance から株価・配当・分割イベントを取り込む。**保存はしない**
+   * （`docs/02_design/ui/pages/market-data-import.md`）。
+   *
+   * IRバンクとは独立した state を使う。片方の取り込み失敗がもう片方の表示を
+   * 巻き込まない（同設計書 §2）。
+   */
+  const handleMarketDataImport = async () => {
+    setMarketImportError(null);
+    setMarketImportNotice(null);
+    setMarketDiagnostics([]);
+    setMarketSplits([]);
+
+    const normalizedCode = toHalfWidth(code).toUpperCase();
+    if (!/^\d{3}[0-9A-Z]$/.test(normalizedCode)) {
+      setMarketImportError(
+        '銘柄コードは4文字（先頭3桁は数字、末尾1桁は数字か英大文字）で入力してください',
+      );
+      return;
+    }
+
+    setMarketImporting(true);
+    try {
+      const result = await api.importMarketData(normalizedCode, fiscalYearEndMonth);
+      setCode(normalizedCode);
+
+      // 株価は空欄のときだけ埋める。手入力を破壊しない（同設計書 §5.1）。
+      // `priceYen` はボタン押下時点のクロージャ値なので、`await` 完了時点の最新値
+      // （`priceYenRef.current`。同期的に読めることが保証される）を基準に判定してから
+      // 非関数型で確定する（fe-review-round2.md 指摘#1）
+      const resolvedPriceYen = resolveImportedPriceYen(priceYenRef.current, result.priceSen);
+      setPriceYen(resolvedPriceYen);
+      // 予想EPS/実績EPS/実績BPS も同じ理由で ref から読む。IRバンク取り込みと
+      // ほぼ同時に実行されると、この closure は起動時点の古い値のままになりうる
+      // （fe-review-round3.md 指摘#1）
+      fillMultiplesIfEmpty(
+        resolvedPriceYen,
+        importedMultiplesRef.current.forecastEpsSen,
+        importedMultiplesRef.current.epsSen,
+        importedMultiplesRef.current.bpsSen,
+      );
+
+      // 銘柄名は空欄のときだけ英語名で埋める（同設計書 §5.4）。ここは書き込むだけで
+      // 解決後の値を後続処理が読まないため、関数型更新のままで安全
+      // （fe-review-round2.md 指摘#1が問題にしたのは「読み戻し」であり、書き込み専用の
+      // 関数型更新自体は問題ない）
+      setName((current) => (result.name !== null && current.trim() === '' ? result.name : current));
+
+      // `rows` も同じ理由で ref から読んでから非関数型で確定する（同指摘#1）
+      const mergedDividends = mergeDividendYears(rowsRef.current, result.dividendRecords);
+      setRows(mergedDividends.rows);
+      setMarketSplits(result.splits);
+      // 取得診断・集計診断は捨てない（`.claude/rules/backend.md`）
+      setMarketDiagnostics([...result.diagnostics, ...result.dividendDiagnostics]);
+
+      const notices: string[] = [];
+      notices.push(
+        result.priceSen === null
+          ? '株価は取得できませんでした'
+          : `株価の観測時刻: ${formatPriceAsOf(result.priceAsOf)}`,
+      );
+      if (!result.dividendAggregated) {
+        notices.push(
+          '決算月が未取得のため、配当の年度集計は行われませんでした（先にIRバンクから取り込んでください）',
+        );
+      } else if (mergedDividends.overwrittenCount > 0) {
+        notices.push(`${String(mergedDividends.overwrittenCount)}件の入力値を取り込み値で置き換えました`);
+      }
+      setMarketImportNotice(notices.join(' / '));
+    } catch (cause) {
+      setMarketImportError(cause instanceof Error ? cause.message : '取り込みに失敗しました');
+    } finally {
+      setMarketImporting(false);
     }
   };
 
@@ -619,6 +878,13 @@ export function CompanyForm({
         <button type="button" onClick={() => void handleImport()} disabled={importing}>
           {importing ? '取り込み中…' : 'IRバンクから取り込む'}
         </button>
+        <button
+          type="button"
+          onClick={() => void handleMarketDataImport()}
+          disabled={marketImporting}
+        >
+          {marketImporting ? '取り込み中…' : 'Yahoo Financeから株価・配当を取り込む'}
+        </button>
         <p className="meta">
           銘柄コードから業績・配当を取り込み、年度別データへ反映します（取り込みに値が無い
           欄の手入力は残ります。株価・PER・PBR・貸借対照表は対象外。株価を先に入力しておくと PER/PBR
@@ -630,6 +896,39 @@ export function CompanyForm({
           </p>
         )}
         {importNotice !== null && <p className="meta">{importNotice}</p>}
+        <p className="meta">
+          Yahoo Financeから株価・配当履歴（21〜28年ぶん）・株式分割イベントを取り込みます
+          （EPS・売上高等は取れません。銘柄名は英語表記です）。配当の年度集計には決算月が
+          必要なため、先にIRバンクから取り込んでおくことを推奨します。
+        </p>
+        {marketImportError !== null && (
+          <p className="error" role="alert">
+            {marketImportError}
+          </p>
+        )}
+        {marketImportNotice !== null && <p className="meta">{marketImportNotice}</p>}
+        {marketSplits.length > 0 && (
+          <div className="meta">
+            <p>
+              株式分割・併合イベント（参考情報です。配当・株価は取り込み時点で分割調整済みです。
+              表の既存の入力値だけは自動更新されません）:
+            </p>
+            <ul>
+              {marketSplits.map((split, order) => (
+                <li key={`${split.date}-${String(order)}`}>{splitEventText(split)}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {marketDiagnostics.length > 0 && (
+          <ul className="warning">
+            {marketDiagnostics.map((diagnostic, order) => (
+              <li key={`${diagnostic.fiscalYearKey}-${diagnostic.column}-${String(order)}`}>
+                {marketDiagnosticText(diagnostic)}
+              </li>
+            ))}
+          </ul>
+        )}
         <label>
           銘柄名
           <input value={name} onChange={(event) => setName(event.target.value)} required />

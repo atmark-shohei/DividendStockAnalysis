@@ -69,6 +69,21 @@ export function formatFetchedAt(isoUtc: string): string {
   return `${date.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}（JST）`;
 }
 
+/**
+ * 株価の観測時刻（`priceAsOf`）を JST 表示にする。**保存は UTC、表示だけ JST**
+ * （`CLAUDE.md`）。
+ *
+ * `formatFetchedAt` とは別関数にしてある。`priceAsOf` は保存時刻ではなく
+ * Yahoo が返した観測時刻そのもので、`null`（取れなかった）を受けたときの文言も違う
+ * （`docs/02_design/logic/market-data-source.md` §7.4）。
+ */
+export function formatPriceAsOf(isoUtc: string | null): string {
+  if (isoUtc === null) return '取得時刻不明';
+  const date = new Date(isoUtc);
+  if (Number.isNaN(date.getTime())) return '取得時刻不明';
+  return `${date.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}（JST）`;
+}
+
 /** 採用した配当の出所。画面に必ず併記する（⑩ 設計書 §3.1） */
 export function dividendSourceText(source: 'forecast' | 'actual' | null): string {
   if (source === 'forecast') return '予想';

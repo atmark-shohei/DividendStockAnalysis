@@ -598,6 +598,66 @@ describe('§5.3 前年比が ±80% を超えたら診断に記録する（除外
   });
 });
 
+// --- 決算月の導出（§7.1.1。市場データ取り込み(Yahoo)向けの決算月の持ち回り） -------
+
+describe('§3.2 決算月の導出（deriveFiscalYearEndMonth）', () => {
+  it('年度キーが 2022/03〜2026/03 のみ → fiscalYearEndMonth: 3', () => {
+    const result = parseDocument({
+      dividend: {
+        '2022/03': dividendRow(10),
+        '2023/03': dividendRow(10),
+        '2024/03': dividendRow(10),
+        '2025/03': dividendRow(10),
+        '2026/03': dividendRow(10),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.fiscalYearEndMonth).toBe(3);
+  });
+
+  it('年度キーが 2022/12〜2026/12 のみ → fiscalYearEndMonth: 12', () => {
+    const result = parseDocument({
+      dividend: {
+        '2022/12': dividendRow(10),
+        '2023/12': dividendRow(10),
+        '2024/12': dividendRow(10),
+        '2025/12': dividendRow(10),
+        '2026/12': dividendRow(10),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.fiscalYearEndMonth).toBe(12);
+  });
+
+  it('2025/03 と 2026/12 が混在 → null（決算期変更）。推測しない。診断を1件出す', () => {
+    const result = parseDocument({
+      dividend: { '2025/03': dividendRow(10) },
+      performance: { '2026/12': performanceRow({ eps: 100 }) },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.fiscalYearEndMonth).toBeNull();
+    expect(result.value.diagnostics).toContainEqual({
+      block: '決算期',
+      fiscalYearKey: expect.any(String) as unknown as string,
+      column: '決算月',
+      reason: 'unknown-note',
+      raw: '3/12',
+    });
+  });
+
+  it('既存の年度パース（2026/03 → 2026年度）の挙動は変わらない（回帰）', () => {
+    const result = parseDocument({ dividend: { '2026/03': dividendRow(100) } });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.records[0]?.fiscalYear).toBe(2026);
+    expect(result.value.fiscalYearEndMonth).toBe(3);
+  });
+
+  it.each(CODES)('%s の実物4銘柄は決算月が一意に定まる', (code) => {
+    // 直近5期ぶんの年度キーが単一の決算月であることの実データ確認
+    expect(parsed(code).fiscalYearEndMonth).not.toBeNull();
+  });
+});
+
 // --- エラー（§5.1） --------------------------------------------------------
 
 describe('§5.1 取り込みが成立しない場合', () => {

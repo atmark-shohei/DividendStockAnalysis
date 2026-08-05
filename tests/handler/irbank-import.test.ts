@@ -7,6 +7,7 @@ import {
   type FinancialSourceError,
   type ImportedFinancials,
 } from '@/domain/company/financial-source';
+import { type MarketDataSource } from '@/domain/company/market-data-source';
 import { type Result, err, ok } from '@/domain/shared/result';
 import { createApp } from '@/handler/app';
 
@@ -44,10 +45,20 @@ function stubSource(
   };
 }
 
+/** このテストファイルは Yahoo 取り込みを対象にしないので、呼ばれたら落とす */
+function unusedMarketDataSource(): MarketDataSource {
+  return {
+    fetchByCode: (): never => {
+      throw new Error('このテストで MarketDataSource が呼ばれるのは想定外');
+    },
+  };
+}
+
 function app(financialSource: FinancialSource) {
   return createApp({
     repository: unusedRepository(),
     financialSource,
+    marketDataSource: unusedMarketDataSource(),
     now: () => new Date('2026-07-28T00:00:00.000Z'),
   });
 }
@@ -68,6 +79,7 @@ const SAMPLE: ImportedFinancials = {
   latestForecastEpsSen: null,
   latestActualEpsSen: 18_359,
   latestActualBpsSen: 133_350,
+  fiscalYearEndMonth: 3,
   diagnostics: [],
 };
 
@@ -86,6 +98,20 @@ describe('GET /api/irbank/:code', () => {
     expect(body.records).toHaveLength(1);
     expect(body.latestForecastEpsSen).toBeNull();
     expect(body.latestActualEpsSen).toBe(18_359);
+  });
+
+  it('決算月を返す（Yahoo 取り込みのクエリに使う。市場データ取り込み設計書 §3.2）', async () => {
+    const response = await app(stubSource(ok(SAMPLE))).request('/api/irbank/9433');
+    const body = (await response.json()) as { fiscalYearEndMonth: number | null };
+    expect(body.fiscalYearEndMonth).toBe(3);
+  });
+
+  it('年度キーの月が定まらない銘柄は決算月を null で返す', async () => {
+    const response = await app(
+      stubSource(ok({ ...SAMPLE, fiscalYearEndMonth: null })),
+    ).request('/api/irbank/9433');
+    const body = (await response.json()) as { fiscalYearEndMonth: number | null };
+    expect(body.fiscalYearEndMonth).toBeNull();
   });
 
   it('1株配当は records ではなく dividends で返す（ADR-0009）', async () => {

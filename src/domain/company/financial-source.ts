@@ -20,7 +20,15 @@ import { type DividendRecord } from './dividend-record';
 export interface ImportDiagnostic {
   /** 取り込み元の区画名。IRバンクなら `業績` / `財務` / `配当` */
   readonly block: string;
-  /** 元のキー（`2026/03`）。決算年度に潰す前の値で報告する */
+  /**
+   * 元のキー。**取り込み元によって意味が異なる**（統一していない。共有インターフェースの
+   * 破壊的変更を避けるため。`docs/02_design/logic/market-data-source.md` §8-7）。
+   * - IRバンク（`irbank/`）: 決算年度に潰す前の原文キー（例: `'2026/03'`）
+   * - Yahoo・決算年度集計後（`dividend-fiscal-year.ts`）: 集計後の決算年度そのもの
+   *   （例: `'2001'`）
+   * - Yahoo・パース診断（`infra/yahoo/parse-chart.ts`。集計前）: 権利落ち日
+   *   （`YYYY-MM-DD`）が読めていればそれ、読めなければ `'unknown'`
+   */
   readonly fiscalYearKey: string;
   readonly column: string;
   readonly reason:
@@ -66,6 +74,15 @@ export interface ImportedFinancials {
   readonly latestActualEpsSen: number | null;
   /** ⑨ PBR 用。最新**実績**年度の 1株純資産（銭） */
   readonly latestActualBpsSen: number | null;
+  /**
+   * 決算月（1〜12）。業績・配当・財務の各ブロックに現れた年度キーの月が
+   * ちょうど1つに定まるときだけ非 `null`（`docs/02_design/logic/market-data-source.md` §3.2）。
+   * 0個（年度キーが無い）または2個以上（決算期変更の疑い）なら `null`。
+   *
+   * Yahoo の市場データ取り込み（`toFiscalYearDividends`）が決算年度への集計に使う。
+   * Yahoo 自体は決算月を返さないため、この値をここ経由で受け渡す。
+   */
+  readonly fiscalYearEndMonth: number | null;
   readonly diagnostics: readonly ImportDiagnostic[];
 }
 

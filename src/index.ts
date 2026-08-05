@@ -8,6 +8,7 @@
 import { createApp } from './handler/app';
 import { D1CompanyRepository } from './infra/d1/company-repository';
 import { IrBankFinancialSource } from './infra/irbank/fy-data-client';
+import { YahooChartMarketDataSource } from './infra/yahoo/chart-client';
 
 /**
  * バインディングの型は `wrangler types` が `worker-configuration.d.ts` に生成する。
@@ -27,6 +28,7 @@ export default {
     const app = createApp({
       repository: new D1CompanyRepository(env.DB),
       financialSource: new IrBankFinancialSource(),
+      marketDataSource: new YahooChartMarketDataSource(),
       now: () => new Date(),
     });
 

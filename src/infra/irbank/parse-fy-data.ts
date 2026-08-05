@@ -343,6 +343,54 @@ function normalizeBlock(
   return rows;
 }
 
+/**
+ * 決算月の診断用の区画名・列名。
+ *
+ * 🔴 推測: 設計書（`docs/02_design/logic/market-data-source.md` §3.2）は
+ * 「reason: 'unknown-note' 相当の診断を残す」とだけ決めており、`block`/`column` に
+ * 何を入れるかは明記していない。業績・配当・財務のどれか1つに紐づく話ではない
+ * （複数ブロックの年度キーをまたいで比較した結果）ため、既存の3ブロック名
+ * （`業績`/`配当`/`財務`）を流用せず、決算期専用の区画名を新設した。
+ */
+const BLOCK_FISCAL_YEAR_END_MONTH = '決算期';
+const COLUMN_FISCAL_YEAR_END_MONTH = '決算月';
+
+/**
+ * 決算月を「業績・配当・財務の各ブロックに現れた年度キーの月」から導出する
+ * （`docs/02_design/logic/market-data-source.md` §3.2）。
+ *
+ * ちょうど1つの月に定まれば決算月。0個（年度キーが無い）または2個以上
+ * （決算期変更の疑い）なら `null` にして推測しない。2個以上のときは決算期変更の
+ * 可能性を示す診断を1件残す（穴のある集計を黙って通さない）。
+ */
+function deriveFiscalYearEndMonth(reader: Reader, blocks: readonly Block[]): number | null {
+  const months = new Set<number>();
+  const keys: string[] = [];
+  for (const block of blocks) {
+    for (const row of block.values()) {
+      const matched = FISCAL_YEAR_KEY.exec(row.fiscalYearKey);
+      if (matched === null) continue;
+      months.add(Number(matched[2]));
+      keys.push(row.fiscalYearKey);
+    }
+  }
+
+  if (months.size === 1) return [...months][0] ?? null;
+  if (months.size >= 2) {
+    record(reader, {
+      block: BLOCK_FISCAL_YEAR_END_MONTH,
+      fiscalYearKey: keys.join(', '),
+      column: COLUMN_FISCAL_YEAR_END_MONTH,
+      reason: 'unknown-note',
+      raw: [...months]
+        .sort((a, b) => a - b)
+        .map(String)
+        .join('/'),
+    });
+  }
+  return null;
+}
+
 function metaCodeOf(raw: Record<string, unknown>): string | null {
   for (const blockName of [BLOCK_PERFORMANCE, BLOCK_DIVIDEND, BLOCK_BALANCE]) {
     const block = raw[blockName];
@@ -502,6 +550,11 @@ export function parseFyData(
     }
   }
 
+  const fiscalYearEndMonth = deriveFiscalYearEndMonth(
+    reader,
+    balance === null ? [performance, dividend] : [performance, dividend, balance],
+  );
+
   return ok({
     code: actualCode,
     records,
@@ -509,6 +562,7 @@ export function parseFyData(
     latestForecastEpsSen: latestForecastRecord?.epsSen ?? null,
     latestActualEpsSen: latestActualRecord?.epsSen ?? null,
     latestActualBpsSen,
+    fiscalYearEndMonth,
     diagnostics: reader.diagnostics,
   });
 }

@@ -38,6 +38,15 @@ export interface IrBankImportResponse {
   readonly latestActualBpsSen: number | null;
   /** 年度別データの「1株配当」欄はここから埋める。`records` は保有しない（ADR-0009） */
   readonly dividends: readonly IrBankDividendView[];
+  /**
+   * 決算月（1〜12）。年度キーの月がちょうど1つに定まるときだけ非 `null`
+   * （`docs/02_design/logic/market-data-source.md` §3.2）。
+   *
+   * FE がそのまま `GET /api/market-data/:code?fiscalYearEndMonth=` へ渡す想定
+   * （`src/handler/app.ts` の結線コメント参照）。**この DTO からの露出漏れがあったため
+   * 2026-08-03 追加**（`ImportedFinancials.fiscalYearEndMonth` 自体は既存）。
+   */
+  readonly fiscalYearEndMonth: number | null;
   /** 読み取れなかった値。**捨てない**（`.claude/rules/backend.md`） */
   readonly diagnostics: readonly ImportDiagnostic[];
   /**
@@ -65,6 +74,7 @@ export function toIrBankImportResponse(imported: ImportedFinancials): IrBankImpo
       fiscalYear: entry.fiscalYear,
       annualAmountSen: entry.annualAmountSen,
     })),
+    fiscalYearEndMonth: imported.fiscalYearEndMonth,
     diagnostics: imported.diagnostics,
     cellWarnings: resolveCellWarnings(imported.diagnostics),
   };

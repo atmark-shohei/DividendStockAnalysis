@@ -25,6 +25,22 @@
 | 貸借対照表   | `BalanceSheetSnapshot` | 値オブジェクト | ⑥ が使う流動資産・投資有価証券・負債総額・前期末配当総額                               |
 | 市場指標     | `MarketMultiples`      | 値オブジェクト | ⑨ が使う PER（会社予想）と PBR（実績）                                                 |
 
+## 市場データ（Yahoo Finance）
+
+> 仕様の正: `docs/02_design/logic/market-data-source.md`。IRバンク（`FinancialSource`）とは
+> 別の外部データ源ポート。決算月（`fiscalYearEndMonth`）は IRバンク経由で受け渡す。
+
+| 日本語                 | 英語（コード名）        | 種別             | 定義                                                                                                                                             |
+| ---------------------- | ----------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 市場データ             | `MarketData`             | 値オブジェクト   | Yahoo から取り込んだ株価・配当履歴（権利落ちベース）・株式分割の1銘柄分。決算年度への集計はしない          |
+| 市場データ源           | `MarketDataSource`       | ポート           | Yahoo から `MarketData` を取り込む。定義は domain、実装は `src/infra/yahoo/`                                                                       |
+| 市場データエラー       | `MarketDataError`        | 値オブジェクト   | 取り込みが成立しなかった理由の判別ユニオン（`kind` で判別）                                                                                        |
+| 配当支払い             | `DividendPayment`        | 値オブジェクト   | 権利落ちベースの1回分の配当。**`amountYenText` は未検証の文字列表現**（`JSON.parse` の丸め誤差を避けるため数値化しない）。`DividendRecord.annualAmountSen`（検証済み・銭単位の年度合計）とは別物。混同しないこと |
+| 分割イベント           | `SplitEvent`             | 値オブジェクト   | 株式分割・併合。`numerator`/`denominator` をそのまま保持する。**参考表示のみ**。スコアリング・自動反映には使わない（§8-17）                       |
+| 決算年度への集計       | `toFiscalYearDividends`  | ドメインサービス | `DividendPayment[]` を決算月（`fiscalYearEndMonth`）ごとの `DividendRecord[]` へ集計する純粋関数。円→銭の変換もここで行う                          |
+| 決算月                 | `fiscalYearEndMonth`     | 値オブジェクト   | 決算月（1〜12）。`ImportedFinancials` のフィールド。IRバンクの年度キーから導出し、Yahoo 側の集計に受け渡す。単一に定まらなければ `null`             |
+| 株価の観測時刻         | `priceAsOf`              | 値オブジェクト   | 株価が観測された時刻。**保存されるのは `fetchedAt`（取得時刻）のみで、`priceAsOf` 自体は保存されない一時的な参考情報**。画面表示のみに使い、`FinancialRecord` 等へ永続化しない |
+
 ## スコアリング
 
 | 日本語         | 英語（コード名）       | 種別             | 定義                                                                                                                                        |

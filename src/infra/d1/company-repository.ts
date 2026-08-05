@@ -25,6 +25,48 @@ import {
   transformedMetrics,
 } from './schema';
 
+/**
+ * D1 が **1文** に許すバインド変数（`?`）の上限。
+ *
+ * 超えると `D1_ERROR: too many SQL variables: SQLITE_ERROR` になる。
+ * 実測（2026-08-05, dev サーバーへ合成データを POST）:
+ * - `dividend_records`（4列）: 25件 = 100 param → 201 / **26件 = 104 param → 500**
+ * - `financial_records`（7列）: 14件 = 98 param → 201 / **15件 = 105 param → 500**
+ *
+ * batch 全体ではなく1文あたりの制限なので、行を分割して複数文にすれば回避できる。
+ */
+export const D1_MAX_BOUND_PARAMETERS = 100;
+
+/**
+ * 1文にまとめてよい行数を列数から導く。
+ *
+ * `25` のようなマジックナンバーを書かない。列が増えたときに黙って上限を超えて
+ * 落ちるのを防ぐため、必ずここで割り算して求める。
+ */
+export function maxRowsPerInsert(columnCount: number): number {
+  // 1行だけで上限を超える列数でも 0 を返さない（0 だと永遠に挿入できない）
+  return Math.max(1, Math.floor(D1_MAX_BOUND_PARAMETERS / columnCount));
+}
+
+/**
+ * 一括 INSERT の行を、1文あたりのバインド変数が D1 の上限を超えないように分割する。
+ *
+ * Drizzle は `values()` の各プロパティを1個のバインド変数にするので、
+ * 1行あたりの変数の個数はプロパティ数と一致する。
+ * 分割しても `db.batch()` は1トランザクションなので原子性は保たれる。
+ */
+function chunkRowsForInsert<T extends Record<string, unknown>>(rows: readonly T[]): T[][] {
+  const first = rows[0];
+  if (first === undefined) return [];
+
+  const rowsPerStatement = maxRowsPerInsert(Object.keys(first).length);
+  const chunks: T[][] = [];
+  for (let index = 0; index < rows.length; index += rowsPerStatement) {
+    chunks.push(rows.slice(index, index + rowsPerStatement));
+  }
+  return chunks;
+}
+
 const DIVIDEND_KINDS: readonly DividendRecordKind[] = ['forecast', 'revised', 'actual'];
 
 /** DB の文字列を配当区分に戻す。未知の値は取り込みの不具合なので `null` を返して捨てる */
@@ -98,47 +140,40 @@ export class D1CompanyRepository implements CompanyRepository {
       this.db.delete(transformedMetrics).where(eq(transformedMetrics.companyCode, company.code)),
     ];
 
-    if (company.records.length > 0) {
-      statements.push(
-        this.db.insert(financialRecords).values(
-          company.records.map((record) => ({
-            companyCode: company.code,
-            fiscalYear: record.fiscalYear,
-            isForecast: record.isForecast ? 1 : 0,
-            epsSen: record.epsSen,
-            roePercent: record.roePercent,
-            revenueSen: record.revenueSen,
-            operatingMarginPercent: record.operatingMarginPercent,
-          })),
-        ),
-      );
+    // 明細は行数が増えると1文のバインド変数が D1 の上限を超える。
+    // 列数から求めた行数で分割して複数文にする（`D1_MAX_BOUND_PARAMETERS`）
+    const financialRows = company.records.map((record) => ({
+      companyCode: company.code,
+      fiscalYear: record.fiscalYear,
+      isForecast: record.isForecast ? 1 : 0,
+      epsSen: record.epsSen,
+      roePercent: record.roePercent,
+      revenueSen: record.revenueSen,
+      operatingMarginPercent: record.operatingMarginPercent,
+    }));
+    for (const rows of chunkRowsForInsert(financialRows)) {
+      statements.push(this.db.insert(financialRecords).values(rows));
     }
 
-    if (company.dividends.length > 0) {
-      statements.push(
-        this.db.insert(dividendRecords).values(
-          company.dividends.map((record) => ({
-            companyCode: company.code,
-            fiscalYear: record.fiscalYear,
-            kind: record.kind,
-            annualAmountSen: record.annualAmountSen,
-          })),
-        ),
-      );
+    const dividendRows = company.dividends.map((record) => ({
+      companyCode: company.code,
+      fiscalYear: record.fiscalYear,
+      kind: record.kind,
+      annualAmountSen: record.annualAmountSen,
+    }));
+    for (const rows of chunkRowsForInsert(dividendRows)) {
+      statements.push(this.db.insert(dividendRecords).values(rows));
     }
 
-    if (scoring.metrics.length > 0) {
-      statements.push(
-        this.db.insert(transformedMetrics).values(
-          scoring.metrics.map((metric) => ({
-            companyCode: company.code,
-            metricKey: metric.metricKey,
-            score: metric.score,
-            value: metric.value,
-            unavailableReason: metric.unavailableReason,
-          })),
-        ),
-      );
+    const metricRows = scoring.metrics.map((metric) => ({
+      companyCode: company.code,
+      metricKey: metric.metricKey,
+      score: metric.score,
+      value: metric.value,
+      unavailableReason: metric.unavailableReason,
+    }));
+    for (const rows of chunkRowsForInsert(metricRows)) {
+      statements.push(this.db.insert(transformedMetrics).values(rows));
     }
 
     statements.push(

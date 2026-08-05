@@ -7,9 +7,10 @@
 
 import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/company-input';
 import type { IrBankImportResponse } from '@/handler/dto/irbank-import';
+import type { MarketDataImportResponse } from '@/handler/dto/market-data-import';
 import type { CompanySummary } from '@/domain/company/company-repository';
 
-export type { AnalyzeCompanyRequest, ScoringResponse, IrBankImportResponse };
+export type { AnalyzeCompanyRequest, ScoringResponse, IrBankImportResponse, MarketDataImportResponse };
 
 /** 失敗しうる外部呼び出しは必ず結果を検査する（`.claude/rules/coding-style.md`） */
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
@@ -49,6 +50,27 @@ export function getCompany(code: string): Promise<ScoringResponse> {
 /** IRバンクから財務データを取り込む。**保存はしない**（結果はフォームの初期値にするだけ） */
 export function importFromIrBank(code: string): Promise<IrBankImportResponse> {
   return request<IrBankImportResponse>(`/api/irbank/${encodeURIComponent(code)}`);
+}
+
+/**
+ * Yahoo Finance から株価・配当履歴・株式分割イベントを取り込む。**保存はしない**
+ * （`docs/02_design/ui/pages/market-data-import.md`）。
+ *
+ * @param fiscalYearEndMonth IRバンク取り込みが返した決算月
+ *   （`IrBankImportResponse.fiscalYearEndMonth`）。`null`／未指定なら配当の年度集計を
+ *   行わず、株価・分割イベントだけが返る（`dividendAggregated: false`）
+ */
+export function importMarketData(
+  code: string,
+  fiscalYearEndMonth?: number | null,
+): Promise<MarketDataImportResponse> {
+  const query =
+    fiscalYearEndMonth === null || fiscalYearEndMonth === undefined
+      ? ''
+      : `?fiscalYearEndMonth=${String(fiscalYearEndMonth)}`;
+  return request<MarketDataImportResponse>(
+    `/api/market-data/${encodeURIComponent(code)}${query}`,
+  );
 }
 
 export async function deleteCompany(code: string): Promise<void> {
