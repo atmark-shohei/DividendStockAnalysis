@@ -81,6 +81,15 @@ GET https://f.irbank.net/files/{code}/fy-data-all.json
 `balanceSheet`（⑥ が使う流動資産・投資有価証券・負債総額・前期末配当総額）に
 対応する列は**この JSON に無い**。§6 参照。
 
+> 🔴 **2026-08-05 訂正。上の記述は4項目のうち2項目について誤り。**
+> 実フィクスチャで確認したところ、**配当ブロックに「剰余金の配当」列があり、
+> これが配当総額（円）である**（9433 の 2026/03 = 301,547,000,000）。
+> **負債総額も財務ブロックの「総資産 − 純資産」から算出できる。**
+> 列が無いのは**流動資産と投資有価証券の2項目だけ**である。
+> 導出規則・例外処理・受入基準は
+> [balance-sheet-derivation.md](./balance-sheet-derivation.md) に起こした（🔴 未実装）。
+> 上の「使う列」の表と §6.3 の「残る手入力」は、その実装が入った時点で更新する。
+
 > ✅ **2026-07-31 訂正。** 以前は `records[].dividendPerShareSen` にも
 > 同じ値を積んでいたが削除した（[ADR-0009](../../adr/0009-dividend-single-source.md)）。
 > **1株配当は `dividends[]` にのみ載る。** ①②③はいずれも `dividends` を読む。
@@ -588,10 +597,17 @@ interface ImportDiagnostic {
 
 - ✅ §8-9（派生値の計算場所の統一リファクタ）は同日中に別途完了（下記「実装（2026-07-29）」）
 - §8-1（⑥ の金額表現）は未着手のまま。§8-5（利用規約）は2026-07-29 決着（上記）
-- `summarizeDiagnostics` の `DISCARDED_REASONS`（`Set` によるメンバーシップ判定）は、
+- ~~`summarizeDiagnostics` の `DISCARDED_REASONS`（`Set` によるメンバーシップ判定）は、
   将来 `ImportDiagnostic.reason` に新しい種別を追加してもコンパイルエラーに
   ならない（code-reviewer 指摘、優先度低）。`switch` 文による網羅性チェックへの
-  置き換えは任意の改善として未実施
+  置き換えは任意の改善として未実施~~
+  → ✅ **2026-08-05 時点で解消済み。** `DISCARDED_REASONS` はコードから消えており
+  （`src` / `frontend` を検索して0件）、`src/domain/company/import-review.ts:82` の
+  `keepsValue()` と `frontend/components/CompanyForm.tsx:99` の `warningReasonText()` の
+  **`default` 節の無い網羅 `switch`** に置き換わっている。`reason` に種別を足すと
+  TS2366 でビルドが落ちる。[import-review.md §3.2](./import-review.md) の
+  「列挙の網羅を型で守る」は実装済みということ。
+  （[balance-sheet-derivation.md §9.0](./balance-sheet-derivation.md) の調査で判明）
 
 ## 実装（2026-07-29）— PER の予想EPS優先化・出所の追跡（1e/1f/1g）
 
