@@ -80,6 +80,9 @@ const SAMPLE: ImportedFinancials = {
   latestActualEpsSen: 18_359,
   latestActualBpsSen: 133_350,
   fiscalYearEndMonth: 3,
+  // ⑥ の入力（docs/02_design/logic/balance-sheet-derivation.md §2.3）
+  totalLiabilities: { valueSen: 1_347_067_400_000_000, fiscalYear: 2026 },
+  previousDividendTotal: { valueSen: 30_154_700_000_000, fiscalYear: 2026 },
   diagnostics: [],
 };
 
@@ -107,9 +110,9 @@ describe('GET /api/irbank/:code', () => {
   });
 
   it('年度キーの月が定まらない銘柄は決算月を null で返す', async () => {
-    const response = await app(
-      stubSource(ok({ ...SAMPLE, fiscalYearEndMonth: null })),
-    ).request('/api/irbank/9433');
+    const response = await app(stubSource(ok({ ...SAMPLE, fiscalYearEndMonth: null }))).request(
+      '/api/irbank/9433',
+    );
     const body = (await response.json()) as { fiscalYearEndMonth: number | null };
     expect(body.fiscalYearEndMonth).toBeNull();
   });
@@ -124,6 +127,82 @@ describe('GET /api/irbank/:code', () => {
     expect(body.dividends).toEqual([{ fiscalYear: 2026, annualAmountSen: 8_000 }]);
     // 二重管理に戻っていないことを機械的に確かめる
     expect(body.records[0]).not.toHaveProperty('dividendPerShareSen');
+  });
+
+  it('⑥ 用の負債総額・前期末配当総額を決算年度つきで返す（balance-sheet-derivation.md §2.3）', async () => {
+    const response = await app(stubSource(ok(SAMPLE))).request('/api/irbank/9433');
+
+    const body = (await response.json()) as {
+      totalLiabilities: { valueSen: number; fiscalYear: number } | null;
+      previousDividendTotal: { valueSen: number; fiscalYear: number } | null;
+    };
+    expect(body.totalLiabilities).toEqual({ valueSen: 1_347_067_400_000_000, fiscalYear: 2026 });
+    expect(body.previousDividendTotal).toEqual({ valueSen: 30_154_700_000_000, fiscalYear: 2026 });
+  });
+
+  it('算出できなかった欄は null で返す。0 に丸めない（無借金・無配と区別する）', async () => {
+    const response = await app(
+      stubSource(ok({ ...SAMPLE, totalLiabilities: null, previousDividendTotal: null })),
+    ).request('/api/irbank/9433');
+
+    const body = (await response.json()) as {
+      totalLiabilities: unknown;
+      previousDividendTotal: unknown;
+    };
+    expect(body.totalLiabilities).toBeNull();
+    expect(body.previousDividendTotal).toBeNull();
+  });
+
+  it('無借金（0 銭）・無配（0 銭）は 0 のまま返す。null にしない', async () => {
+    const response = await app(
+      stubSource(
+        ok({
+          ...SAMPLE,
+          totalLiabilities: { valueSen: 0, fiscalYear: 2026 },
+          previousDividendTotal: { valueSen: 0, fiscalYear: 2026 },
+        }),
+      ),
+    ).request('/api/irbank/9433');
+
+    const body = (await response.json()) as {
+      totalLiabilities: { valueSen: number } | null;
+      previousDividendTotal: { valueSen: number } | null;
+    };
+    expect(body.totalLiabilities?.valueSen).toBe(0);
+    expect(body.previousDividendTotal?.valueSen).toBe(0);
+  });
+
+  it('inconsistent-value の診断も画面のセル解決つきでそのまま返す', async () => {
+    const response = await app(
+      stubSource(
+        ok({
+          ...SAMPLE,
+          diagnostics: [
+            {
+              block: '財務',
+              fiscalYearKey: '2026/03',
+              column: '総資産',
+              reason: 'inconsistent-value',
+              raw: '1000 - 1001',
+            },
+          ],
+        }),
+      ),
+    ).request('/api/irbank/9433');
+
+    const body = (await response.json()) as { cellWarnings: { valueKept: boolean }[] };
+    // 財務ブロックは画面のセルに対応しないので行外の警告になる（import-review.md §5.3）
+    expect(body.cellWarnings).toEqual([
+      {
+        fiscalYear: 2026,
+        fiscalYearKey: '2026/03',
+        field: null,
+        column: '総資産',
+        reason: 'inconsistent-value',
+        valueKept: false,
+        raw: '1000 - 1001',
+      },
+    ]);
   });
 
   it('要求した銘柄コードをそのまま FinancialSource へ渡す', async () => {

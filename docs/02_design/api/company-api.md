@@ -1,6 +1,7 @@
 # 銘柄・スコアリング API 仕様
 
-> ステータス: 🟢 実装済み（2026-07-28。IRバンク・Yahoo取り込みの契約記載は2026-08-04追加）
+> ステータス: 🟢 実装済み（2026-07-28。IRバンク・Yahoo取り込みの契約記載は2026-08-04追加。
+> ③ 実績配当性向・`useActualForScoring` の契約記載は2026-08-06追加）
 > 実装: `src/handler/app.ts` / DTO: `src/handler/dto/company-input.ts`, `src/handler/dto/price-input.ts`,
 > `src/handler/dto/irbank-import.ts`, `src/handler/dto/market-data-import.ts`
 
@@ -132,6 +133,8 @@ IRバンクから財務データを取り込む。**保存はしない。**
   "latestActualBpsSen": 133350,
   "dividends": [{ "fiscalYear": 2025, "annualAmountSen": 14500 }],
   "fiscalYearEndMonth": 3,
+  "totalLiabilities": { "valueSen": 6450226300000000, "fiscalYear": 2026 },
+  "previousDividendTotal": { "valueSen": 30154700000000, "fiscalYear": 2026 },
   "diagnostics": [
     {
       "block": "業績",
@@ -161,6 +164,12 @@ IRバンクから財務データを取り込む。**保存はしない。**
 > 決算年度キーの月がちょうど1つに定まらない場合（0個または決算期変更の疑いで2個以上）は `null`。
 > `diagnostics` は捨てずに残す生の取得診断、`cellWarnings` は取り込んだ時点で
 > handler 側が画面のセルに解決したもの（`docs/02_design/logic/import-review.md` §3.2）。
+>
+> ✅ **2026-08-06 追加。** `totalLiabilities` / `previousDividendTotal` は
+> ⑥（配当維持可能年数）用の負債総額・前期末の配当総額（`ImportedAmount | null`）。
+> `valueSen` は銭、`fiscalYear` はその値を採った決算年度。算出・取得できなければ
+> `null`（**`0`（無借金・無配）と `null`（判定不能）は別物**）。導出規則は
+> [balance-sheet-derivation.md](../logic/balance-sheet-derivation.md) が正。
 
 エラー:
 
@@ -259,21 +268,23 @@ Yahoo Finance から株価・配当履歴・株式分割イベントを取り込
     "previousDividendTotalSen": null
   },
   "multiples": { "per": 14.2, "pbr": 2.1 },
-  "priceSen": 425000
+  "priceSen": 425000,
+  "useActualForScoring": false
 }
 ```
 
 主なバリデーション（zod。`company-input.ts`）:
 
-| 項目             | 制約                                                            |
-| ---------------- | --------------------------------------------------------------- |
-| `code`           | 4文字固定。先頭3桁は数字、末尾1桁は数字か英大文字（例: `130A`） |
-| `name`           | 1〜100文字                                                      |
-| `records`        | 最大60件                                                        |
-| `dividends`      | 最大60件                                                        |
-| 金額系フィールド | 整数のみ（安全整数）。小数は弾く                                |
-| 比率系フィールド | 有限の実数（`NaN`/`Infinity` は弾く）                           |
-| `priceSen`       | `0` 〜 `MAX_PRICE_SEN`（1株1,000,000円相当）                    |
+| 項目                  | 制約                                                                              |
+| --------------------- | --------------------------------------------------------------------------------- |
+| `code`                | 4文字固定。先頭3桁は数字、末尾1桁は数字か英大文字（例: `130A`）                   |
+| `name`                | 1〜100文字                                                                        |
+| `records`             | 最大60件                                                                          |
+| `dividends`           | 最大60件                                                                          |
+| 金額系フィールド      | 整数のみ（安全整数）。小数は弾く                                                  |
+| 比率系フィールド      | 有限の実数（`NaN`/`Infinity` は弾く）                                             |
+| `priceSen`            | `0` 〜 `MAX_PRICE_SEN`（1株1,000,000円相当）                                      |
+| `useActualForScoring` | 任意の `boolean`。省略時は既定 `false`（③ を予想優先で採点する。設計書 §5.1・§7） |
 
 `records`/`dividends` は受信後に年度**降順**へ並べ替えてからドメインへ渡す
 （並べ替えは handler の責務。ドメインは「降順で来る」ことを前提にしてよい）。
@@ -287,6 +298,9 @@ Yahoo Finance から株価・配当履歴・株式分割イベントを取り込
   "effectiveMetricCount": 10,
   "totalMetricCount": 10,
   "dividendSource": "forecast",
+  "payoutRatioSource": "forecast",
+  "payoutRatioForecast": { "score": 8, "value": 32.1, "unavailableReason": null },
+  "payoutRatioActual": { "score": 6, "value": 41.5, "unavailableReason": null },
   "fetchedAt": "2026-07-28T00:00:00.000Z",
   "metrics": [
     {
@@ -305,16 +319,33 @@ Yahoo Finance から株価・配当履歴・株式分割イベントを取り込
 > **判定不能な指標は `score`/`value` が `null` になり、`unavailableReason` に理由コードが入る。**
 > `0` を返すことはない（`.claude/rules/frontend.md`「データが無い場合に0を表示しない」）。
 
+> ✅ **2026-08-06 追加。** `payoutRatioSource` は③ 予想配当性向が採点に採用した出所
+> （`'forecast' | 'actual' | null`。⑩ `dividendSource` と同じ発想）。
+> `payoutRatioForecast` / `payoutRatioActual` は③ の予想側・実績側それぞれの判定結果
+> （`PayoutRatioSideView`。`score` / `value` / `unavailableReason`）で、**採点への採用と
+> 無関係に常に両方返す**（画面が両方を表示し、採用元を併記するため。設計書 §7・
+> [payout-ratio-scoring.md](../logic/payout-ratio-scoring.md) §2）。`metrics[]` 中の
+> ③（`payoutRatio`）は採点に**採用した**側の値のみが入る。
+
 400: zod 検証失敗。
 
 ## GET /api/companies/:code
 
-保存済み銘柄を**生データから再採点**して返す（`ScoringResponse`。形は POST と同じ）。
+保存済み銘柄を**生データから再採点**して返す（`ScoringResponse`。形は POST と同じ。
+`payoutRatioSource`/`payoutRatioForecast`/`payoutRatioActual` も同様に含む）。
 
 保存済みの `score_cards`/`transformed_metrics` をそのまま返さないのは、ロジックを直したあとに
 古い整形データを見せると画面と実装が食い違うため（`usecase/read-companies.ts`）。
 
+クエリパラメータ:
+
+| 項目                  | 制約                                                                                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `useActualForScoring` | 任意。`"true"` \| `"false"`（文字列）。未指定なら既定 `false`（③ を予想優先で採点する）。`true` なら③ の採点に実績を強制採用する（設計書 §5.1・§7） |
+
 - 400: 銘柄コードの形式不正
+- 400: `useActualForScoring` が `"true"`/`"false"` のいずれでもない
+  （文言:「useActualForScoring は true か false で指定する」。`src/handler/app.ts`）
 - 404: 該当コードなし
 
 ## DELETE /api/companies/:code

@@ -63,8 +63,21 @@ const BALANCE_COLUMNS = [
   '自己資本比率',
 ];
 
-function balanceRow(bps: unknown): unknown[] {
-  return ['-', '-', '-', '-', '-', '-', bps, '-'];
+function balanceRow(values: {
+  totalAssets?: unknown;
+  netAssets?: unknown;
+  bps?: unknown;
+}): unknown[] {
+  return [
+    values.totalAssets ?? '-',
+    values.netAssets ?? '-',
+    '-',
+    '-',
+    '-',
+    '-',
+    values.bps ?? '-',
+    '-',
+  ];
 }
 
 function performanceRow(values: {
@@ -84,8 +97,8 @@ function performanceRow(values: {
   ];
 }
 
-function dividendRow(perShare: unknown): unknown[] {
-  return [perShare, '-', '-', '-', '-', '-'];
+function dividendRow(values: { perShare?: unknown; total?: unknown }): unknown[] {
+  return [values.perShare ?? '-', values.total ?? '-', '-', '-', '-', '-'];
 }
 
 function document(options: {
@@ -201,8 +214,26 @@ describe('8306 三菱UFJ — 営業利益が全年 "-"（金融業）', () => {
     expect(recordOf(imported, 2026).roePercent).toBe(10.9);
   });
 
-  it('総資産（銭にすると安全整数を超える）は読まないので診断も出ない', () => {
-    expect(imported.diagnostics.filter((entry) => entry.reason === 'unsafe-integer')).toEqual([]);
+  /**
+   * ⑥ の負債総額を読むようになったので、総資産を読まなかった時代の
+   * 「診断も出ない」は成り立たなくなった（balance-sheet-derivation.md §3.2）。
+   * 円で引いても銭化で MAX_SAFE_INTEGER を超えるため、**実績5年すべてで桁あふれる**。
+   */
+  it('総資産（銭にすると安全整数を超える）は財務ブロックの unsafe-integer として残る', () => {
+    const overflows = imported.diagnostics.filter((entry) => entry.reason === 'unsafe-integer');
+    expect(overflows.length).toBeGreaterThan(0);
+    for (const entry of overflows) {
+      expect(entry.block).toBe('財務');
+      expect(entry.column).toBe('総資産');
+    }
+  });
+
+  it('業績・配当の金額列では桁あふれが起きない（EPS・一株配当は銭に収まる）', () => {
+    expect(
+      imported.diagnostics.filter(
+        (entry) => entry.reason === 'unsafe-integer' && entry.block !== '財務',
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -253,8 +284,8 @@ describe('§3.1 同じ列で number / 数値文字列 / "-" が混在する', ()
   it('数値文字列と number が同じ銭になる', () => {
     const result = parseDocument({
       dividend: {
-        '2025/03': dividendRow('67.5'),
-        '2026/03': dividendRow(67.5),
+        '2025/03': dividendRow({ perShare: '67.5' }),
+        '2026/03': dividendRow({ perShare: 67.5 }),
       },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
@@ -264,8 +295,8 @@ describe('§3.1 同じ列で number / 数値文字列 / "-" が混在する', ()
   it('"-" は null。**無配 0 円とは別物**', () => {
     const result = parseDocument({
       dividend: {
-        '2025/03': dividendRow('-'),
-        '2026/03': dividendRow(0),
+        '2025/03': dividendRow({ perShare: '-' }),
+        '2026/03': dividendRow({ perShare: 0 }),
       },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
@@ -273,7 +304,7 @@ describe('§3.1 同じ列で number / 数値文字列 / "-" が混在する', ()
   });
 
   it('読めない文字列は null にして診断に残す（捨てない）', () => {
-    const result = parseDocument({ dividend: { '2026/03': dividendRow('N/A') } });
+    const result = parseDocument({ dividend: { '2026/03': dividendRow({ perShare: 'N/A' }) } });
     if (!result.ok) throw new Error('取り込みに失敗した');
     expect(result.value.dividends[0]?.annualAmountSen).toBeNull();
     expect(result.value.diagnostics).toContainEqual({
@@ -290,7 +321,7 @@ describe('§3.1 同じ列で number / 数値文字列 / "-" が混在する', ()
 
 describe('§3.4 銭への変換', () => {
   it('小数第3位以下は四捨五入し、丸めたことを記録する', () => {
-    const result = parseDocument({ dividend: { '2026/03': dividendRow('1.005') } });
+    const result = parseDocument({ dividend: { '2026/03': dividendRow({ perShare: '1.005' }) } });
     if (!result.ok) throw new Error('取り込みに失敗した');
     expect(result.value.dividends[0]?.annualAmountSen).toBe(101);
     expect(result.value.diagnostics.map((entry) => entry.reason)).toContain('rounded');
@@ -326,7 +357,7 @@ describe('§3.4 銭への変換', () => {
 
 describe('§3.2 年度キー', () => {
   it('2026/03 → 2026 年度', () => {
-    const result = parseDocument({ dividend: { '2026/03': dividendRow(100) } });
+    const result = parseDocument({ dividend: { '2026/03': dividendRow({ perShare: 100 }) } });
     if (!result.ok) throw new Error('取り込みに失敗した');
     expect(result.value.records[0]?.fiscalYear).toBe(2026);
   });
@@ -334,9 +365,9 @@ describe('§3.2 年度キー', () => {
   it('同じ年度が2行あったら**両方**落として記録する（後勝ちにしない）', () => {
     const result = parseDocument({
       dividend: {
-        '2026/03': dividendRow(100),
-        '2026/12': dividendRow(200),
-        '2025/03': dividendRow(50),
+        '2026/03': dividendRow({ perShare: 100 }),
+        '2026/12': dividendRow({ perShare: 200 }),
+        '2025/03': dividendRow({ perShare: 50 }),
       },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
@@ -346,7 +377,7 @@ describe('§3.2 年度キー', () => {
 
   it('年度キーの形式が違う行は落として記録する', () => {
     const result = parseDocument({
-      dividend: { 通期: dividendRow(100), '2026/03': dividendRow(80) },
+      dividend: { 通期: dividendRow({ perShare: 100 }), '2026/03': dividendRow({ perShare: 80 }) },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
     expect(result.value.records.map((entry) => entry.fiscalYear)).toEqual([2026]);
@@ -365,7 +396,7 @@ describe('§3.3 予想の判別', () => {
   });
 
   it('配列の行は実績', () => {
-    const result = parseDocument({ dividend: { '2026/03': dividendRow(80) } });
+    const result = parseDocument({ dividend: { '2026/03': dividendRow({ perShare: 80 }) } });
     if (!result.ok) throw new Error('取り込みに失敗した');
     expect(result.value.dividends[0]?.kind).toBe('actual');
   });
@@ -374,7 +405,7 @@ describe('§3.3 予想の判別', () => {
     const result = parseDocument({
       dividend: {
         '2026/03': { 0: 80, 備考: '変則決算' },
-        '2025/03': dividendRow(70),
+        '2025/03': dividendRow({ perShare: 70 }),
       },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
@@ -406,7 +437,7 @@ describe('§3.2 ブロックをまたぐときは添字ではなく年度で突�
         '2025/03': performanceRow({ eps: 100 }),
         '2026/03': performanceRow({ eps: 200 }),
       },
-      balance: { '2023/03': balanceRow(1000), '2024/03': balanceRow(2000) },
+      balance: { '2023/03': balanceRow({ bps: 1000 }), '2024/03': balanceRow({ bps: 2000 }) },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
     expect(result.value.latestActualEpsSen).toBe(20000); // 2026
@@ -423,7 +454,7 @@ describe('§3.2 ブロックをまたぐときは添字ではなく年度で突�
   it('配当だけにある年度も records に入る（和集合を取る）', () => {
     const result = parseDocument({
       performance: { '2026/03': performanceRow({ eps: 100 }) },
-      dividend: { '2027/03': dividendRow(50) },
+      dividend: { '2027/03': dividendRow({ perShare: 50 }) },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
     expect(result.value.records.map((entry) => entry.fiscalYear)).toEqual([2026, 2027]);
@@ -463,7 +494,12 @@ describe('§5.3 前年比が ±80% を超えたら診断に記録する（除外
 
   it('一株配当が +81% なら記録する', () => {
     expect(
-      jumpsOf({ dividend: { '2025/03': dividendRow(100), '2026/03': dividendRow(181) } }),
+      jumpsOf({
+        dividend: {
+          '2025/03': dividendRow({ perShare: 100 }),
+          '2026/03': dividendRow({ perShare: 181 }),
+        },
+      }),
     ).toEqual([
       {
         block: '配当',
@@ -477,7 +513,12 @@ describe('§5.3 前年比が ±80% を超えたら診断に記録する（除外
 
   it('一株配当が -81% なら記録する', () => {
     expect(
-      jumpsOf({ dividend: { '2025/03': dividendRow(100), '2026/03': dividendRow(19) } }),
+      jumpsOf({
+        dividend: {
+          '2025/03': dividendRow({ perShare: 100 }),
+          '2026/03': dividendRow({ perShare: 19 }),
+        },
+      }),
     ).toHaveLength(1);
   });
 
@@ -502,34 +543,62 @@ describe('§5.3 前年比が ±80% を超えたら診断に記録する（除外
 
   it('ちょうど ±80% は「超えた」に当たらないので記録しない', () => {
     expect(
-      jumpsOf({ dividend: { '2025/03': dividendRow(100), '2026/03': dividendRow(180) } }),
+      jumpsOf({
+        dividend: {
+          '2025/03': dividendRow({ perShare: 100 }),
+          '2026/03': dividendRow({ perShare: 180 }),
+        },
+      }),
     ).toEqual([]);
     expect(
-      jumpsOf({ dividend: { '2025/03': dividendRow(100), '2026/03': dividendRow(20) } }),
+      jumpsOf({
+        dividend: {
+          '2025/03': dividendRow({ perShare: 100 }),
+          '2026/03': dividendRow({ perShare: 20 }),
+        },
+      }),
     ).toEqual([]);
   });
 
   it('境界をわずかに超えたら記録する', () => {
     expect(
-      jumpsOf({ dividend: { '2025/03': dividendRow(1000), '2026/03': dividendRow(1800.01) } }),
+      jumpsOf({
+        dividend: {
+          '2025/03': dividendRow({ perShare: 1000 }),
+          '2026/03': dividendRow({ perShare: 1800.01 }),
+        },
+      }),
     ).toHaveLength(1);
   });
 
   it('前年が "-"（データなし）なら比較できないので記録しない', () => {
     expect(
-      jumpsOf({ dividend: { '2025/03': dividendRow('-'), '2026/03': dividendRow(200) } }),
+      jumpsOf({
+        dividend: {
+          '2025/03': dividendRow({ perShare: '-' }),
+          '2026/03': dividendRow({ perShare: 200 }),
+        },
+      }),
     ).toEqual([]);
   });
 
   it('前年が 0（無配）ならゼロ除算になるので記録しない', () => {
     expect(
-      jumpsOf({ dividend: { '2025/03': dividendRow(0), '2026/03': dividendRow(200) } }),
+      jumpsOf({
+        dividend: {
+          '2025/03': dividendRow({ perShare: 0 }),
+          '2026/03': dividendRow({ perShare: 200 }),
+        },
+      }),
     ).toEqual([]);
   });
 
   it('記録しても値は採用したまま。null にしない', () => {
     const result = parseDocument({
-      dividend: { '2025/03': dividendRow(100), '2026/03': dividendRow(181) },
+      dividend: {
+        '2025/03': dividendRow({ perShare: 100 }),
+        '2026/03': dividendRow({ perShare: 181 }),
+      },
       performance: {
         '2025/03': performanceRow({ eps: 100 }),
         '2026/03': performanceRow({ eps: 181 }),
@@ -604,11 +673,11 @@ describe('§3.2 決算月の導出（deriveFiscalYearEndMonth）', () => {
   it('年度キーが 2022/03〜2026/03 のみ → fiscalYearEndMonth: 3', () => {
     const result = parseDocument({
       dividend: {
-        '2022/03': dividendRow(10),
-        '2023/03': dividendRow(10),
-        '2024/03': dividendRow(10),
-        '2025/03': dividendRow(10),
-        '2026/03': dividendRow(10),
+        '2022/03': dividendRow({ perShare: 10 }),
+        '2023/03': dividendRow({ perShare: 10 }),
+        '2024/03': dividendRow({ perShare: 10 }),
+        '2025/03': dividendRow({ perShare: 10 }),
+        '2026/03': dividendRow({ perShare: 10 }),
       },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
@@ -618,11 +687,11 @@ describe('§3.2 決算月の導出（deriveFiscalYearEndMonth）', () => {
   it('年度キーが 2022/12〜2026/12 のみ → fiscalYearEndMonth: 12', () => {
     const result = parseDocument({
       dividend: {
-        '2022/12': dividendRow(10),
-        '2023/12': dividendRow(10),
-        '2024/12': dividendRow(10),
-        '2025/12': dividendRow(10),
-        '2026/12': dividendRow(10),
+        '2022/12': dividendRow({ perShare: 10 }),
+        '2023/12': dividendRow({ perShare: 10 }),
+        '2024/12': dividendRow({ perShare: 10 }),
+        '2025/12': dividendRow({ perShare: 10 }),
+        '2026/12': dividendRow({ perShare: 10 }),
       },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
@@ -631,7 +700,7 @@ describe('§3.2 決算月の導出（deriveFiscalYearEndMonth）', () => {
 
   it('2025/03 と 2026/12 が混在 → null（決算期変更）。推測しない。診断を1件出す', () => {
     const result = parseDocument({
-      dividend: { '2025/03': dividendRow(10) },
+      dividend: { '2025/03': dividendRow({ perShare: 10 }) },
       performance: { '2026/12': performanceRow({ eps: 100 }) },
     });
     if (!result.ok) throw new Error('取り込みに失敗した');
@@ -646,7 +715,7 @@ describe('§3.2 決算月の導出（deriveFiscalYearEndMonth）', () => {
   });
 
   it('既存の年度パース（2026/03 → 2026年度）の挙動は変わらない（回帰）', () => {
-    const result = parseDocument({ dividend: { '2026/03': dividendRow(100) } });
+    const result = parseDocument({ dividend: { '2026/03': dividendRow({ perShare: 100 }) } });
     if (!result.ok) throw new Error('取り込みに失敗した');
     expect(result.value.records[0]?.fiscalYear).toBe(2026);
     expect(result.value.fiscalYearEndMonth).toBe(3);
@@ -655,6 +724,473 @@ describe('§3.2 決算月の導出（deriveFiscalYearEndMonth）', () => {
   it.each(CODES)('%s の実物4銘柄は決算月が一意に定まる', (code) => {
     // 直近5期ぶんの年度キーが単一の決算月であることの実データ確認
     expect(parsed(code).fiscalYearEndMonth).not.toBeNull();
+  });
+});
+
+// --- ⑥ の入力（負債総額・前期末の配当総額） --------------------------------
+// 仕様: docs/02_design/logic/balance-sheet-derivation.md §2.2 / §2.3 / §5 / §6
+
+/** 財務ブロックの1年ぶん。両列を明示して「片方だけ読める」ケースを作れるようにする */
+function balanceYear(totalAssets: unknown, netAssets: unknown): unknown[] {
+  return balanceRow({ totalAssets, netAssets, bps: 100 });
+}
+
+describe('§2.3 負債総額の対象年度の選択（財務ブロック）', () => {
+  it('最新実績年度で両方読めればその年度を採る', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: {
+        '2025/03': balanceYear(2_000, 1_000),
+        '2026/03': balanceYear(1_000, 400),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 60_000, fiscalYear: 2026 });
+  });
+
+  it('最新実績年度が両方 "-" なら1つ前の年度を採る', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: {
+        '2025/03': balanceYear(2_000, 1_000),
+        '2026/03': balanceYear('-', '-'),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 100_000, fiscalYear: 2025 });
+    // 正常な欠損なので診断は出さない
+    expect(result.value.diagnostics.filter((entry) => entry.block === '財務')).toEqual([]);
+  });
+
+  it('総資産だけ読めても年度を確定させない（1つ前を採る）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: {
+        '2025/03': balanceYear(2_000, 1_000),
+        '2026/03': balanceYear(5_000, '-'),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 100_000, fiscalYear: 2025 });
+  });
+
+  it('純資産だけ読めても年度を確定させない（2列のどちらが欠けても同じ）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: {
+        '2025/03': balanceYear(2_000, 1_000),
+        '2026/03': balanceYear('-', 900),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 100_000, fiscalYear: 2025 });
+  });
+
+  it('最新年度が桁あふれでも1つ前を採り、unsafe-integer の診断が残る', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: {
+        '2025/03': balanceYear(2_000, 1_000),
+        // 431.7兆 − 23.7兆 = 408.0兆円 → 4.08e16 銭（MAX_SAFE_INTEGER 超え）
+        '2026/03': balanceYear(431_731_548_000_000, 23_744_152_000_000),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    // 診断が出た＝値が無い、ではない（§2.3）
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 100_000, fiscalYear: 2025 });
+    expect(result.value.diagnostics.filter((entry) => entry.block === '財務')).toEqual([
+      {
+        block: '財務',
+        fiscalYearKey: '2026/03',
+        column: '総資産',
+        reason: 'unsafe-integer',
+        raw: '431731548000000 - 23744152000000',
+      },
+    ]);
+  });
+
+  it('総資産 < 純資産の年度は飛ばし、inconsistent-value の診断が残る', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: {
+        '2025/03': balanceYear(2_000, 1_000),
+        '2026/03': balanceYear(1_000, 1_001),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 100_000, fiscalYear: 2025 });
+    expect(result.value.diagnostics.filter((entry) => entry.block === '財務')).toEqual([
+      {
+        block: '財務',
+        fiscalYearKey: '2026/03',
+        column: '総資産',
+        reason: 'inconsistent-value',
+        // どちらの列が誤りか機械的に決められないので、両方を残す（§2.2.1）
+        raw: '1000 - 1001',
+      },
+    ]);
+  });
+
+  it('円の生値が整数でない年度は unparsable-value を残して飛ばす', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: {
+        '2025/03': balanceYear(2_000, 1_000),
+        '2026/03': balanceYear('1000.5', 400),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 100_000, fiscalYear: 2025 });
+    expect(result.value.diagnostics.filter((entry) => entry.block === '財務')).toEqual([
+      {
+        block: '財務',
+        fiscalYearKey: '2026/03',
+        column: '総資産',
+        reason: 'unparsable-value',
+        raw: '1000.5 - 400',
+      },
+    ]);
+  });
+
+  it('数値として読めない文字列は診断をちょうど1件出して飛ばす（二重に出さない）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: { '2026/03': balanceYear('N/A', 400) },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toBeNull();
+    expect(result.value.diagnostics.filter((entry) => entry.block === '財務')).toEqual([
+      {
+        block: '財務',
+        fiscalYearKey: '2026/03',
+        column: '総資産',
+        reason: 'unparsable-value',
+        raw: 'N/A',
+      },
+    ]);
+  });
+
+  it('純資産だけが読めない文字列でも診断は1件。列は純資産に付く（総資産へ寄せない）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: { '2026/03': balanceYear(1_000, 'N/A') },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toBeNull();
+    // `yenAt` が壊れた**列そのもの**を記録する経路。2列から1つの値を作る
+    // `readTotalLiabilities` の診断（列を総資産へ寄せる経路）とは別物なので、
+    // ここで column が '総資産' になったら列の取り違えである
+    expect(result.value.diagnostics.filter((entry) => entry.block === '財務')).toEqual([
+      {
+        block: '財務',
+        fiscalYearKey: '2026/03',
+        column: '純資産',
+        reason: 'unparsable-value',
+        raw: 'N/A',
+      },
+    ]);
+  });
+
+  it('純資産が整数でない年度も unparsable-value を残して飛ばす（raw は「総資産 - 純資産」の並び）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: {
+        '2025/03': balanceYear(2_000, 1_000),
+        '2026/03': balanceYear(2_000, '1000.5'),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 100_000, fiscalYear: 2025 });
+    // 非整数は「読めた値」なので `yenAt` は診断を出さず、`deriveTotalLiabilities` の
+    // not-integer 経由で1件だけ出る。この経路は列を総資産に固定し、raw に両方を並べる
+    expect(result.value.diagnostics.filter((entry) => entry.block === '財務')).toEqual([
+      {
+        block: '財務',
+        fiscalYearKey: '2026/03',
+        column: '総資産',
+        reason: 'unparsable-value',
+        raw: '2000 - 1000.5',
+      },
+    ]);
+  });
+
+  it('総資産・純資産の両方が読めない文字列なら、列ごとに1件ずつ計2件出る', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: { '2026/03': balanceYear('N/A', '???') },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toBeNull();
+    // 壊れた列の数だけ出る（「ちょうど1件」ではない）。どちらの列を直せばよいか
+    // 原典と突き合わせる人が判断できるよう、列ごとに残す
+    expect(result.value.diagnostics.filter((entry) => entry.block === '財務')).toEqual([
+      {
+        block: '財務',
+        fiscalYearKey: '2026/03',
+        column: '総資産',
+        reason: 'unparsable-value',
+        raw: 'N/A',
+      },
+      {
+        block: '財務',
+        fiscalYearKey: '2026/03',
+        column: '純資産',
+        reason: 'unparsable-value',
+        raw: '???',
+      },
+    ]);
+  });
+
+  it('input-missing の年度しか無ければ totalLiabilities は null（年度だけの組を作らない）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: { '2026/03': balanceYear('-', '-') },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toBeNull();
+    expect(result.value.diagnostics.filter((entry) => entry.block === '財務')).toEqual([]);
+  });
+
+  it('財務が予想行だけなら totalLiabilities は null', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: {
+        '2027/03': {
+          0: 1_000,
+          1: 400,
+          2: '-',
+          3: '-',
+          4: '-',
+          5: '-',
+          6: 100,
+          7: '-',
+          備考: '予想',
+        },
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toBeNull();
+  });
+
+  it('予想行の総資産・純資産は採らない（実績行だけを走査する）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: {
+        '2026/03': balanceYear(2_000, 1_000),
+        '2027/03': { 0: 9_999, 1: 0, 2: '-', 3: '-', 4: '-', 5: '-', 6: 100, 7: '-', 備考: '予想' },
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 100_000, fiscalYear: 2026 });
+  });
+
+  it('財務ブロックが丸ごと無くても取り込みは成立し、totalLiabilities だけ null になる（§10-2）', () => {
+    const result = parseDocument({ performance: { '2026/03': performanceRow({ eps: 100 }) } });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toBeNull();
+    expect(result.value.latestActualEpsSen).toBe(10_000);
+  });
+
+  it('無借金（総資産 = 純資産）は 0 銭。null に丸めない（§5.4）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: { '2026/03': balanceYear(1_000, 1_000) },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 0, fiscalYear: 2026 });
+  });
+
+  it('債務超過（純資産が負）でも算出して年度を載せる（§5.2）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: { '2026/03': balanceYear(1_000, -500) },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 150_000, fiscalYear: 2026 });
+    expect(result.value.diagnostics.filter((entry) => entry.block === '財務')).toEqual([]);
+  });
+
+  it('数値文字列で来ても読める（7203 の純資産は文字列の年がある）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      balance: { '2026/03': balanceYear('105522331000000', '41020068000000') },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({
+      valueSen: 6_450_226_300_000_000,
+      fiscalYear: 2026,
+    });
+  });
+});
+
+describe('§2.2 前期末の配当総額（剰余金の配当）', () => {
+  it('最新実績年度の剰余金の配当を採り、その年度を載せる', () => {
+    const result = parseDocument({
+      dividend: {
+        '2025/03': dividendRow({ perShare: 70, total: 2_000 }),
+        '2026/03': dividendRow({ perShare: 80, total: 3_000 }),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.previousDividendTotal).toEqual({ valueSen: 300_000, fiscalYear: 2026 });
+  });
+
+  it('最新実績年度が "-" なら1つ前の年度を採る', () => {
+    const result = parseDocument({
+      dividend: {
+        '2025/03': dividendRow({ perShare: 70, total: 2_000 }),
+        '2026/03': dividendRow({ perShare: 80 }),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.previousDividendTotal).toEqual({ valueSen: 200_000, fiscalYear: 2025 });
+  });
+
+  it('剰余金の配当が "-" は正常な欠損。診断を出さない', () => {
+    const result = parseDocument({ dividend: { '2026/03': dividendRow({ perShare: 80 }) } });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.previousDividendTotal).toBeNull();
+    expect(result.value.diagnostics.filter((entry) => entry.column === '剰余金の配当')).toEqual([]);
+  });
+
+  it('剰余金の配当 0 は 0 銭。null に丸めない（無配とデータ欠損は別物）', () => {
+    const result = parseDocument({
+      dividend: { '2026/03': dividendRow({ perShare: 0, total: 0 }) },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.previousDividendTotal).toEqual({ valueSen: 0, fiscalYear: 2026 });
+  });
+
+  it('配当が予想行だけなら previousDividendTotal は null', () => {
+    const result = parseDocument({
+      dividend: { '2027/03': { 0: 84, 1: 5_000, 2: '-', 3: '-', 4: '-', 5: '-', 備考: '予想' } },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.previousDividendTotal).toBeNull();
+  });
+
+  it('予想行の剰余金の配当は採らない（実績行だけを走査する）', () => {
+    const result = parseDocument({
+      dividend: {
+        '2026/03': dividendRow({ perShare: 80, total: 3_000 }),
+        '2027/03': { 0: 84, 1: 9_999, 2: '-', 3: '-', 4: '-', 5: '-', 備考: '予想' },
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.previousDividendTotal).toEqual({ valueSen: 300_000, fiscalYear: 2026 });
+  });
+
+  it('剰余金の配当が負なら null にし、inconsistent-value を1件残す（§5.5）', () => {
+    const result = parseDocument({
+      dividend: { '2026/03': dividendRow({ perShare: -1, total: -1 }) },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.previousDividendTotal).toBeNull();
+    expect(result.value.diagnostics.filter((entry) => entry.column === '剰余金の配当')).toEqual([
+      {
+        block: '配当',
+        fiscalYearKey: '2026/03',
+        column: '剰余金の配当',
+        reason: 'inconsistent-value',
+        // 銭化後（-100）ではなく原文を残す。原典と突き合わせるのは人なので
+        raw: '-1',
+      },
+    ]);
+  });
+
+  it('負の検査は senAt の外側にある（同じ文書の一株配当 -1 は -100 銭のまま採用される）', () => {
+    const result = parseDocument({
+      dividend: { '2026/03': dividendRow({ perShare: -1, total: -1 }) },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    // senAt() を「負なら null」に変えると、この期待値と営業赤字の取り込みが同時に壊れる
+    expect(result.value.dividends[0]?.annualAmountSen).toBe(-100);
+  });
+
+  it('負の年度は飛ばし、1つ前の実績年度を採る', () => {
+    const result = parseDocument({
+      dividend: {
+        '2025/03': dividendRow({ perShare: 70, total: 2_000 }),
+        '2026/03': dividendRow({ perShare: 80, total: -1 }),
+      },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.previousDividendTotal).toEqual({ valueSen: 200_000, fiscalYear: 2025 });
+  });
+
+  it('負債総額と配当総額の決算年度が食い違っても両方返す。診断も出さない（§2.3）', () => {
+    const result = parseDocument({
+      performance: { '2026/03': performanceRow({ eps: 100 }) },
+      dividend: {
+        '2024/03': dividendRow({ perShare: 70, total: 2_000 }),
+        '2025/03': dividendRow({ perShare: 75 }),
+        '2026/03': dividendRow({ perShare: 80 }),
+      },
+      balance: { '2026/03': balanceYear(1_000, 400) },
+    });
+    if (!result.ok) throw new Error('取り込みに失敗した');
+    expect(result.value.totalLiabilities).toEqual({ valueSen: 60_000, fiscalYear: 2026 });
+    expect(result.value.previousDividendTotal).toEqual({ valueSen: 200_000, fiscalYear: 2024 });
+    expect(
+      result.value.diagnostics.filter(
+        (entry) => entry.column === '剰余金の配当' || entry.column === '総資産',
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('§6.4 実物4銘柄の ⑥ 入力', () => {
+  it('9433: 負債総額・配当総額の両方が FY2026 で埋まる', () => {
+    const imported = parsed('9433');
+    expect(imported.totalLiabilities).toEqual({
+      valueSen: 1_347_067_400_000_000,
+      fiscalYear: 2026,
+    });
+    expect(imported.previousDividendTotal).toEqual({
+      valueSen: 30_154_700_000_000,
+      fiscalYear: 2026,
+    });
+  });
+
+  it('1301: 負債総額・配当総額の両方が FY2026 で埋まる', () => {
+    const imported = parsed('1301');
+    expect(imported.totalLiabilities).toEqual({ valueSen: 13_526_000_000_000, fiscalYear: 2026 });
+    expect(imported.previousDividendTotal).toEqual({ valueSen: 155_400_000_000, fiscalYear: 2026 });
+  });
+
+  it('7203: 剰余金の配当は全年 "-" で null。負債総額は算出される（円で引いてから銭化）', () => {
+    const imported = parsed('7203');
+    expect(imported.totalLiabilities).toEqual({
+      valueSen: 6_450_226_300_000_000,
+      fiscalYear: 2026,
+    });
+    expect(imported.previousDividendTotal).toBeNull();
+    // 全年 "-" は正常な欠損。診断は出さない
+    expect(imported.diagnostics.filter((entry) => entry.column === '剰余金の配当')).toEqual([]);
+  });
+
+  it('8306: 負債総額は桁あふれで null（unsafe-integer の診断つき）、配当総額だけ埋まる', () => {
+    const imported = parsed('8306');
+    expect(imported.totalLiabilities).toBeNull();
+    expect(imported.previousDividendTotal).toEqual({
+      valueSen: 84_891_500_000_000,
+      fiscalYear: 2026,
+    });
+    // 実績5年すべてが桁あふれるので件数は1件ではない
+    const overflows = imported.diagnostics.filter(
+      (entry) => entry.block === '財務' && entry.reason === 'unsafe-integer',
+    );
+    expect(overflows.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it.each(CODES)('%s の ⑥ 入力は銭の安全整数（判定不能なら null）', (code) => {
+    const imported = parsed(code);
+    for (const amount of [imported.totalLiabilities, imported.previousDividendTotal]) {
+      if (amount === null) continue;
+      expect(Number.isSafeInteger(amount.valueSen)).toBe(true);
+      expect(amount.valueSen).toBeGreaterThanOrEqual(0);
+      expect(Number.isInteger(amount.fiscalYear)).toBe(true);
+    }
   });
 });
 

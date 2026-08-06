@@ -48,9 +48,31 @@ export interface ImportDiagnostic {
      */
     | 'suspicious-jump'
     /** 予想・実績のどちらとも判断できない注記が付いていた */
-    | 'unknown-note';
+    | 'unknown-note'
+    /**
+     * 値は数値として読めたが、他の値と突き合わせると成立しない
+     * （総資産 < 純資産、配当総額が負など。
+     * `docs/02_design/logic/balance-sheet-derivation.md` §5.1 / §5.5）。
+     * `unparsable-value` と分けるのは、原因調査で「読めなかった」のか
+     * 「恒等式違反」なのかを診断ログから区別できるようにするため
+     */
+    | 'inconsistent-value';
   /** 元の値。原因調査のためそのまま残す */
   readonly raw: string;
+}
+
+/**
+ * 取り込みで得た金額と、それがどの決算年度の値かの組
+ * （`docs/02_design/logic/balance-sheet-derivation.md` §2.3）。
+ *
+ * `BalanceSheetSnapshot`（`company.ts`）は年度を持たないため、年度を一緒に返さないと
+ * 「3年前の負債総額」と「今期の配当総額」を混ぜたことに誰も気づけない。
+ */
+export interface ImportedAmount {
+  /** 銭（整数） */
+  readonly valueSen: number;
+  /** 決算年度。2026年3月期なら 2026 */
+  readonly fiscalYear: number;
 }
 
 /**
@@ -83,6 +105,20 @@ export interface ImportedFinancials {
    * Yahoo 自体は決算月を返さないため、この値をここ経由で受け渡す。
    */
   readonly fiscalYearEndMonth: number | null;
+  /**
+   * ⑥ 用。財務ブロックの最新実績年度から算出した負債総額（総資産 − 純資産）。
+   * 算出できなければ `null`（`docs/02_design/logic/balance-sheet-derivation.md` §2.3）
+   */
+  readonly totalLiabilities: ImportedAmount | null;
+  /**
+   * ⑥ 用。配当ブロックの最新実績年度の配当総額（「剰余金の配当」）。読めなければ `null`。
+   *
+   * ⚠️ **⑥ が想定する「前期末の配当総額」と半期ぶんずれうる**（同 §10-1）。
+   * 「剰余金の配当」は当期に**支払った**配当（株主資本等変動計算書ベース）で、
+   * 3月期なら前期の期末配当＋当期の中間配当にあたる。増配・減配の年に開く
+   * （実測で 1301 の 2025/03 は −11.4%）。⑥ の値に違和感があれば最初にここを疑う。
+   */
+  readonly previousDividendTotal: ImportedAmount | null;
   readonly diagnostics: readonly ImportDiagnostic[];
 }
 

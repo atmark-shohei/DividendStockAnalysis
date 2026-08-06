@@ -115,6 +115,23 @@ describe('⑥ 配当維持可能年数 — 6.3 無配・0', () => {
     expect(result.score).toBeNull();
     expect(result.unavailableReason).toBe('division-by-zero');
   });
+
+  /**
+   * 負債総額 0（無借金）は実在する。取り込み側（`deriveTotalLiabilities`）が
+   * 0 を `null` に丸めないことの受け皿（balance-sheet-derivation.md §5.4 / §6.3）。
+   */
+  it('負債総額 0（無借金）ならネットキャッシュは流動資産＋有価証券0.7掛けのまま', () => {
+    const result = calculateDividendSustainability({
+      currentAssets: sen(10_000),
+      investmentSecurities: sen(10_000),
+      totalLiabilities: sen(0),
+      previousDividendTotal: sen(DIVIDEND_TOTAL),
+    });
+    // (10000 + 10000 * 0.7) - 0 = 17000 銭 → 170年
+    expect(result.value).toBe(17_000 / DIVIDEND_TOTAL);
+    expect(result.score).toBe(10);
+    expect(result.unavailableReason).toBeNull();
+  });
 });
 
 describe('⑥ 配当維持可能年数 — 6.4 データ欠損', () => {

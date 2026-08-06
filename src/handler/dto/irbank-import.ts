@@ -8,6 +8,7 @@
 import {
   type FinancialSourceError,
   type ImportDiagnostic,
+  type ImportedAmount,
   type ImportedFinancials,
 } from '../../domain/company/financial-source';
 import { type CellWarning, resolveCellWarnings } from '../../domain/company/import-review';
@@ -47,6 +48,17 @@ export interface IrBankImportResponse {
    * 2026-08-03 追加**（`ImportedFinancials.fiscalYearEndMonth` 自体は既存）。
    */
   readonly fiscalYearEndMonth: number | null;
+  /**
+   * ⑥ 用の負債総額（銭）と、それを算出した決算年度
+   * （`docs/02_design/logic/balance-sheet-derivation.md` §2.3）。
+   * 算出できなければ `null`。**`0`（無借金）と `null`（判定不能）は別物**
+   */
+  readonly totalLiabilities: ImportedAmount | null;
+  /**
+   * ⑥ 用の前期末の配当総額（銭）と、その決算年度。読めなければ `null`。
+   * **`0`（無配）と `null`（データ欠損）は別物**。ゼロ除算の判断は ⑥ の責務
+   */
+  readonly previousDividendTotal: ImportedAmount | null;
   /** 読み取れなかった値。**捨てない**（`.claude/rules/backend.md`） */
   readonly diagnostics: readonly ImportDiagnostic[];
   /**
@@ -75,6 +87,8 @@ export function toIrBankImportResponse(imported: ImportedFinancials): IrBankImpo
       annualAmountSen: entry.annualAmountSen,
     })),
     fiscalYearEndMonth: imported.fiscalYearEndMonth,
+    totalLiabilities: imported.totalLiabilities,
+    previousDividendTotal: imported.previousDividendTotal,
     diagnostics: imported.diagnostics,
     cellWarnings: resolveCellWarnings(imported.diagnostics),
   };

@@ -73,6 +73,48 @@ describe('セルに紐づかない診断', () => {
     expect(warnings[0]?.field).toBeNull();
   });
 
+  /**
+   * ⑥ の入力（負債総額・前期末の配当総額）は画面の年度別テーブルの列ではないので、
+   * 行外の警告になる（`docs/02_design/logic/balance-sheet-derivation.md` §2.2.1 / §5.5）。
+   */
+  it('財務 / 総資産 の inconsistent-value は行外の警告になり、値も採用しない', () => {
+    const warnings = resolveCellWarnings([
+      diagnostic({
+        block: '財務',
+        column: '総資産',
+        reason: 'inconsistent-value',
+        raw: '1000 - 1001',
+      }),
+    ]);
+
+    expect(warnings).toEqual([
+      {
+        fiscalYear: 2026,
+        fiscalYearKey: '2026/03',
+        field: null,
+        column: '総資産',
+        reason: 'inconsistent-value',
+        valueKept: false,
+        raw: '1000 - 1001',
+      },
+    ]);
+  });
+
+  it('配当 / 剰余金の配当 の inconsistent-value も行外（1株配当欄に混ぜない）', () => {
+    const warnings = resolveCellWarnings([
+      diagnostic({
+        block: '配当',
+        column: '剰余金の配当',
+        reason: 'inconsistent-value',
+        raw: '-1',
+      }),
+    ]);
+
+    expect(warnings[0]?.field).toBeNull();
+    expect(warnings[0]?.column).toBe('剰余金の配当');
+    expect(warnings[0]?.valueKept).toBe(false);
+  });
+
   it('duplicate-year は行ごと落ちているので field は null、値も採用しない', () => {
     const warnings = resolveCellWarnings([
       diagnostic({ column: '年度', reason: 'duplicate-year', raw: '2026/03' }),
@@ -94,6 +136,7 @@ describe('valueKept', () => {
     ['year-out-of-range' as const],
     ['duplicate-year' as const],
     ['unknown-note' as const],
+    ['inconsistent-value' as const],
   ])('%s は値が落ちている', (reason) => {
     expect(resolveCellWarnings([diagnostic({ reason })])[0]?.valueKept).toBe(false);
   });

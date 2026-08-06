@@ -68,27 +68,30 @@ GET https://f.irbank.net/files/{code}/fy-data-all.json
 
 今回の取り込みで実際に読む列は以下だけ。他は無視する（将来のために構造は残す）。
 
-| 取り込み先（DTO）                  | 出所                                                         |
-| :--------------------------------- | :----------------------------------------------------------- |
-| `records[].epsSen`                 | 業績.EPS                                                     |
-| `records[].roePercent`             | 業績.ROE                                                     |
-| `records[].revenueSen`             | 業績.売上高                                                  |
-| `records[].operatingMarginPercent` | 業績.営業利益 ÷ 業績.売上高（§3.5）                          |
-| `dividends[].annualAmountSen`      | 配当.一株配当                                                |
-| `multiples.pbr`                    | 財務.BPS（実績）と株価から算出（§3.5）                       |
-| `multiples.per`                    | 業績.EPS（**予想優先**・無ければ実績）と株価から算出（§3.5） |
+| 取り込み先（DTO）                  | 出所                                                                                                         |
+| :--------------------------------- | :----------------------------------------------------------------------------------------------------------- |
+| `records[].epsSen`                 | 業績.EPS                                                                                                     |
+| `records[].roePercent`             | 業績.ROE                                                                                                     |
+| `records[].revenueSen`             | 業績.売上高                                                                                                  |
+| `records[].operatingMarginPercent` | 業績.営業利益 ÷ 業績.売上高（§3.5）                                                                          |
+| `dividends[].annualAmountSen`      | 配当.一株配当                                                                                                |
+| `multiples.pbr`                    | 財務.BPS（実績）と株価から算出（§3.5）                                                                       |
+| `multiples.per`                    | 業績.EPS（**予想優先**・無ければ実績）と株価から算出（§3.5）                                                 |
+| `totalLiabilities`（⑥ 用）         | 財務.総資産 − 財務.純資産から算出（[balance-sheet-derivation.md](./balance-sheet-derivation.md) §2.1・§3.1） |
+| `previousDividendTotal`（⑥ 用）    | 配当.剰余金の配当（同 §2.2）                                                                                 |
 
-`balanceSheet`（⑥ が使う流動資産・投資有価証券・負債総額・前期末配当総額）に
-対応する列は**この JSON に無い**。§6 参照。
+`balanceSheet`（⑥ が使う流動資産・投資有価証券・負債総額・前期末配当総額）のうち、
+**流動資産と投資有価証券の2項目に対応する列はこの JSON に無い**（§6 参照）。
+負債総額・前期末の配当総額の2項目は上の表のとおり算出できる。
 
-> 🔴 **2026-08-05 訂正。上の記述は4項目のうち2項目について誤り。**
+> 🔴 **2026-08-05 訂正。当初の記述は4項目のうち2項目について誤り。**
 > 実フィクスチャで確認したところ、**配当ブロックに「剰余金の配当」列があり、
 > これが配当総額（円）である**（9433 の 2026/03 = 301,547,000,000）。
 > **負債総額も財務ブロックの「総資産 − 純資産」から算出できる。**
 > 列が無いのは**流動資産と投資有価証券の2項目だけ**である。
 > 導出規則・例外処理・受入基準は
-> [balance-sheet-derivation.md](./balance-sheet-derivation.md) に起こした（🔴 未実装）。
-> 上の「使う列」の表と §6.3 の「残る手入力」は、その実装が入った時点で更新する。
+> [balance-sheet-derivation.md](./balance-sheet-derivation.md) に起こした。
+> ✅ **実装済み（2026-08-06）。** 上の「使う列」の表と §6.3 の「残る手入力」は更新済み。
 
 > ✅ **2026-07-31 訂正。** 以前は `records[].dividendPerShareSen` にも
 > 同じ値を積んでいたが削除した（[ADR-0009](../../adr/0009-dividend-single-source.md)）。
@@ -262,7 +265,8 @@ interface ImportDiagnostic {
     | 'year-out-of-range'
     | 'duplicate-year'
     | 'unknown-note' // 備考が '予想' 以外
-    | 'suspicious-jump'; // 前年比が ±80% を超えた（株式分割の反映漏れを疑う。§5.3）
+    | 'suspicious-jump' // 前年比が ±80% を超えた（株式分割の反映漏れを疑う。§5.3）
+    | 'inconsistent-value'; // 値は読めたが他の値と突き合わせると成立しない（総資産<純資産、配当総額が負など。balance-sheet-derivation.md §5.1・§5.5）
   readonly raw: string; // 元の値（そのまま）
 }
 ```
@@ -331,8 +335,10 @@ interface ImportDiagnostic {
 - **PER / PBR の入力欄が不要になる**（株価から算出）
 - 予想配当が自動で入る
 
-残る手入力は **株価**、**⑥ の貸借対照表4項目**、および ①②④⑦ が要求する
-**6期以上前の古い年度**。
+残る手入力は **株価**、**⑥ の貸借対照表2項目（流動資産・投資有価証券）**、
+および ①②④⑦ が要求する**6期以上前の古い年度**。⑥ の残り2項目（負債総額・
+前期末の配当総額）は [balance-sheet-derivation.md](./balance-sheet-derivation.md) の
+実装により自動で埋まるようになった（2026-08-06）。
 
 ## 7. 受入基準
 

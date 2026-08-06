@@ -85,11 +85,14 @@ function keepsValue(reason: ImportDiagnostic['reason']): boolean {
     case 'suspicious-jump':
     case 'rounded':
       return true;
+    // `inconsistent-value`（数値としては読めたが他の値と突き合わせると成立しない）も
+    // 値は採用せず空欄にする（`docs/02_design/logic/balance-sheet-derivation.md` §5.1 / §5.5）
     case 'unparsable-value':
     case 'unsafe-integer':
     case 'year-out-of-range':
     case 'duplicate-year':
     case 'unknown-note':
+    case 'inconsistent-value':
       return false;
   }
 }

@@ -6,9 +6,12 @@ import {
   dropEditedWarnings,
   fillBlankMultiples,
   hasUnconfirmedWarnings,
+  importedAmountNoteText,
   marketDiagnosticText,
   mergeDividendYears,
   mergeRowsWithImport,
+  resolveEditedAmountNote,
+  resolveImportedAmount,
   resolveImportedPriceYen,
   rowlessWarningText,
   rowlessWarnings,
@@ -487,6 +490,284 @@ describe('resolveImportedPriceYen', () => {
 });
 
 /**
+ * ⑥ の入力（負債総額・前期末の配当総額）の取り込み
+ * （`docs/02_design/logic/balance-sheet-derivation.md` §2.3・§5.4・§5.5）。
+ *
+ * フィクスチャの値は同設計書 §6.4 の実測値（9433 / 7203）をそのまま使う。
+ * **`null`（取り込めなかった）と `valueSen: 0`（無借金・無配）を分けることが本テストの核心**
+ * （`.claude/rules/frontend.md`「データが無い場合に 0 を表示しない」）。
+ */
+type ImportedAmount = NonNullable<Parameters<typeof resolveImportedAmount>[1]>;
+
+describe('resolveImportedAmount', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly currentYen: string;
+    readonly imported: ImportedAmount | null;
+    readonly expectedYen: string;
+    readonly expectedNoteKind: string;
+  }[] = [
+    {
+      name: '空欄なら取り込み値を銭→円で入れる（9433 の負債総額）',
+      currentYen: '',
+      imported: { valueSen: 1_347_067_400_000_000, fiscalYear: 2026 },
+      expectedYen: '13470674000000',
+      expectedNoteKind: 'filled',
+    },
+    {
+      name: '空欄なら取り込み値を銭→円で入れる（9433 の前期末配当総額）',
+      currentYen: '',
+      imported: { valueSen: 30_154_700_000_000, fiscalYear: 2026 },
+      expectedYen: '301547000000',
+      expectedNoteKind: 'filled',
+    },
+    {
+      name: 'valueSen: 0（無借金・無配）は値。"0" を入れる（null 扱いにしない）',
+      currentYen: '',
+      imported: { valueSen: 0, fiscalYear: 2026 },
+      expectedYen: '0',
+      expectedNoteKind: 'filled',
+    },
+    {
+      name: '取り込めなかった（null）ら空欄のまま。"0" を書き込まない',
+      currentYen: '',
+      imported: null,
+      expectedYen: '',
+      expectedNoteKind: 'unavailable',
+    },
+    {
+      name: '手入力済みなら取り込み値で上書きしない',
+      currentYen: '123',
+      imported: { valueSen: 456_00, fiscalYear: 2026 },
+      expectedYen: '123',
+      expectedNoteKind: 'kept-existing',
+    },
+    {
+      name: '取り込めなくても手入力は消さない',
+      currentYen: '123',
+      imported: null,
+      expectedYen: '123',
+      expectedNoteKind: 'unavailable',
+    },
+    {
+      name: '端数（1銭）も銭→円で入る',
+      currentYen: '',
+      imported: { valueSen: 1, fiscalYear: 2025 },
+      expectedYen: '0.01',
+      expectedNoteKind: 'filled',
+    },
+    {
+      name: '手入力の "0" は「入力済み」。空欄と混同しない',
+      currentYen: '0',
+      imported: { valueSen: 500_00, fiscalYear: 2026 },
+      expectedYen: '0',
+      expectedNoteKind: 'kept-existing',
+    },
+  ];
+
+  for (const { name, currentYen, imported, expectedYen, expectedNoteKind } of cases) {
+    it(name, () => {
+      const result = resolveImportedAmount(currentYen, imported);
+      expect(result.yen).toBe(expectedYen);
+      expect(result.noteKind).toBe(expectedNoteKind);
+      expect(result.imported).toEqual(imported);
+    });
+  }
+});
+
+describe('importedAmountNoteText', () => {
+  it('取り込み前（null）は何も出さない', () => {
+    expect(importedAmountNoteText(null, 3)).toBe('');
+  });
+
+  it('埋めたときは採用した決算年度を出す（年度ずれを人が判断するため）', () => {
+    const result = resolveImportedAmount('', { valueSen: 1_347_067_400_000_000, fiscalYear: 2026 });
+    expect(importedAmountNoteText(result, 3)).toBe('IRバンク取り込み: 2026年3月期の値を入れました');
+  });
+
+  it('決算月が不明でも年度は出す', () => {
+    const result = resolveImportedAmount('', { valueSen: 30_154_700_000_000, fiscalYear: 2026 });
+    expect(importedAmountNoteText(result, null)).toBe('IRバンク取り込み: 2026年度の値を入れました');
+  });
+
+  it('入力済みで入れ替えなかったときは年度と金額を併記する（3桁区切り＋単位）', () => {
+    // 7203 の負債総額（64.5兆円）。入力欄に出ていない値なので注記に出す
+    const result = resolveImportedAmount('123', {
+      valueSen: 6_450_226_300_000_000,
+      fiscalYear: 2026,
+    });
+    const text = importedAmountNoteText(result, 3);
+    expect(text).toContain('入力済みのため入れ替えていません');
+    expect(text).toContain('2026年3月期');
+    expect(text).toContain('64,502,263,000,000.00 円');
+  });
+
+  it('取り込めなかったときは言葉で明示し、数字を出さない（0 と表示しない）', () => {
+    const result = resolveImportedAmount('', null);
+    const text = importedAmountNoteText(result, 3);
+    expect(text).toContain('取り込めませんでした');
+    expect(text).toContain('手入力');
+    expect(text).not.toContain('0');
+  });
+
+  it('valueSen: 0（無借金・無配）は「入れました」。データなし扱いにしない', () => {
+    const result = resolveImportedAmount('', { valueSen: 0, fiscalYear: 2026 });
+    const text = importedAmountNoteText(result, 3);
+    expect(text).toContain('2026年3月期の値を入れました');
+    expect(text).not.toContain('—');
+  });
+});
+
+/**
+ * 取り込み後に欄を手で書き換えたときの注記（fe-review CR-1 の回帰）。
+ *
+ * 取り込み時点の由来（「IRバンク取り込み: …の値を入れました」）が、表示中の値とは
+ * 無関係なまま残り続けるのが元の不具合。注記を state ではなく**現在値からの派生**に
+ * したので、値を変える経路が増えても取り残されない。
+ *
+ * 編集の判定は `note.yen !== currentYen`。**`'0'`（無借金・無配）と `''`（空欄）が
+ * 別物として扱われることを必ず固定する**（`.claude/rules/frontend.md`）。
+ */
+describe('resolveEditedAmountNote', () => {
+  const LIABILITIES_9433: ImportedAmount = { valueSen: 1_347_067_400_000_000, fiscalYear: 2026 };
+  const DEBT_FREE: ImportedAmount = { valueSen: 0, fiscalYear: 2026 };
+
+  const cases: readonly {
+    readonly name: string;
+    readonly note: ReturnType<typeof resolveImportedAmount> | null;
+    readonly currentYen: string;
+    readonly expectedNoteKind: string | null;
+  }[] = [
+    {
+      name: '取り込み前（null）は編集しても何も出ない',
+      note: null,
+      currentYen: '999',
+      expectedNoteKind: null,
+    },
+    {
+      name: 'filled を編集していなければ取り込みの注記のまま',
+      note: resolveImportedAmount('', LIABILITIES_9433),
+      currentYen: '13470674000000',
+      expectedNoteKind: 'filled',
+    },
+    {
+      name: 'filled を別の値に書き換えたら「手入力」へ切り替わる',
+      note: resolveImportedAmount('', LIABILITIES_9433),
+      currentYen: '13470674000001',
+      expectedNoteKind: 'edited',
+    },
+    {
+      name: 'filled を空欄に戻しても「値を入れました」を残さない',
+      note: resolveImportedAmount('', LIABILITIES_9433),
+      currentYen: '',
+      expectedNoteKind: 'edited',
+    },
+    {
+      name: 'valueSen: 0（無借金・無配）の "0" は編集ではない（"" と混同しない）',
+      note: resolveImportedAmount('', DEBT_FREE),
+      currentYen: '0',
+      expectedNoteKind: 'filled',
+    },
+    {
+      name: 'valueSen: 0 の欄を空欄にしたら編集扱いになる（"0" と "" は別物）',
+      note: resolveImportedAmount('', DEBT_FREE),
+      currentYen: '',
+      expectedNoteKind: 'edited',
+    },
+    {
+      name: 'kept-existing を編集していなければそのまま出す',
+      note: resolveImportedAmount('123', LIABILITIES_9433),
+      currentYen: '123',
+      expectedNoteKind: 'kept-existing',
+    },
+    {
+      name: 'kept-existing を編集したら注記を消す（入れ替えなかった説明が成立しない）',
+      note: resolveImportedAmount('123', LIABILITIES_9433),
+      currentYen: '456',
+      expectedNoteKind: null,
+    },
+    {
+      name: 'unavailable を編集していなければそのまま出す',
+      note: resolveImportedAmount('', null),
+      currentYen: '',
+      expectedNoteKind: 'unavailable',
+    },
+    {
+      name: 'unavailable を手入力で埋めたら注記を消す',
+      note: resolveImportedAmount('', null),
+      currentYen: '789',
+      expectedNoteKind: null,
+    },
+    {
+      name: '編集して元の取り込み値に戻したら元の注記へ復帰する',
+      note: resolveImportedAmount('', LIABILITIES_9433),
+      currentYen: '13470674000000',
+      expectedNoteKind: 'filled',
+    },
+  ];
+
+  for (const { name, note, currentYen, expectedNoteKind } of cases) {
+    it(name, () => {
+      const resolved = resolveEditedAmountNote(note, currentYen);
+      expect(resolved === null ? null : resolved.noteKind).toBe(expectedNoteKind);
+    });
+  }
+
+  it('edited でも取り込み値は出所として残す（何を上書きしたか追えるようにする）', () => {
+    const resolved = resolveEditedAmountNote(resolveImportedAmount('', LIABILITIES_9433), '1');
+    expect(resolved?.noteKind).toBe('edited');
+    expect(resolved?.imported).toEqual(LIABILITIES_9433);
+  });
+});
+
+/**
+ * 画面に出る文字列レベルでの回帰。**古い文言が残らないことを `not.toContain` で固定する。**
+ * `noteKind` だけを見ていると、文言側の分岐漏れ（`edited` を `filled` と同じ文にする等）を
+ * 検出できない。
+ */
+describe('importedAmountNoteText（編集後）', () => {
+  const LIABILITIES_9433: ImportedAmount = { valueSen: 1_347_067_400_000_000, fiscalYear: 2026 };
+
+  it('filled を書き換えたら「手入力に変更しました」＋取り込み値になる（「値を入れました」を残さない）', () => {
+    const note = resolveEditedAmountNote(
+      resolveImportedAmount('', LIABILITIES_9433),
+      '13470674000001',
+    );
+    const text = importedAmountNoteText(note, 3);
+    expect(text).toBe('手入力に変更しました（取り込み値: 2026年3月期 / 13,470,674,000,000.00 円）');
+    expect(text).not.toContain('値を入れました');
+  });
+
+  it('filled を空欄に戻しても「値を入れました」は残らない', () => {
+    const note = resolveEditedAmountNote(resolveImportedAmount('', LIABILITIES_9433), '');
+    const text = importedAmountNoteText(note, 3);
+    expect(text).toContain('手入力に変更しました');
+    expect(text).not.toContain('値を入れました');
+  });
+
+  it('決算月が不明でも編集後の注記に年度は出す', () => {
+    const note = resolveEditedAmountNote(resolveImportedAmount('', LIABILITIES_9433), '1');
+    expect(importedAmountNoteText(note, null)).toBe(
+      '手入力に変更しました（取り込み値: 2026年度 / 13,470,674,000,000.00 円）',
+    );
+  });
+
+  it('kept-existing を編集したら何も出さない（入れ替えていません が残らない）', () => {
+    const note = resolveEditedAmountNote(resolveImportedAmount('123', LIABILITIES_9433), '456');
+    const text = importedAmountNoteText(note, 3);
+    expect(text).toBe('');
+    expect(text).not.toContain('入れ替えていません');
+  });
+
+  it('unavailable を編集したら何も出さない（取り込めませんでした が残らない）', () => {
+    const note = resolveEditedAmountNote(resolveImportedAmount('', null), '789');
+    const text = importedAmountNoteText(note, 3);
+    expect(text).toBe('');
+    expect(text).not.toContain('取り込めませんでした');
+  });
+});
+
+/**
  * セル警告の表示（`docs/02_design/logic/import-review.md` §5.2・§5.3 / 受入基準 §7.4）。
  *
  * 診断を件数に潰していた `summarizeDiagnostics` の置き換え（同 §2.1）。
@@ -541,6 +822,27 @@ describe('cellWarningText', () => {
     const text = cellWarningText(warning({ reason: 'rounded', valueKept: true }));
     expect(text).toContain('値は採用しています');
     expect(text).not.toContain('空欄');
+  });
+
+  /**
+   * `inconsistent-value`（総資産 < 純資産、配当総額が負）は
+   * `unparsable-value`（数値として読めなかった）と別物として言葉にする
+   * （`docs/02_design/logic/balance-sheet-derivation.md` §5.1・§9.0）。
+   */
+  it('恒等式違反は「読めなかった」と混ぜず、成立しない値だったと伝える', () => {
+    const text = cellWarningText(
+      warning({
+        field: null,
+        column: '総資産',
+        reason: 'inconsistent-value',
+        valueKept: false,
+        raw: '1000 - 1001',
+      }),
+    );
+    expect(text).toBe(
+      '⚠ 他の値と突き合わせると成立しない値でした。この欄は空欄にしました。必要なら手入力してください',
+    );
+    expect(text).not.toContain('数値として読めない');
   });
 
   it('値が落ちた警告は空欄にしたことと手入力を促す', () => {
@@ -611,6 +913,29 @@ describe('rowlessWarnings / rowlessWarningText', () => {
     for (const text of texts) expect(text).toContain('⚠');
   });
 
+  /**
+   * 負債総額（総資産 − 純資産）の算出失敗は、画面に欄が無い列（`総資産`）の警告として
+   * 表の外に出る（`docs/02_design/logic/balance-sheet-derivation.md` §2.2.1）。
+   * 件数に潰さず、年度と理由を1件ずつ出す。
+   */
+  it('恒等式違反（inconsistent-value）は表の外に年度つきで1件出る', () => {
+    const inconsistent = warning({
+      field: null,
+      fiscalYear: 2026,
+      fiscalYearKey: '2026/03',
+      column: '総資産',
+      reason: 'inconsistent-value',
+      valueKept: false,
+      raw: '1000 - 1001',
+    });
+    const outside = rowlessWarnings([warning(), inconsistent]);
+
+    expect(outside).toEqual([inconsistent]);
+    expect(rowlessWarningText(inconsistent)).toBe(
+      '⚠ 2026年度（2026/03）の総資産は取り込めていません: 他の値と突き合わせると成立しない値でした',
+    );
+  });
+
   it('行ごと落ちた警告は手入力を促す', () => {
     const text = rowlessWarningText(
       warning({ field: null, column: '年度', reason: 'year-out-of-range', valueKept: false }),
@@ -647,6 +972,12 @@ describe('hasUnconfirmedWarnings', () => {
   it('値が落ちた警告だけなら確認は要らない（採用していないので確かめる値が無い）', () => {
     expect(
       hasUnconfirmedWarnings([warning({ reason: 'unparsable-value', valueKept: false })]),
+    ).toBe(false);
+  });
+
+  it('恒等式違反（inconsistent-value）は値を捨てた系なので確認バナーを出さない', () => {
+    expect(
+      hasUnconfirmedWarnings([warning({ reason: 'inconsistent-value', valueKept: false })]),
     ).toBe(false);
   });
 

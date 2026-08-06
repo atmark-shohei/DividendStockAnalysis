@@ -3,7 +3,7 @@
 > **依存する指標:** [dividend-sustainability-scoring.md](./dividend-sustainability-scoring.md)（指標⑥）
 > **依存する取り込み:** [irbank-json-import.md](./irbank-json-import.md)（データ源・値の型の揺れ・銭化）
 > **関連機能:** [F-07 / F-19](../../01_requirements/features.md)
-> ステータス: 🔴 未実装（本書は Step1 の設計）
+> ステータス: 🟢 実装済み（2026-08-06）
 
 ## 1. 概要
 
@@ -122,6 +122,10 @@ export function deriveTotalLiabilities(
 - **実績行のみ**を対象とする（`isForecast === true` は飛ばす）
 - 読めない年度（`"-"`・数値として読めない・銭化で桁あふれ）は飛ばして次の年度へ進む
 - 1件も読めなければ `null`
+- **財務ブロックが丸ごと欠けている銘柄**（`normalizeBlock` が失敗して `balance` が
+  `null` になる場合）は `totalLiabilities` を `null` にして取り込みは成立させる。
+  BPS（⑨ PBR）が既にこの方針で `balance = null` を許容しており（§10-2）、
+  それと一貫させる（`src/infra/irbank/parse-fy-data.ts:570` 付近）
 
 **負債総額は2列（総資産・純資産）を使うので、年度の確定条件を明示する。**
 
@@ -473,15 +477,15 @@ EDINET の XBRL を採るかは本書の範囲外とし、別途 ADR で決め�
 （[irbank-json-import.md §1](./irbank-json-import.md)）、`companies` テーブルの
 貸借対照表4列は既に存在する。
 
-実装は本書では行わない。`impl-from-spec` に回す。
+✅ 実装は `impl-from-spec` で完了した（2026-08-06。実装ファイル一覧は末尾「実装（2026-08-06）」）。
 
 ### 9.1. 本書の適用後に更新が要るドキュメント
 
-- [irbank-json-import.md §2.3](./irbank-json-import.md) — 「`balanceSheet` に対応する列は
+- ✅ [irbank-json-import.md §2.3](./irbank-json-import.md) — 「`balanceSheet` に対応する列は
   この JSON に無い」を訂正し、「使う列」に「剰余金の配当」「総資産」「純資産」を追加する
-- [irbank-json-import.md §6.3](./irbank-json-import.md) — 「残る手入力」から
+- ✅ [irbank-json-import.md §6.3](./irbank-json-import.md) — 「残る手入力」から
   貸借対照表4項目 → 2項目へ更新する
-- [import-review.md §3.2](./import-review.md) — `reason` → `valueKept` の表に
+- ✅ [import-review.md §3.2](./import-review.md) — `reason` → `valueKept` の表に
   `inconsistent-value` の行を足す（§9.0）
 - ✅ [features.md](../../01_requirements/features.md) — F-07 / F-19 から本書へのリンクは
   2026-08-05 に追加済み
@@ -517,16 +521,13 @@ EDINET の XBRL を採るかは本書の範囲外とし、別途 ADR で決め�
 代替案（`一株配当 × 株数`）は**株数の取得手段が無い**（IRバンクの JSON に株数の列は無く、
 `株主資本 ÷ BPS` は概算にしかならない）ため、現時点では選べない。
 
-### 10-2. 🟡 財務ブロックが丸ごと欠けている銘柄の挙動を明記していない
+### 10-2. ✅ 解消済み（2026-08-06）財務ブロックが丸ごと欠けている銘柄の挙動
 
-`src/infra/irbank/parse-fy-data.ts:435` は
-
-> 財務は BPS（⑨ PBR）にしか使わない。欠けていても取り込みは成立させる
-
-として `balance = null` を許容している。**本書の実装後、このコメントは古くなる**
-（財務ブロックは負債総額にも使われる）。挙動としては「`totalLiabilities` を `null` に
-して取り込みは成立させる」で既存方針と一貫するが、§2.3 に明記していない。
-実装時に §2.3 へ1行足し、`parse-fy-data.ts` のコメントも直すこと。
+§2.3 に「財務ブロックが丸ごと欠けている銘柄は `totalLiabilities` を `null` にして
+取り込みは成立させる」を明記した。`src/infra/irbank/parse-fy-data.ts:570-571` の
+コメントも「財務は BPS（⑨ PBR）と負債総額（⑥）に使う。欠けていても取り込みは成立させる
+（`totalLiabilities` が `null` になるだけ）」に更新済み。挙動は既存方針（BPS が
+`balance = null` を許容していたのと同じ）と一貫している。
 
 ### 10-3. 🟡 決算期変更（変則決算）に対応していない
 
@@ -543,14 +544,50 @@ EDINET の XBRL を採るかは本書の範囲外とし、別途 ADR で決め�
 既に「月が2つ以上現れたら `null`」を返す。**この値を見て集計を止める**のが
 自然な対処だが、本書の範囲では未着手とした。
 
-### 10-4. 🟡 採用した決算年度をどこに表示するか決まっていない
+### 10-4. ✅ 解消済み（2026-08-06）採用した決算年度の表示
 
-§2.3 は「年度を画面に出して人が判断する」と書き、`ImportedAmount.fiscalYear` を
-そのために持たせている。しかし `BalanceSheetSnapshot`（`company.ts:33`）は年度を持たず、
-**貸借対照表4欄の画面設計（どこに「2026年3月期」と出すか）は未着手**である。
-[import-review.md](./import-review.md) にも該当する節が無い。
+`frontend/components/CompanyForm.tsx` が、負債総額・前期末の配当総額の**各入力欄の
+直下に注記を1行**表示する案（fe-plan.md §3.1 案A）を採用した。`import-review.md` へ
+節を足す代わりに、この2欄専用の注記としてフォーム内に実装している。
 
-UI 設計は本書の範囲外（§1.1）だが、**引き渡し先が決まっていない**。
-実装時に `import-review.md` へ節を足すか、`new-screen-spec` を起こすかを選ぶこと。
-年度を出さないまま実装すると、§2.3 で「年度ずれを人が判断する」と決めた前提が
-画面上で成立しない。
+**注記は4状態**を持つ（`ResolveImportedAmountResult` / `EditedImportedAmountNote` の
+判別可能ユニオン、`CompanyForm.tsx:423-468`）。当初の計画（fe-plan.md §3.2）は
+取り込み直後の3状態だけを想定していたが、実装時のユーザー決定（2026-08-06）で
+「取り込み後に手で書き換えた」状態（`edited`）を追加した。
+
+| `noteKind`      | いつこの状態になるか                                | 文言（`importedAmountNoteText`）                                                              |
+| :-------------- | :-------------------------------------------------- | :-------------------------------------------------------------------------------------------- |
+| `filled`        | 空欄に取り込み値を入れた                            | 「IRバンク取り込み: 2026年3月期の値を入れました」                                             |
+| `kept-existing` | 既に手入力があり、取り込み値を入れなかった          | 「入力済みのため入れ替えていません（取り込み値: 2026年3月期 / 6,450,226,300,000,000.00 円）」 |
+| `unavailable`   | IRバンクから取り込めなかった（`imported === null`） | 「IRバンクからは取り込めませんでした。原典を見て手入力してください」                          |
+| `edited`        | `filled` の状態から、さらに手で値を書き換えた       | 「手入力に変更しました（取り込み値: 2026年3月期 / …）」                                       |
+
+`filled` から編集すると `edited` へ切り替わり、取り込み値を出所として残す。
+`kept-existing` / `unavailable` から編集すると注記は消える（`null`）。当時の
+「取り込み値を入れなかった」という事実の説明であり、値が変わった後は説明として
+成立しないため。この切り替えは `resolveEditedAmountNote(note, currentYen)`
+（`CompanyForm.tsx:487-495`）が **state ではなく現在の入力値からの派生**として
+計算する（値を変える経路が増えても注記が取り残されないようにするため。
+fe-review.md CR-1 の解消）。
+
+**年度は必ず月と組で人が読める形にする**（`fiscalPeriodLabel`、`frontend/format.ts`）。
+`fiscalYear === null` は `—`（`NO_DATA`）を返し、`0年3月期` のような偽の期を作らない。
+
+## 実装（2026-08-06）
+
+| 対象                                     | ファイル                                                                                                                                                                      |
+| :--------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 負債総額の算出（純関数）                 | `src/domain/company/total-liabilities.ts`（`deriveTotalLiabilities` / `TotalLiabilitiesDerivation`）                                                                          |
+| 型の追加（`ImportedAmount`・診断種別）   | `src/domain/company/financial-source.ts`                                                                                                                                      |
+| セル警告への波及                         | `src/domain/company/import-review.ts`（`keepsValue()` に `inconsistent-value`）                                                                                               |
+| 列の読み取り・年度選択・負を弾く読み取り | `src/infra/irbank/parse-fy-data.ts`（`COLUMN_TOTAL_ASSETS` / `COLUMN_NET_ASSETS` / `COLUMN_DIVIDEND_TOTAL` / `yenAt` / `readTotalLiabilities` / `readPreviousDividendTotal`） |
+| DTO への透過                             | `src/handler/dto/irbank-import.ts`（`IrBankImportResponse.totalLiabilities` / `.previousDividendTotal`）                                                                      |
+| 画面（入力欄の prefill・注記・警告文言） | `frontend/components/CompanyForm.tsx`（`resolveImportedAmount` / `resolveEditedAmountNote` / `importedAmountNoteText` / `warningReasonText`）                                 |
+| テスト（domain）                         | `tests/domain/company/total-liabilities.test.ts`（新規）／`tests/domain/company/import-review.test.ts`（追記）                                                                |
+| テスト（infra）                          | `tests/infra/irbank/parse-fy-data.test.ts`（追記）                                                                                                                            |
+| テスト（handler）                        | `tests/handler/irbank-import.test.ts`（追記）                                                                                                                                 |
+| テスト（frontend）                       | `tests/frontend/company-form.test.tsx`（追記）                                                                                                                                |
+
+**DB スキーマ変更なし。** `totalLiabilitiesSen` / `previousDividendTotalSen` は
+既存列（`src/infra/d1/schema.ts`）をそのまま使う。`ImportedAmount.fiscalYear` は
+保存しない（フォームの初期値を返すだけで、確定は人が行う。§2.3）。

@@ -17,8 +17,13 @@ import { type FinancialRecord } from '../../domain/company/company';
 import { type DividendRecord } from '../../domain/company/dividend-record';
 import { deriveOperatingMarginPercent } from '../../domain/company/operating-margin';
 import {
+  type TotalLiabilitiesDerivation,
+  deriveTotalLiabilities,
+} from '../../domain/company/total-liabilities';
+import {
   type FinancialSourceError,
   type ImportDiagnostic,
+  type ImportedAmount,
   type ImportedFinancials,
 } from '../../domain/company/financial-source';
 import { type Result, err, ok } from '../../domain/shared/result';
@@ -40,6 +45,10 @@ export const COLUMN_EPS = 'EPS';
 export const COLUMN_ROE = 'ROE';
 const COLUMN_BPS = 'BPS';
 export const COLUMN_DIVIDEND_PER_SHARE = '一株配当';
+/** ⑥ 用（`docs/02_design/logic/balance-sheet-derivation.md`）。負債総額は総資産 − 純資産で導出する */
+export const COLUMN_TOTAL_ASSETS = '総資産';
+export const COLUMN_NET_ASSETS = '純資産';
+export const COLUMN_DIVIDEND_TOTAL = '剰余金の配当';
 
 /** 予想行にだけ付く注記。この値以外は素性が分からないので採用しない（§3.3） */
 const NOTE_KEY = '備考';
@@ -193,6 +202,41 @@ function senAt(reader: Reader, block: string, row: BlockRow, column: string): nu
   }
   if (converted.rounded) record(reader, { ...context, reason: 'rounded', raw });
   return converted.sen;
+}
+
+/**
+ * 金額列を**円のまま**読む。銭化しない。欠損は `null`。
+ *
+ * 総資産・純資産は先に銭化すると桁あふれる（7203 の総資産は銭で 1.06e16）。
+ * 円で引いてから差だけを銭にする必要があるため、銭化前の生値を返す口が要る
+ * （`docs/02_design/logic/balance-sheet-derivation.md` §3.2）。
+ *
+ * **整数性・安全整数の判定はここでやらない。** `deriveTotalLiabilities()` が
+ * `not-integer` / `unsafe-integer` として返すので、判定を二重に持たない。
+ */
+function yenAt(reader: Reader, block: string, row: BlockRow, column: string): number | null {
+  const cell = readNumeric(row.values.get(column));
+  if (cell.kind === 'missing') return null;
+  if (cell.kind === 'invalid') {
+    // 「読めない文字列」は既存 `senAt()` と同型に倒し、壊れた**その列**について
+    // `unparsable-value` を1件記録して `null` を返す。後段の `deriveTotalLiabilities` は
+    // `input-missing` になり診断を出さないので、診断はその列につき1件で二重にならない。
+    // **総資産・純資産の両方が壊れていれば2件出る**（列ごとに1件。合計が常に1件ではない）。
+    // 仕様: `docs/02_design/logic/balance-sheet-derivation.md` §5.1
+    // （ユーザー承認済み 2026-08-06。設計書 §5.1 の表は入力が `null` か非整数かしか
+    //   書いていなかったため、この扱いを実装時に決めて承認を得た）
+    record(reader, {
+      block,
+      fiscalYearKey: row.fiscalYearKey,
+      column,
+      reason: 'unparsable-value',
+      raw: cell.raw,
+    });
+    return null;
+  }
+  // NUMERIC_TEXT を通っているので Number() で落ちない（7203 の純資産は数値文字列で来る）
+  const value = cell.kind === 'text' ? Number(cell.text) : cell.value;
+  return Number.isFinite(value) ? value : null;
 }
 
 /** 比率列（%・倍）。金額ではないので実数のままでよい */
@@ -391,6 +435,97 @@ function deriveFiscalYearEndMonth(reader: Reader, blocks: readonly Block[]): num
   return null;
 }
 
+/**
+ * 算出できなかった理由 → 診断の種別（`docs/02_design/logic/balance-sheet-derivation.md` §5.1 の表）。
+ *
+ * `input-missing` は診断を出さない（正常な欠損）ので、この表に持たせない。
+ */
+const DERIVATION_REASON = {
+  'not-integer': 'unparsable-value',
+  'negative-liabilities': 'inconsistent-value',
+  'unsafe-integer': 'unsafe-integer',
+} as const satisfies Record<
+  Exclude<TotalLiabilitiesDerivation['kind'], 'derived' | 'input-missing'>,
+  ImportDiagnostic['reason']
+>;
+
+/**
+ * 負債総額（総資産 − 純資産）を財務ブロックから読む
+ * （`docs/02_design/logic/balance-sheet-derivation.md` §2.3）。
+ *
+ * **実績行を決算年度の降順に走査し、両方が読めて算出まで成功した最初の年度を採る。**
+ * 片方だけ読めた年度・算出に失敗した年度はその年度ごと飛ばす。値と年度は必ず対で
+ * 確定させる（片方だけ埋まると画面が「2026年3月期・データなし」という無意味な組を出す）。
+ *
+ * 飛ばした年度ごとに診断が残る。**診断が出た＝値が無い、ではない**（最新年度が
+ * 桁あふれでも1つ前で算出できれば、診断を残したまま値は返る）。
+ *
+ * 走査の規則は既存の `latestActualBpsSen` と同じ。BPS は1列なので、
+ * 「両方読めた年度」の条件だけが本項の追加分である。
+ */
+function readTotalLiabilities(reader: Reader, balance: Block): ImportedAmount | null {
+  for (const fiscalYear of [...balance.keys()].sort((a, b) => b - a)) {
+    const row = balance.get(fiscalYear);
+    if (row === undefined || row.isForecast) continue;
+
+    const totalAssetsYen = yenAt(reader, BLOCK_BALANCE, row, COLUMN_TOTAL_ASSETS);
+    const netAssetsYen = yenAt(reader, BLOCK_BALANCE, row, COLUMN_NET_ASSETS);
+    const derivation = deriveTotalLiabilities(totalAssetsYen, netAssetsYen);
+
+    if (derivation.kind === 'derived') return { valueSen: derivation.valueSen, fiscalYear };
+    // 正常な欠損。診断は出さない（§5.1）。`yenAt` が既に記録した場合はそちらが1件残る
+    if (derivation.kind === 'input-missing') continue;
+
+    // 2列から1つの値を作るので、診断の `column` は先に読んだ「総資産」へ寄せ、
+    // `raw` に両方を残して原因調査で追えるようにする（§2.2.1）
+    record(reader, {
+      block: BLOCK_BALANCE,
+      fiscalYearKey: row.fiscalYearKey,
+      column: COLUMN_TOTAL_ASSETS,
+      reason: DERIVATION_REASON[derivation.kind],
+      raw: `${String(totalAssetsYen)} - ${String(netAssetsYen)}`,
+    });
+  }
+  return null;
+}
+
+/**
+ * 前期末の配当総額（「剰余金の配当」）を配当ブロックから読む（同 §2.2 / §2.3）。
+ *
+ * 既存の `senAt()` を**包む**。`senAt()` 自体は業績・財務・配当の全金額列で共有され、
+ * 営業利益は営業赤字で正当に負を取るため、**「負なら `null`」に変えてはいけない**。
+ * 負の検査はこの列にだけ被せる（同 §2.2 の 🔴）。
+ *
+ * 0（無配）は 0 のまま返す。**`null` に丸めない**（ゼロ除算の判断は ⑥ の責務。§5.5）。
+ */
+function readPreviousDividendTotal(reader: Reader, dividend: Block): ImportedAmount | null {
+  for (const fiscalYear of [...dividend.keys()].sort((a, b) => b - a)) {
+    const row = dividend.get(fiscalYear);
+    if (row === undefined || row.isForecast) continue;
+
+    const valueSen = senAt(reader, BLOCK_DIVIDEND, row, COLUMN_DIVIDEND_TOTAL);
+    if (valueSen === null) continue;
+    if (valueSen >= 0) return { valueSen, fiscalYear };
+
+    // 配当総額が負は制度上ありえない。データ不良として値を採らない（§5.5）
+    //
+    // `raw` は銭化後（-100）ではなく原文（-1）を残す。`ImportDiagnostic.raw` の定義
+    // 「元の値。原因調査のためそのまま残す」に従う。原典と突き合わせるのは人なので、
+    // 原文のほうが照合しやすい。
+    // 仕様: `docs/02_design/logic/balance-sheet-derivation.md` §5.5
+    // （ユーザー承認済み 2026-08-06。設計書 §5.5 は `raw` の形式を定めていなかったため、
+    //   この扱いを実装時に決めて承認を得た）
+    record(reader, {
+      block: BLOCK_DIVIDEND,
+      fiscalYearKey: row.fiscalYearKey,
+      column: COLUMN_DIVIDEND_TOTAL,
+      reason: 'inconsistent-value',
+      raw: String(row.values.get(COLUMN_DIVIDEND_TOTAL)),
+    });
+  }
+  return null;
+}
+
 function metaCodeOf(raw: Record<string, unknown>): string | null {
   for (const blockName of [BLOCK_PERFORMANCE, BLOCK_DIVIDEND, BLOCK_BALANCE]) {
     const block = raw[blockName];
@@ -432,7 +567,8 @@ export function parseFyData(
   const dividend = normalizeBlock(reader, BLOCK_DIVIDEND, raw[BLOCK_DIVIDEND]);
   if ('error' in dividend) return err({ kind: 'unexpected-shape', detail: dividend.error });
 
-  // 財務は BPS（⑨ PBR）にしか使わない。欠けていても取り込みは成立させる
+  // 財務は BPS（⑨ PBR）と負債総額（⑥）に使う。欠けていても取り込みは成立させる
+  // （`totalLiabilities` が `null` になるだけ。balance-sheet-derivation.md §10-2）
   const balanceResult = normalizeBlock(reader, BLOCK_BALANCE, raw[BLOCK_BALANCE]);
   const balance = 'error' in balanceResult ? null : balanceResult;
 
@@ -550,6 +686,12 @@ export function parseFyData(
     }
   }
 
+  // ⑥ の入力（`docs/02_design/logic/balance-sheet-derivation.md`）。
+  // 2欄の決算年度が食い違っても取り込みは止めず、診断も出さない（同 §2.3）。
+  // 確定するのは人であり、年度は画面に出して判断してもらう
+  const totalLiabilities = balance === null ? null : readTotalLiabilities(reader, balance);
+  const previousDividendTotal = readPreviousDividendTotal(reader, dividend);
+
   const fiscalYearEndMonth = deriveFiscalYearEndMonth(
     reader,
     balance === null ? [performance, dividend] : [performance, dividend, balance],
@@ -563,6 +705,8 @@ export function parseFyData(
     latestActualEpsSen: latestActualRecord?.epsSen ?? null,
     latestActualBpsSen,
     fiscalYearEndMonth,
+    totalLiabilities,
+    previousDividendTotal,
     diagnostics: reader.diagnostics,
   });
 }

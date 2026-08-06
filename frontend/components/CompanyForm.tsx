@@ -6,7 +6,9 @@ import { deriveMarketMultiples } from '@/domain/company/market-multiples';
 import type { AnalyzeCompanyRequest, IrBankImportResponse, MarketDataImportResponse } from '../api';
 import * as api from '../api';
 import {
+  fiscalPeriodLabel,
   formatPriceAsOf,
+  formatSen,
   multipleSourceText,
   ratioToEditableText,
   senToEditableText,
@@ -81,6 +83,12 @@ type IrBankDividendView = IrBankImportResponse['dividends'][number];
 /** 診断をどのセルの話かに解決したもの。**判定は domain 側**（`import-review.ts` §3.2） */
 type CellWarning = IrBankImportResponse['cellWarnings'][number];
 type YearRowField = NonNullable<CellWarning['field']>;
+/**
+ * ⑥ 用に取り込んだ金額と、それがどの決算年度の値かの組
+ * （`docs/02_design/logic/balance-sheet-derivation.md` §2.3）。
+ * domain から直接 import せず応答型から導出する（`ImportedRecord` と同じ方針）。
+ */
+type ImportedAmountView = NonNullable<IrBankImportResponse['totalLiabilities']>;
 
 /** Yahoo由来の年度別配当。業績データを伴わない（`docs/02_design/ui/pages/market-data-import.md` §5.2） */
 type MarketDataDividendYear = MarketDataImportResponse['dividendRecords'][number];
@@ -112,6 +120,8 @@ function warningReasonText(reason: CellWarning['reason']): string {
       return '同じ決算年度が重複していました。どちらの値も採用していません';
     case 'unknown-note':
       return '予想と実績のどちらとも判断できない注記が付いていました';
+    case 'inconsistent-value':
+      return '他の値と突き合わせると成立しない値でした';
   }
 }
 
@@ -405,6 +415,113 @@ export function resolveImportedPriceYen(
   return senToEditableText(importedPriceSen);
 }
 
+/**
+ * `resolveImportedAmount` の結果。**判別可能ユニオンにしてある。**
+ * 「取り込めなかった（`unavailable`）＝ 値が無い」を型で保証し、
+ * 注記に値や年度を出す経路へ `null` が漏れないようにする（`.claude/CLAUDE.md`）。
+ */
+export type ResolveImportedAmountResult =
+  | {
+      /** 入力欄に入れる値。**取り込めなくても現在値は消さない** */
+      readonly yen: string;
+      readonly noteKind: 'unavailable';
+      readonly imported: null;
+    }
+  | {
+      readonly yen: string;
+      readonly noteKind: 'filled' | 'kept-existing';
+      /** 注記に出す年度・金額の出所 */
+      readonly imported: ImportedAmountView;
+    };
+
+/**
+ * 取り込んだ ⑥ 用の金額を入力欄へ反映するかどうかの判定。**空欄のときだけ埋める。
+ * 手入力は破壊しない**（`resolveImportedPriceYen` と同じ規則。
+ * `docs/02_design/logic/balance-sheet-derivation.md` §2.3 の「確定は人が行う」）。
+ *
+ * `imported` が `null`（判定不能）のとき、**入力欄に `'0'` を書き込まない。**
+ * 無借金・無配（`valueSen: 0`）は値なので `'0'` を入れる（同 §5.4・§5.5）。
+ * 空欄の判定は `resolveImportedPriceYen` と揃えて `=== ''` のみで行う
+ * （空白だけの入力は送信時の `yenToSen` が `null` として扱う）。
+ * React の state を知らない純粋関数にしてある（`fillBlankMultiples` と同じ方針）。
+ */
+export function resolveImportedAmount(
+  currentYen: string,
+  imported: ImportedAmountView | null,
+): ResolveImportedAmountResult {
+  if (imported === null) return { yen: currentYen, noteKind: 'unavailable', imported: null };
+  if (currentYen !== '') return { yen: currentYen, noteKind: 'kept-existing', imported };
+  return { yen: senToEditableText(imported.valueSen), noteKind: 'filled', imported };
+}
+
+/**
+ * 取り込み後にユーザーが欄を書き換えたときの注記（4状態目）。
+ * **取り込み値そのものは出所として残す**（何を上書きしたのかを人が追えるようにする）。
+ */
+export interface EditedImportedAmountNote {
+  readonly noteKind: 'edited';
+  /** 上書きされた取り込み値。年度と金額を注記に出す */
+  readonly imported: ImportedAmountView;
+}
+
+/** ⑥ の入力欄の直下に出す注記の全状態（取り込み直後の3状態＋編集後） */
+export type ImportedAmountNote = ResolveImportedAmountResult | EditedImportedAmountNote;
+
+/**
+ * 取り込み後に欄が編集されたかを見て、実際に出す注記へ解決する
+ * （fe-review CR-1。編集しても取り込み時点の注記が残り、表示中の値とは無関係な
+ * 由来を主張し続けていた）。**注記は state ではなく現在値からの派生**として扱う。
+ * これで値を変える経路（`onChange` 以外に将来増えても）が増えても注記が取り残されない。
+ *
+ * 編集の判定は `note.yen !== currentYen`。`note.yen` は取り込み直後に欄へ入った値
+ * （`filled` なら取り込み値、`kept-existing`/`unavailable` なら当時の手入力値）なので、
+ * **`'0'`（無借金・無配）と `''`（空欄）は別の文字列として正しく区別される。**
+ *
+ * 編集後の扱いは状態で分ける（ユーザー決定、2026-08-06）:
+ * - `filled` … `edited` へ切り替え、取り込み値を出所として残す（何を上書きしたか分かる）
+ * - `kept-existing` / `unavailable` … 注記を消す（`null`）。どちらも「取り込み値を
+ *   入れなかった」という当時の事実の説明であり、値が変わった後は説明として成立しない
+ *
+ * React の state を知らない純粋関数にしてある（`resolveImportedAmount` と同じ方針）。
+ */
+export function resolveEditedAmountNote(
+  note: ResolveImportedAmountResult | null,
+  currentYen: string,
+): ImportedAmountNote | null {
+  if (note === null) return null;
+  if (note.yen === currentYen) return note;
+  if (note.noteKind === 'filled') return { noteKind: 'edited', imported: note.imported };
+  return null;
+}
+
+/**
+ * ⑥ の入力欄の直下に出す注記（同 §2.3・§10-4 への回答）。**採用した決算年度を必ず出す。**
+ * 出さないと「負債総額は3年前、配当総額は今期」の取り合わせに人が気づけない。
+ *
+ * `result` が `null`（まだ取り込みを実行していない、または編集で注記が消えた）は
+ * 何も出さない（`multipleSourceText(null)` が空文字を返すのと同じ扱い）。
+ * `kept-existing` と `edited` は金額も併記する。取り込み値が入力欄に出ていないので、
+ * 年度だけ出すと「入力欄の値がその年度のもの」と誤読される。
+ * **`unavailable` に数値を出さない**（データが無いのに `0` を見せない。
+ * `.claude/rules/frontend.md`）。
+ */
+export function importedAmountNoteText(
+  result: ImportedAmountNote | null,
+  fiscalYearEndMonth: number | null,
+): string {
+  if (result === null) return '';
+  switch (result.noteKind) {
+    case 'unavailable':
+      return 'IRバンクからは取り込めませんでした。原典を見て手入力してください';
+    case 'kept-existing':
+      return `入力済みのため入れ替えていません（取り込み値: ${fiscalPeriodLabel(result.imported.fiscalYear, fiscalYearEndMonth)} / ${formatSen(result.imported.valueSen)}）`;
+    case 'edited':
+      return `手入力に変更しました（取り込み値: ${fiscalPeriodLabel(result.imported.fiscalYear, fiscalYearEndMonth)} / ${formatSen(result.imported.valueSen)}）`;
+    case 'filled':
+      return `IRバンク取り込み: ${fiscalPeriodLabel(result.imported.fiscalYear, fiscalYearEndMonth)}の値を入れました`;
+  }
+}
+
 export interface FillBlankMultiplesResult {
   readonly per: string;
   /** `per` を新しく埋めたときだけ非 `null`。既存値を触らなかった場合は `null` */
@@ -495,6 +612,26 @@ export function CompanyForm({
   const [investmentSecuritiesYen, setInvestmentSecuritiesYen] = useState('');
   const [totalLiabilitiesYen, setTotalLiabilitiesYen] = useState('');
   const [previousDividendTotalYen, setPreviousDividendTotalYen] = useState('');
+  /**
+   * ⑥ の2欄の最新値を同期的に読むための ref。`priceYenRef` と同じ理由
+   * （`handleImport` は `await` を挟むので closure の値は古くなりうる）。
+   */
+  const totalLiabilitiesYenRef = useRef(totalLiabilitiesYen);
+  useEffect(() => {
+    totalLiabilitiesYenRef.current = totalLiabilitiesYen;
+  }, [totalLiabilitiesYen]);
+  const previousDividendTotalYenRef = useRef(previousDividendTotalYen);
+  useEffect(() => {
+    previousDividendTotalYenRef.current = previousDividendTotalYen;
+  }, [previousDividendTotalYen]);
+  /**
+   * ⑥ の2欄の取り込み結果（採用した決算年度を欄の直下に出すために持つ。
+   * `docs/02_design/logic/balance-sheet-derivation.md` §2.3）。取り込み前は `null`
+   */
+  const [totalLiabilitiesNote, setTotalLiabilitiesNote] =
+    useState<ResolveImportedAmountResult | null>(null);
+  const [previousDividendTotalNote, setPreviousDividendTotalNote] =
+    useState<ResolveImportedAmountResult | null>(null);
   const [rows, setRows] = useState<readonly YearRow[]>(() => [
     emptyRow(THIS_YEAR + 1, true),
     ...Array.from({ length: DEFAULT_ROWS }, (_, index) => emptyRow(THIS_YEAR - index)),
@@ -589,6 +726,9 @@ export function CompanyForm({
     setImportNotice(null);
     // 前回の取り込みの警告を別の銘柄に付けたまま残さない
     setCellWarnings([]);
+    // ⑥ の注記も同じ理由でリセットする（前の銘柄の決算年度を残さない）
+    setTotalLiabilitiesNote(null);
+    setPreviousDividendTotalNote(null);
     // 警告の中身が入れ替わるので、古い警告に対する確認を新しい警告へ持ち越さない
     // （code-reviewer 指摘、2026-07-30。確認バナー表示中の再取り込みが未確認のまま素通りしていた）
     setAwaitingConfirmation(false);
@@ -615,6 +755,22 @@ export function CompanyForm({
       setImportedBpsSen(result.latestActualBpsSen);
       // Yahoo 取り込みの配当年度集計に使う（同設計書 §3）
       setFiscalYearEndMonth(result.fiscalYearEndMonth);
+      // ⑥ の2欄は空欄のときだけ埋める。手入力は破壊しない
+      // （`docs/02_design/logic/balance-sheet-derivation.md` §2.3）。
+      // 2欄の決算年度が食い違っても取り込みは止めない（同 §2.3。実測で常態）。
+      // ここでも `await` を挟んでいるので ref から最新値を読む（同指摘#1）
+      const liabilities = resolveImportedAmount(
+        totalLiabilitiesYenRef.current,
+        result.totalLiabilities,
+      );
+      setTotalLiabilitiesYen(liabilities.yen);
+      setTotalLiabilitiesNote(liabilities);
+      const dividendTotal = resolveImportedAmount(
+        previousDividendTotalYenRef.current,
+        result.previousDividendTotal,
+      );
+      setPreviousDividendTotalYen(dividendTotal.yen);
+      setPreviousDividendTotalNote(dividendTotal);
       // `priceYen` も同じ理由で ref から読む（fe-review-round2.md 指摘#2）
       fillMultiplesIfEmpty(
         priceYenRef.current,
@@ -703,7 +859,9 @@ export function CompanyForm({
           '決算月が未取得のため、配当の年度集計は行われませんでした（先にIRバンクから取り込んでください）',
         );
       } else if (mergedDividends.overwrittenCount > 0) {
-        notices.push(`${String(mergedDividends.overwrittenCount)}件の入力値を取り込み値で置き換えました`);
+        notices.push(
+          `${String(mergedDividends.overwrittenCount)}件の入力値を取り込み値で置き換えました`,
+        );
       }
       setMarketImportNotice(notices.join(' / '));
     } catch (cause) {
@@ -887,8 +1045,9 @@ export function CompanyForm({
         </button>
         <p className="meta">
           銘柄コードから業績・配当を取り込み、年度別データへ反映します（取り込みに値が無い
-          欄の手入力は残ります。株価・PER・PBR・貸借対照表は対象外。株価を先に入力しておくと PER/PBR
-          も算出します）。
+          欄の手入力は残ります。株価・PER・PBR は対象外。株価を先に入力しておくと PER/PBR
+          も算出します）。貸借対照表は負債総額・前期末の配当総額だけを取り込みます。
+          流動資産・投資有価証券は取り込めないので手入力してください。
         </p>
         {importError !== null && (
           <p className="error" role="alert">
@@ -982,6 +1141,9 @@ export function CompanyForm({
             inputMode="decimal"
           />
         </label>
+        {/* 4欄のうち2欄は取り込めない。埋まった2欄を見て「⑥ は揃った」と誤解させない
+            （`docs/02_design/logic/balance-sheet-derivation.md` §1・§7.3） */}
+        <p className="meta">IRバンクからは取り込めません（手入力）</p>
         <label>
           投資有価証券（円）
           <input
@@ -990,6 +1152,7 @@ export function CompanyForm({
             inputMode="decimal"
           />
         </label>
+        <p className="meta">IRバンクからは取り込めません（手入力）</p>
         <label>
           負債総額（円）
           <input
@@ -998,6 +1161,15 @@ export function CompanyForm({
             inputMode="decimal"
           />
         </label>
+        {/* 採用した決算年度を欄の直下に出す。2欄の年度ずれは人が見比べて判断する（同 §2.3）。
+            注記は現在値からの派生（`resolveEditedAmountNote`）。手で書き換えられた欄に
+            取り込み時点の由来を出したままにしない（fe-review CR-1） */}
+        <p className="meta">
+          {importedAmountNoteText(
+            resolveEditedAmountNote(totalLiabilitiesNote, totalLiabilitiesYen),
+            fiscalYearEndMonth,
+          )}
+        </p>
         <label>
           前期末の配当総額（円）
           <input
@@ -1006,6 +1178,12 @@ export function CompanyForm({
             inputMode="decimal"
           />
         </label>
+        <p className="meta">
+          {importedAmountNoteText(
+            resolveEditedAmountNote(previousDividendTotalNote, previousDividendTotalYen),
+            fiscalYearEndMonth,
+          )}
+        </p>
       </fieldset>
 
       <fieldset>
