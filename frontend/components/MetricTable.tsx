@@ -1,13 +1,29 @@
 import type { ScoringResponse } from '../api';
-import { NO_DATA, formatMetricValue, reasonText } from '../format';
+import { NO_DATA, formatMetricValue, payoutRatioBreakdownText, reasonText } from '../format';
 
 /**
  * 指標ごとのスコア一覧。
  *
  * **データ取得も計算もしない。props を描画するだけ**（`.claude/rules/frontend.md`）。
  * 表形式データなので `<table>` を使う。`<div>` のグリッドで代替しない。
+ *
+ * ③ 予想配当性向の内訳は `MetricView`（`metrics` の各行）ではなく `ScoringResponse`
+ * トップレベルにある（`payoutRatioSource`/`payoutRatioForecast`/`payoutRatioActual`。
+ * `dividendSource` と同じ置き方。`src/handler/dto/company-input.ts` 実装済みの形）。
+ * ③ 行を描画するときだけこの3つを使い、既存の行構造・汎用ループは変えない
+ * （備考列への追記。Manager決定、2026-08-06）。
  */
-export function MetricTable({ metrics }: { readonly metrics: ScoringResponse['metrics'] }) {
+export function MetricTable({
+  metrics,
+  payoutRatioSource,
+  payoutRatioForecast,
+  payoutRatioActual,
+}: {
+  readonly metrics: ScoringResponse['metrics'];
+  readonly payoutRatioSource: ScoringResponse['payoutRatioSource'];
+  readonly payoutRatioForecast: ScoringResponse['payoutRatioForecast'];
+  readonly payoutRatioActual: ScoringResponse['payoutRatioActual'];
+}) {
   return (
     <table className="metric-table">
       <caption>指標別スコア</caption>
@@ -32,7 +48,19 @@ export function MetricTable({ metrics }: { readonly metrics: ScoringResponse['me
               </td>
               {/* 判定不能に 0 を出さない。0点と「計算できなかった」は別物（§0.5） */}
               <td className="numeric">{unavailable ? NO_DATA : `${metric.score} 点`}</td>
-              <td>{reasonText(metric.unavailableReason)}</td>
+              <td>
+                {reasonText(metric.unavailableReason)}
+                {/* ③ だけ予想・実績の内訳と採用元を併記する（既存の行構造は変えない） */}
+                {metric.key === 'payoutRatio' && (
+                  <div className="metric-detail">
+                    {payoutRatioBreakdownText(
+                      payoutRatioForecast,
+                      payoutRatioActual,
+                      payoutRatioSource,
+                    )}
+                  </div>
+                )}
+              </td>
             </tr>
           );
         })}

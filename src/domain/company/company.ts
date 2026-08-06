@@ -99,6 +99,19 @@ export function latestForecastRecord(company: Company): FinancialRecord | null {
 }
 
 /**
+ * 最新の実績レコード。③ の実績側が使う。無ければ `null`
+ * （`latestForecastRecord` の `isForecast` フィルタを反転したもの。設計書 §2）
+ */
+export function latestActualRecord(company: Company): FinancialRecord | null {
+  let latest: FinancialRecord | null = null;
+  for (const record of company.records) {
+    if (record.isForecast) continue;
+    if (latest === null || record.fiscalYear > latest.fiscalYear) latest = record;
+  }
+  return latest;
+}
+
+/**
  * 実績系列から指定した列を**年度に揃えて**年度降順で取り出す。
  *
  * ⚠️ **添字を年数として使えるようにするのがこの関数の役目。**

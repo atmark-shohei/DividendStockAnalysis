@@ -10,6 +10,7 @@ import {
   type Company,
   type PbrSource,
   type PerSource,
+  latestActualRecord,
   latestForecastRecord,
   seriesOf,
 } from '../domain/company/company';
@@ -17,6 +18,7 @@ import {
   type DividendSource,
   actualDividendSeries,
   selectAnnualDividend,
+  selectLatestActualDividend,
   selectLatestForecastDividend,
 } from '../domain/company/dividend-record';
 import { calculateConsecutiveYears } from '../domain/scoring/consecutive-years';
@@ -29,10 +31,11 @@ import {
 import { calculateEpsCagr } from '../domain/scoring/eps-cagr';
 import { calculateMixCoefficient } from '../domain/scoring/mix-coefficient';
 import { calculateOperatingMargin } from '../domain/scoring/operating-margin';
-import { calculatePayoutRatio } from '../domain/scoring/payout-ratio';
+import { calculatePayoutRatio, payoutRatioToMetricScore } from '../domain/scoring/payout-ratio';
 import { calculateRevenueCagr } from '../domain/scoring/revenue-cagr';
 import { calculateRoeAverage } from '../domain/scoring/roe-average';
 import { type ScoreCard, buildScoreCard } from '../domain/scoring/scoring-service';
+import { type MetricScore } from '../domain/shared/metric-score';
 
 /**
  * ①⑦ が比較する「5年前」の添字。`seriesOf` が年度に揃えた系列を返すので、
@@ -52,15 +55,20 @@ function at(series: readonly (number | null)[], index: number): number | null {
 }
 
 /**
- * 会社の財務データから10指標を採点し、スコアカードを返す。
- *
- * 予想と実績を混ぜないため、平均・CAGR 系には実績だけを渡す（`seriesOf` が
- * 実績に絞る）。③ だけは今期予想を使うので `latestForecastRecord` から取る。
+ * 採点結果。予想と実績を混ぜないため、平均・CAGR 系には実績だけを渡す（`seriesOf` が
+ * 実績に絞る）。③ だけは今期予想・直近実績の両方を使う（`latestForecastRecord` /
+ * `latestActualRecord` から取る）。
  */
 export interface CompanyScoring {
   readonly card: ScoreCard;
   /** ⑩ が採用した配当の出所。画面に「予想」「実績」を併記するため */
   readonly dividendSource: DividendSource | null;
+  /** ③ が採点に採用した出所。画面に「予想」「実績」を併記するため（設計書 §7） */
+  readonly payoutRatioSource: 'forecast' | 'actual' | null;
+  /** ③ 予想側の判定結果。採点への採用と無関係に常に持つ（表示用。設計書 §2） */
+  readonly payoutRatioForecast: MetricScore;
+  /** ③ 実績側の判定結果。同上 */
+  readonly payoutRatioActual: MetricScore;
   /** ⑨ PER の出所。保存済みの値をそのまま通す（採点では算出しない） */
   readonly perSource: PerSource | null;
   /** ⑨ PBR の出所 */
@@ -69,7 +77,13 @@ export interface CompanyScoring {
   readonly fetchedAt: string;
 }
 
-export function scoreCompany(company: Company): CompanyScoring {
+/**
+ * 会社の財務データから10指標を採点し、スコアカードを返す。
+ *
+ * @param useActualForScoring ③ 予想配当性向で実績を強制採用するか（設計書 §5.1・§7）。
+ *   既定 `false`（予想優先。予想が判定不能なら実績にフォールバック）
+ */
+export function scoreCompany(company: Company, useActualForScoring = false): CompanyScoring {
   // 年度に揃えた系列を作る。添字がそのまま「何年前か」になる（欠損年は null）
   // ①② の配当は `DividendRecord` から取る（ADR-0009）
   const dividendSeries = actualDividendSeries(company.dividends, SERIES_YEARS);
@@ -89,6 +103,27 @@ export function scoreCompany(company: Company): CompanyScoring {
     forecastDividend !== null &&
     forecast.fiscalYear === forecastDividend.fiscalYear;
 
+  // ③ 実績側も同じ規則で年度を突き合わせる（設計書 §2 / §6.4.1。実績側にも ADR-0009 の
+  // 「決定した結合規則」を適用する）
+  const actual = latestActualRecord(company);
+  const actualDividend = selectLatestActualDividend(company.dividends);
+  const actualYearsMatch =
+    actual !== null &&
+    actualDividend !== null &&
+    actual.fiscalYear === actualDividend.fiscalYear;
+
+  const payoutRatioResult = calculatePayoutRatio({
+    forecast: {
+      dividendSen: forecastYearsMatch ? forecastDividend.amountSen : null,
+      epsSen: forecastYearsMatch ? forecast.epsSen : null,
+    },
+    actual: {
+      dividendSen: actualYearsMatch ? actualDividend.amountSen : null,
+      epsSen: actualYearsMatch ? actual.epsSen : null,
+    },
+    useActualForScoring,
+  });
+
   const yieldResult = calculateDividendYield({
     priceSen: company.priceSen,
     dividend: selectedDividend,
@@ -101,10 +136,7 @@ export function scoreCompany(company: Company): CompanyScoring {
       dividendFiveYearsAgo: at(dividendSeries, FIVE_YEARS_AGO_INDEX),
     }),
     consecutiveYears: calculateConsecutiveYears({ dividendHistory: dividendSeries }),
-    payoutRatio: calculatePayoutRatio({
-      forecastDividend: forecastYearsMatch ? forecastDividend.amountSen : null,
-      forecastEps: forecastYearsMatch ? forecast.epsSen : null,
-    }),
+    payoutRatio: payoutRatioToMetricScore(payoutRatioResult),
     epsCagr: calculateEpsCagr({ epsHistory: epsSeries }),
     roeAverage: calculateRoeAverage({ roeHistory: roeSeries }),
     dividendSustainability: calculateDividendSustainability({
@@ -128,6 +160,9 @@ export function scoreCompany(company: Company): CompanyScoring {
   return {
     card,
     dividendSource: yieldResult.dividendSource,
+    payoutRatioSource: payoutRatioResult.source,
+    payoutRatioForecast: payoutRatioResult.forecast,
+    payoutRatioActual: payoutRatioResult.actual,
     perSource: company.multiples.perSource,
     pbrSource: company.multiples.pbrSource,
     fetchedAt: company.fetchedAt,

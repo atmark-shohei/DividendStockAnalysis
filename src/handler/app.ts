@@ -17,7 +17,12 @@ import { analyzeCompany } from '../usecase/analyze-company';
 import { importFromIrBank } from '../usecase/import-from-irbank';
 import { importMarketData } from '../usecase/import-market-data';
 import { deleteCompany, getCompanyScoring, listCompanies } from '../usecase/read-companies';
-import { analyzeCompanyRequest, toCompany, toScoringResponse } from './dto/company-input';
+import {
+  analyzeCompanyRequest,
+  toCompany,
+  toScoringResponse,
+  useActualForScoringQuery,
+} from './dto/company-input';
 import {
   isExternalFactor,
   toIrBankErrorResponse,
@@ -89,7 +94,13 @@ export function createApp(dependencies: AppDependencies): Hono {
 
     const fetchedAt = dependencies.now().toISOString();
     const company = toCompany(parsed.data, fetchedAt);
-    const scoring = await analyzeCompany(dependencies.repository, company, dependencies.now);
+    const useActualForScoring = parsed.data.useActualForScoring ?? false;
+    const scoring = await analyzeCompany(
+      dependencies.repository,
+      company,
+      dependencies.now,
+      useActualForScoring,
+    );
     return context.json(toScoringResponse(scoring), 201);
   });
 
@@ -150,13 +161,28 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json(toMarketDataImportResponse(result.value));
   });
 
+  /**
+   * `useActualForScoring` は③ 予想配当性向で実績を強制採用するか（設計書 §5.1・§7）。
+   * 未指定なら既定 `false`（予想優先）。`fiscalYearEndMonth` と同じ
+   * 「クエリパラメータは zod で検証する」方式（BE 計画 §0.1・§4.2）。
+   */
   app.get('/api/companies/:code', async (context) => {
     const code = context.req.param('code');
     if (!COMPANY_CODE_PATTERN.test(code)) {
       return context.json({ error: '銘柄コードの形式が不正です' }, 400);
     }
 
-    const scoring = await getCompanyScoring(dependencies.repository, code);
+    const rawUseActualForScoring = context.req.query('useActualForScoring');
+    let useActualForScoring = false;
+    if (rawUseActualForScoring !== undefined) {
+      const parsed = useActualForScoringQuery.safeParse(rawUseActualForScoring);
+      if (!parsed.success) {
+        return context.json({ error: 'useActualForScoring は true か false で指定する' }, 400);
+      }
+      useActualForScoring = parsed.data;
+    }
+
+    const scoring = await getCompanyScoring(dependencies.repository, code, useActualForScoring);
     if (scoring === null) {
       return context.json({ error: '指定された銘柄は保存されていません' }, 404);
     }

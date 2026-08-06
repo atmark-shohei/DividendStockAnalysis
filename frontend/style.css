@@ -169,6 +169,13 @@ td {
   font-size: var(--font-size-sm);
 }
 
+/* ③ 予想配当性向の内訳（備考列への追記分）。備考本文と区別するため改行して出す */
+.metric-detail {
+  display: block;
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
 .error {
   color: var(--color-error);
 }

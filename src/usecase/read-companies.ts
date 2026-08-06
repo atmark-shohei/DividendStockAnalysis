@@ -25,10 +25,11 @@ export async function listCompanies(
 export async function getCompanyScoring(
   repository: CompanyRepository,
   code: string,
+  useActualForScoring = false,
 ): Promise<CompanyScoring | null> {
   const company = await repository.findByCode(code);
   if (company === null) return null;
-  return scoreCompany(company);
+  return scoreCompany(company, useActualForScoring);
 }
 
 export async function deleteCompany(repository: CompanyRepository, code: string): Promise<void> {

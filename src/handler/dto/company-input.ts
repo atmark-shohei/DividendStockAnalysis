@@ -75,9 +75,28 @@ export const analyzeCompanyRequest = z.object({
    * 画面側にも同じ範囲検証を置くが、外から直接叩かれる経路もあるのでここでも見る。
    */
   priceSen: senValue.min(0).max(MAX_PRICE_SEN).nullable(),
+  /**
+   * ③ 予想配当性向で実績を強制採用するか（設計書 §5.1・§7。画面のチェックボックス）。
+   *
+   * `.optional()` を選ぶ理由: `.default(false)` にすると `z.infer` の出力型で
+   * このフィールドが必須になり、既存フィクスチャ（このフィールドを持たない）が
+   * 型エラーになる。`.optional()` なら型は `boolean | undefined` のままで、
+   * handler 側で `?? false` として既定値を適用すればよい。
+   */
+  useActualForScoring: z.boolean().optional(),
 });
 
 export type AnalyzeCompanyRequest = z.infer<typeof analyzeCompanyRequest>;
+
+/**
+ * `GET /api/companies/:code?useActualForScoring=true|false` のクエリ検証。
+ * `fiscalYearEndMonthQuery`（`market-data-import.ts`）と同じ「クエリパラメータは
+ * zod で検証する」方式。`"true"`/`"false"` の文字列を bool に変換する
+ * （BE 計画 §0.1・§4.1。フィールド名は POST 側の `useActualForScoring` と揃える）。
+ */
+export const useActualForScoringQuery = z
+  .enum(['true', 'false'])
+  .transform((value) => value === 'true');
 
 /**
  * DTO をドメインの型へ詰め替える。**年度降順に並べ替えるのはここ**。
@@ -108,12 +127,25 @@ export interface MetricView {
   readonly unavailableReason: string | null;
 }
 
+/** ③ 予想側・実績側それぞれの判定結果を画面へ渡す形（内訳表示用） */
+export interface PayoutRatioSideView {
+  readonly score: number | null;
+  readonly value: number | null;
+  readonly unavailableReason: string | null;
+}
+
 export interface ScoringResponse {
   readonly totalScore: number;
   readonly maxTotalScore: number;
   readonly effectiveMetricCount: number;
   readonly totalMetricCount: number;
   readonly dividendSource: 'forecast' | 'actual' | null;
+  /** ③ が採点に採用した出所。画面に「予想」「実績」を併記するため（設計書 §7） */
+  readonly payoutRatioSource: 'forecast' | 'actual' | null;
+  /** ③ 予想側の内訳。採点への採用と無関係に常に返す（設計書 §2） */
+  readonly payoutRatioForecast: PayoutRatioSideView;
+  /** ③ 実績側の内訳。同上 */
+  readonly payoutRatioActual: PayoutRatioSideView;
   /** ⑨ PER の出所。予想EPS / 実績EPS / 手入力のどれで算出したか。§3.5 */
   readonly perSource: 'forecast-eps' | 'actual-eps' | 'manual' | null;
   /** ⑨ PBR の出所 */
@@ -135,6 +167,17 @@ export function toScoringResponse(scoring: CompanyScoring): ScoringResponse {
     effectiveMetricCount: scoring.card.effectiveMetricCount,
     totalMetricCount: scoring.card.totalMetricCount,
     dividendSource: scoring.dividendSource,
+    payoutRatioSource: scoring.payoutRatioSource,
+    payoutRatioForecast: {
+      score: scoring.payoutRatioForecast.score,
+      value: scoring.payoutRatioForecast.value,
+      unavailableReason: scoring.payoutRatioForecast.unavailableReason,
+    },
+    payoutRatioActual: {
+      score: scoring.payoutRatioActual.score,
+      value: scoring.payoutRatioActual.value,
+      unavailableReason: scoring.payoutRatioActual.unavailableReason,
+    },
     perSource: scoring.perSource,
     pbrSource: scoring.pbrSource,
     fetchedAt: scoring.fetchedAt,

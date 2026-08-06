@@ -5,6 +5,8 @@
  * 混同すると利回り計算が壊れる。
  */
 
+import type { ScoringResponse } from './api';
+
 /** データなしの表示。`0` と区別する */
 export const NO_DATA = '—';
 
@@ -84,7 +86,13 @@ export function formatPriceAsOf(isoUtc: string | null): string {
   return `${date.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}（JST）`;
 }
 
-/** 採用した配当の出所。画面に必ず併記する（⑩ 設計書 §3.1） */
+/**
+ * 採用した配当の出所。画面に必ず併記する（⑩ 設計書 §3.1）。
+ *
+ * `'forecast' | 'actual' | null` → `'予想' | '実績' | NO_DATA` の汎用変換であり、
+ * ⑩ 配当利回りの採用元表示だけでなく、③ 予想配当性向の採用元表示
+ * （`payoutRatioBreakdownText` 内）にも共通利用する（型が同一のため）。
+ */
 export function dividendSourceText(source: 'forecast' | 'actual' | null): string {
   if (source === 'forecast') return '予想';
   if (source === 'actual') return '実績';
@@ -113,6 +121,53 @@ export function multipleSourceText(
     case null:
       return '';
   }
+}
+
+/**
+ * ③ 予想配当性向の内訳（予想または実績いずれか片側）の判定結果。
+ * ハンドラ DTO の `ScoringResponse['payoutRatioForecast']`（`PayoutRatioSideView`。
+ * `src/handler/dto/company-input.ts`）を type alias として使う。手書きで再定義しない
+ * （`frontend/components/MetricTable.tsx` の書き方に揃える。二重定義しない）。
+ */
+type PayoutRatioBreakdown = ScoringResponse['payoutRatioForecast'];
+
+/**
+ * ③ 予想配当性向の内訳（予想/実績それぞれの算出値・スコア・採用元）を1行の文言にする。
+ *
+ * `docs/02_design/logic/payout-ratio-scoring.md` §7。判定不能（`null`）は `NO_DATA` +
+ * 理由文言にする。無配（0%・判定可）は `0.00%` / `0点` を出す。**0 と null を混同しない**
+ * （`.claude/rules/frontend.md`「データが無い場合に 0 を表示しない」）。
+ */
+export function payoutRatioBreakdownText(
+  forecast: PayoutRatioBreakdown,
+  actual: PayoutRatioBreakdown,
+  source: 'forecast' | 'actual' | null,
+): string {
+  const part = (label: string, breakdown: PayoutRatioBreakdown): string => {
+    const value = formatMetricValue(breakdown.value, '%', false);
+    const score = breakdown.score === null ? NO_DATA : `${String(breakdown.score)} 点`;
+    const reason =
+      breakdown.unavailableReason === null ? '' : `（${reasonText(breakdown.unavailableReason)}）`;
+    return `${label} ${value} / ${score}${reason}`;
+  };
+  return `${part('予想', forecast)}／${part('実績', actual)}／採用: ${dividendSourceText(source)}`;
+}
+
+/**
+ * 決算年度を「2026年3月期」の形にする（`docs/02_design/logic/balance-sheet-derivation.md` §2.3）。
+ *
+ * ⑥ の入力（負債総額・前期末の配当総額）はどの決算年度の値かを持たないと、
+ * 「3年前の負債総額」と「今期の配当総額」を混ぜたことに誰も気づけない。年度を
+ * 画面に出して人が判断する。
+ *
+ * 決算月は取り込みで一意に定まらないことがある（決算期変更の疑いで
+ * `fiscalYearEndMonth` が `null`。同 §10-3）。そのときは「2026年度」までにとどめ、
+ * **月を推測しない。** 年度自体が無ければ `0年3月期` のような偽の期を作らず `—` を返す。
+ */
+export function fiscalPeriodLabel(fiscalYear: number | null, endMonth: number | null): string {
+  if (fiscalYear === null) return NO_DATA;
+  if (endMonth === null) return `${String(fiscalYear)}年度`;
+  return `${String(fiscalYear)}年${String(endMonth)}月期`;
 }
 
 /**

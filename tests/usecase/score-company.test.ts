@@ -193,10 +193,163 @@ describe('③ 予想配当性向は予想EPSと予想配当の年度が揃った
     expect(metric.value).toBeCloseTo(40, 6);
   });
 
-  it('予想がどちらも無ければ判定不能', () => {
-    const metric = payoutRatioOf(company([record(2026)], [actualDividend(2026, 9_000)]));
+  it('予想がどちらも無ければ予想側は判定不能', () => {
+    // record(2026) はデフォルトで isForecast: false なので、ここでは予想データが
+    // 一切無い状態を作っている。`record`/`actualDividend` を使うため、実績側は
+    // 判定できるデータが揃っている。
+    const target = company([record(2026)], [actualDividend(2026, 9_000)]);
+    expect(scoreCompany(target).payoutRatioForecast.unavailableReason).toBe('input-missing');
+  });
+
+  it(
+    '2026-08-06 決定（設計書 §7 決定3）: 予想が判定不能なら実績にフォールバックする。' +
+      '既定（useActualForScoring 未指定）の挙動が変わった点',
+    () => {
+      const target = company([record(2026)], [actualDividend(2026, 9_000)]);
+      const scoring = scoreCompany(target);
+      expect(scoring.payoutRatioSource).toBe('actual');
+      expect(scoring.card.metrics.payoutRatio.score).not.toBeNull();
+    },
+  );
+
+  it('予想も実績も無ければ判定不能（フォールバック先も無い場合）', () => {
+    const metric = payoutRatioOf(company([], []));
     expect(metric.score).toBeNull();
     expect(metric.unavailableReason).toBe('input-missing');
+  });
+});
+
+/**
+ * ③ 実績側の年度突き合わせ（ADR-0009「決定した結合規則」を実績側にも適用。
+ * 設計書 §2 / §6.4.1）。予想側の既存 describe と対にする。
+ *
+ * `useActualForScoring: true` で実績を強制採用し、`card.metrics.payoutRatio` を
+ * 直接見ることで実績側の判定結果が採点に反映されることを確認する。
+ */
+describe('③ 予想配当性向は実績EPSと実績配当の年度が揃ったときだけ採点する（実績側）', () => {
+  const actualEps = (fiscalYear: number, epsSen: number) => record(fiscalYear, { epsSen });
+  const actualDividendRecord = (fiscalYear: number, annualAmountSen: number): DividendRecord => ({
+    fiscalYear,
+    kind: 'actual',
+    annualAmountSen,
+  });
+
+  const payoutRatioOf = (target: Company) =>
+    scoreCompany(target, true).card.metrics.payoutRatio;
+
+  it('実績EPSと実績配当が同じ年度で揃えばその年度で採点する', () => {
+    const metric = payoutRatioOf(
+      company([actualEps(2026, 30_000)], [actualDividendRecord(2026, 9_000)]),
+    );
+    // 90円 ÷ 300円 = 30%
+    expect(metric.value).toBeCloseTo(30, 6);
+    expect(metric.score).not.toBeNull();
+  });
+
+  it('実績配当が1年古ければ判定不能。その年度へ落とさない', () => {
+    const metric = payoutRatioOf(
+      company([actualEps(2026, 30_000)], [actualDividendRecord(2025, 9_000)]),
+    );
+    expect(metric.score).toBeNull();
+    expect(metric.unavailableReason).toBe('input-missing');
+  });
+
+  it('実績EPSが1年古ければ判定不能', () => {
+    const metric = payoutRatioOf(
+      company([actualEps(2025, 30_000)], [actualDividendRecord(2026, 9_000)]),
+    );
+    expect(metric.score).toBeNull();
+    expect(metric.unavailableReason).toBe('input-missing');
+  });
+
+  it('予想側は揃うが実績側は揃わない → 実績側を強制採用しているので判定不能', () => {
+    const target = company(
+      [record(2026, { isForecast: true, epsSen: 30_000 }), actualEps(2025, 30_000)],
+      [
+        { fiscalYear: 2026, kind: 'forecast', annualAmountSen: 9_000 },
+        actualDividendRecord(2024, 9_000),
+      ],
+    );
+    expect(payoutRatioOf(target).score).toBeNull();
+  });
+
+  it('実績側は揃うが予想側は揃わない → 実績を強制採用しているので実績側の判定結果が採点される', () => {
+    const target = company(
+      [record(2027, { isForecast: true, epsSen: 30_000 }), actualEps(2026, 30_000)],
+      [
+        { fiscalYear: 2025, kind: 'forecast', annualAmountSen: 9_000 },
+        actualDividendRecord(2026, 9_000),
+      ],
+    );
+    expect(payoutRatioOf(target).score).not.toBeNull();
+  });
+});
+
+/**
+ * ③ のソース選択（`useActualForScoring`。設計書 §5.1・§7）。
+ * usecase 経由で `scoreCompany` に渡ったフラグが `calculatePayoutRatio` に届き、
+ * `scoring.payoutRatioSource` へ反映されることを確認する（結線の確認。
+ * 判定そのものは `tests/domain/scoring/payout-ratio.test.ts` §6.5 で尽くしてある）。
+ */
+describe('③ 予想配当性向のソース選択（useActualForScoring）', () => {
+  const forecastEps = (fiscalYear: number, epsSen: number) =>
+    record(fiscalYear, { isForecast: true, epsSen });
+  const forecastDividendRecord = (fiscalYear: number, annualAmountSen: number): DividendRecord => ({
+    fiscalYear,
+    kind: 'forecast',
+    annualAmountSen,
+  });
+  const actualEps = (fiscalYear: number, epsSen: number) => record(fiscalYear, { epsSen });
+  const actualDividendRecord = (fiscalYear: number, annualAmountSen: number): DividendRecord => ({
+    fiscalYear,
+    kind: 'actual',
+    annualAmountSen,
+  });
+
+  const bothAvailable = () =>
+    company(
+      [forecastEps(2027, 30_000), actualEps(2026, 30_000)],
+      [forecastDividendRecord(2027, 9_000), actualDividendRecord(2026, 12_000)],
+    );
+
+  it('useActualForScoring 未指定（既定 false）→ 予想優先', () => {
+    const scoring = scoreCompany(bothAvailable());
+    expect(scoring.payoutRatioSource).toBe('forecast');
+    // 90円 ÷ 300円 = 30%（予想側）
+    expect(scoring.card.metrics.payoutRatio.value).toBeCloseTo(30, 6);
+  });
+
+  it('useActualForScoring: false かつ予想不能・実績可能 → 実績にフォールバックし、payoutRatioSource が actual になる', () => {
+    const target = company(
+      [actualEps(2026, 30_000)],
+      [actualDividendRecord(2026, 12_000)],
+    );
+    const scoring = scoreCompany(target, false);
+    expect(scoring.payoutRatioSource).toBe('actual');
+    // 120円 ÷ 300円 = 40%（実績側）
+    expect(scoring.card.metrics.payoutRatio.value).toBeCloseTo(40, 6);
+  });
+
+  it('useActualForScoring: true → 実績を強制採用。payoutRatioSource が actual', () => {
+    const scoring = scoreCompany(bothAvailable(), true);
+    expect(scoring.payoutRatioSource).toBe('actual');
+    expect(scoring.card.metrics.payoutRatio.value).toBeCloseTo(40, 6);
+  });
+
+  it('useActualForScoring: true かつ実績不能 → payoutRatio が null、payoutRatioSource も null（予想へフォールバックしない）', () => {
+    const target = company(
+      [forecastEps(2027, 30_000)],
+      [forecastDividendRecord(2027, 9_000)],
+    );
+    const scoring = scoreCompany(target, true);
+    expect(scoring.card.metrics.payoutRatio.score).toBeNull();
+    expect(scoring.payoutRatioSource).toBeNull();
+  });
+
+  it('予想・実績どちらの内訳も常に返す（表示用）', () => {
+    const scoring = scoreCompany(bothAvailable(), false);
+    expect(scoring.payoutRatioForecast.score).not.toBeNull();
+    expect(scoring.payoutRatioActual.score).not.toBeNull();
   });
 });
 

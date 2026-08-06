@@ -18,14 +18,27 @@ interface Selection {
   readonly loading: boolean;
 }
 
+/**
+ * ③ 予想配当性向の採点に実績を使うかのチェックボックス状態と切替ハンドラ。
+ * 1つのオブジェクトにまとめ、`ListPage` の props 数を増やさない
+ * （`.claude/rules/frontend.md`「props は 5 個を超えたらオブジェクトにまとめる」）。
+ */
+export interface PayoutRatioSourceControl {
+  readonly checked: boolean;
+  readonly onToggle: (checked: boolean) => void;
+}
+
 export function ListPage({
   companies,
   selected,
+  payoutRatioSourceControl,
   onSelect,
   onDelete,
 }: {
   readonly companies: readonly CompanySummary[];
   readonly selected: Selection;
+  /** ③ 予想配当性向の採点に実績を使うか（`docs/02_design/logic/payout-ratio-scoring.md` §7） */
+  readonly payoutRatioSourceControl: PayoutRatioSourceControl;
   readonly onSelect: (code: string) => void;
   readonly onDelete: (code: string) => void;
 }) {
@@ -89,7 +102,7 @@ export function ListPage({
       {selected.code !== null && (
         <section aria-live="polite">
           <h2>解析結果: {selectedName}</h2>
-          <ScoringBody selected={selected} />
+          <ScoringBody selected={selected} payoutRatioSourceControl={payoutRatioSourceControl} />
         </section>
       )}
     </>
@@ -99,17 +112,53 @@ export function ListPage({
 /**
  * 解析結果の中身。**「読み込み中」と「取得できなかった」を必ず区別する。**
  * 失敗をいつまでも「読み込み中…」と出すと、待てば表示されると誤解させる。
+ *
+ * ③ 予想配当性向のソース切替チェックボックスは、解析結果セクション（会社詳細）に
+ * だけ置く。評価基準タブ（F-31）は未実装のため（`docs/02_design/ui/screen-list.md`。
+ * Manager確認済み: 会社詳細のみで確定）、`CompanyForm.tsx`（データ入力画面）には置かない。
  */
-function ScoringBody({ selected }: { readonly selected: Selection }) {
-  if (selected.loading) return <p className="meta">読み込み中…</p>;
+function ScoringBody({
+  selected,
+  payoutRatioSourceControl,
+}: {
+  readonly selected: Selection;
+  readonly payoutRatioSourceControl: PayoutRatioSourceControl;
+}) {
+  const sourceCheckbox = (
+    <p className="meta">
+      <label className="inline">
+        <input
+          type="checkbox"
+          checked={payoutRatioSourceControl.checked}
+          onChange={(event) => payoutRatioSourceControl.onToggle(event.target.checked)}
+        />
+        実績配当性向を採点に使う
+      </label>
+    </p>
+  );
+
+  if (selected.loading) {
+    return (
+      <>
+        {sourceCheckbox}
+        <p className="meta">読み込み中…</p>
+      </>
+    );
+  }
 
   if (selected.scoring === null) {
     // 何が起きたかは App のエラー表示（role="alert"）が出す。ここは次の行動だけ示す
-    return <p className="meta">解析結果を表示できませんでした。一覧から選び直してください。</p>;
+    return (
+      <>
+        {sourceCheckbox}
+        <p className="meta">解析結果を表示できませんでした。一覧から選び直してください。</p>
+      </>
+    );
   }
 
   return (
     <>
+      {sourceCheckbox}
       <p className="total">
         総合点 <strong>{selected.scoring.totalScore}</strong> / {selected.scoring.maxTotalScore} 点
         {/* 有効指標数の併記は §0.5 の必須要件。80/100 の誤読を防ぐ */}
@@ -128,7 +177,12 @@ function ScoringBody({ selected }: { readonly selected: Selection }) {
         </p>
       )}
       <ScoreRadar metrics={selected.scoring.metrics} />
-      <MetricTable metrics={selected.scoring.metrics} />
+      <MetricTable
+        metrics={selected.scoring.metrics}
+        payoutRatioSource={selected.scoring.payoutRatioSource}
+        payoutRatioForecast={selected.scoring.payoutRatioForecast}
+        payoutRatioActual={selected.scoring.payoutRatioActual}
+      />
     </>
   );
 }

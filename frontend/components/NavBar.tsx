@@ -42,7 +42,7 @@ export function NavBar({
   return (
     <nav className="nav" aria-label="画面切り替え">
       <NavLink
-        to={{ kind: 'list', selectedCode: null }}
+        to={{ kind: 'list', selectedCode: null, useActualForScoring: false }}
         active={current.kind === 'list'}
         onNavigate={onNavigate}
       >

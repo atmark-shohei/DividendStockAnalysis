@@ -234,6 +234,75 @@ describe('POST /api/companies', () => {
   });
 });
 
+/**
+ * ③ 予想配当性向のソース切替（`useActualForScoring`。設計書 §5.1・§7）の結線確認。
+ * 判定そのものは domain/usecase 側のテストで尽くしてある。ここでは
+ * POST ボディ・GET クエリの両経路でフラグが usecase まで届くことだけを見る。
+ *
+ * `samplePayload()` の予想EPSを 20,000銭・予想配当を 5,000銭に上書きして性向 25%
+ * （9点）にし、最新実績年度（2025）の配当を 9,000銭に上書きして実績EPS 30,000銭との
+ * 性向を 30%（8点）にする。予想・実績で区分（点数）が変わるようにして、
+ * `payoutRatioSource` の切り替わりが採点結果にも反映されることを確認する。
+ */
+function payoutRatioSamplePayload(
+  overrides: Partial<AnalyzeCompanyRequest> = {},
+): AnalyzeCompanyRequest {
+  const base = samplePayload();
+  return {
+    ...base,
+    records: [
+      { fiscalYear: 2026, isForecast: true, epsSen: 20_000, roePercent: null, revenueSen: null, operatingMarginPercent: null },
+      ...base.records.filter((r) => !r.isForecast),
+    ],
+    dividends: [
+      { fiscalYear: 2026, kind: 'forecast', annualAmountSen: 5_000 },
+      { fiscalYear: 2025, kind: 'actual', annualAmountSen: 9_000 },
+      ...base.dividends.filter((d) => d.fiscalYear !== 2025 && d.fiscalYear !== 2026),
+    ],
+    ...overrides,
+  };
+}
+
+describe('POST /api/companies — useActualForScoring', () => {
+  it('未指定なら予想を採用する（既定 false）', async () => {
+    const body = (await (await post(payoutRatioSamplePayload())).json()) as ScoringResponse;
+    // 5,000銭 ÷ 20,000銭 = 25% → 9点
+    expect(body.payoutRatioSource).toBe('forecast');
+    expect(body.metrics.find((m) => m.key === 'payoutRatio')?.score).toBe(9);
+  });
+
+  it('true を渡すと実績を強制採用する', async () => {
+    const body = (await (
+      await post(payoutRatioSamplePayload({ useActualForScoring: true }))
+    ).json()) as ScoringResponse;
+    // 9,000銭 ÷ 30,000銭 = 30% → 8点。予想の25%（9点）とは別区分になる
+    expect(body.payoutRatioSource).toBe('actual');
+    expect(body.metrics.find((m) => m.key === 'payoutRatio')?.score).toBe(8);
+  });
+});
+
+describe('GET /api/companies/:code — useActualForScoring', () => {
+  it('?useActualForScoring=true クエリで実績を強制採用できる', async () => {
+    await post(payoutRatioSamplePayload());
+
+    const withActual = (await (
+      await app().request('/api/companies/9433?useActualForScoring=true')
+    ).json()) as ScoringResponse;
+    expect(withActual.payoutRatioSource).toBe('actual');
+
+    const withoutActual = (await (
+      await app().request('/api/companies/9433')
+    ).json()) as ScoringResponse;
+    expect(withoutActual.payoutRatioSource).toBe('forecast');
+  });
+
+  it('不正なクエリ値（true/false 以外）は 400', async () => {
+    await post(payoutRatioSamplePayload());
+    const response = await app().request('/api/companies/9433?useActualForScoring=abc');
+    expect(response.status).toBe(400);
+  });
+});
+
 describe('GET /api/companies', () => {
   it('保存済みの一覧を返す', async () => {
     await post(samplePayload());

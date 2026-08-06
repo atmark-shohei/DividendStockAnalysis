@@ -44,6 +44,18 @@ export interface ForecastDividend {
 }
 
 /**
+ * ③ の実績側が実績EPSと年度を突き合わせるための実績配当。
+ *
+ * `ForecastDividend` を再利用しない理由: 既存の型自体が「予想配当」という名を持ち、
+ * 実績側に使うと読み手が混乱する。`PerSource`（`forecast-eps`/`actual-eps`）と同じく、
+ * 予想・実績を対にした命名をこのコードベースは既に多用している。
+ */
+export interface ActualDividend {
+  readonly fiscalYear: number;
+  readonly amountSen: number;
+}
+
+/**
  * 業務上の株価上限。1株 1,000,000 円（2026-07-27 決定）。
  *
  * これを超える株価は日本株には事実上存在しないので、桁の打ち間違いとみなして弾く。
@@ -179,6 +191,25 @@ export function selectLatestForecastDividend(
     (r): r is UsableRecord => r.annualAmountSen !== null && Number.isSafeInteger(r.fiscalYear),
   );
   const latest = pickLatest(usable, ['forecast', 'revised']);
+  if (latest === null) return null;
+  return { fiscalYear: latest.fiscalYear, amountSen: latest.annualAmountSen };
+}
+
+/**
+ * 実績配当（`kind === 'actual'`）のうち最新年度のものを返す。
+ *
+ * ③ 実績側が、実績EPSの年度と突き合わせるために年度も一緒に返す
+ * （ADR-0009「決定した結合規則」を実績側にも適用。設計書 §2 / §6.4.1）。
+ *
+ * @returns 使える実績配当が1件も無ければ `null`
+ */
+export function selectLatestActualDividend(
+  records: readonly DividendRecord[],
+): ActualDividend | null {
+  const usable = records.filter(
+    (r): r is UsableRecord => r.annualAmountSen !== null && Number.isSafeInteger(r.fiscalYear),
+  );
+  const latest = pickLatest(usable, ['actual']);
   if (latest === null) return null;
   return { fiscalYear: latest.fiscalYear, amountSen: latest.annualAmountSen };
 }

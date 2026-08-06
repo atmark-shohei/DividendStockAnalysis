@@ -21,7 +21,7 @@ import { type CompanyScoring, scoreCompany } from './score-company';
  * （`.claude/CLAUDE.md`「再監査目的で計算時点の値と計算バージョンを保存する」）。
  * これを上げ忘れると、古い値と新しい値が同じバージョンで混在して監査できなくなる。
  */
-export const SCORING_CALC_VERSION = '2026-07-28.1';
+export const SCORING_CALC_VERSION = '2026-08-06.1';
 
 /** スコアカードを保存形式へ落とす。`null` を 0 に丸めない（§0.5） */
 function toStoredScoring(scoring: CompanyScoring, calculatedAt: string): StoredScoring {
@@ -54,8 +54,9 @@ export async function analyzeCompany(
   repository: CompanyRepository,
   company: Company,
   now: () => Date = () => new Date(),
+  useActualForScoring = false,
 ): Promise<CompanyScoring> {
-  const scoring = scoreCompany(company);
+  const scoring = scoreCompany(company, useActualForScoring);
   await repository.save(company, toStoredScoring(scoring, now().toISOString()));
   return scoring;
 }

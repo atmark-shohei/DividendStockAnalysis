@@ -43,8 +43,15 @@ export async function listCompanies(): Promise<readonly CompanySummary[]> {
   return body.companies;
 }
 
-export function getCompany(code: string): Promise<ScoringResponse> {
-  return request<ScoringResponse>(`/api/companies/${encodeURIComponent(code)}`);
+/**
+ * @param useActualForScoring ③ 予想配当性向の採点に実績を強制採用するか。
+ *   `true` のときだけクエリを付ける（既定 `false` は省略。`importMarketData` の
+ *   `fiscalYearEndMonth` と同じ「必要な時だけ ? を付ける」形。
+ *   `docs/02_design/logic/payout-ratio-scoring.md` §7）
+ */
+export function getCompany(code: string, useActualForScoring?: boolean): Promise<ScoringResponse> {
+  const query = useActualForScoring === true ? '?useActualForScoring=true' : '';
+  return request<ScoringResponse>(`/api/companies/${encodeURIComponent(code)}${query}`);
 }
 
 /** IRバンクから財務データを取り込む。**保存はしない**（結果はフォームの初期値にするだけ） */

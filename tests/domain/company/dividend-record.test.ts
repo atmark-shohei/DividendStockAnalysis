@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type DividendRecord,
   actualDividendSeries,
+  selectLatestActualDividend,
   selectLatestForecastDividend,
 } from '@/domain/company/dividend-record';
 
@@ -115,6 +116,58 @@ describe('selectLatestForecastDividend — ③ が使う予想配当', () => {
     expect(selectLatestForecastDividend(records)).toEqual({
       fiscalYear: 2026,
       amountSen: 8_000,
+    });
+  });
+});
+
+/**
+ * `selectLatestForecastDividend` の対（③ 実績側。ADR-0009 の結合規則を実績側にも
+ * 適用。設計書 §2 / §6.4.1）。観点は上の予想側テスト群と揃える。
+ */
+describe('selectLatestActualDividend — ③ 実績側が使う実績配当', () => {
+  it('実績のうち最新年度のものを返す', () => {
+    const records: DividendRecord[] = [
+      actual(2025, 5_000),
+      actual(2026, 5_400),
+      { fiscalYear: 2027, kind: 'forecast', annualAmountSen: 8_000 },
+    ];
+    expect(selectLatestActualDividend(records)).toEqual({
+      fiscalYear: 2026,
+      amountSen: 5_400,
+    });
+  });
+
+  it('予想・修正しか無ければ null（予想を実績として使わない）', () => {
+    const records: DividendRecord[] = [
+      { fiscalYear: 2027, kind: 'forecast', annualAmountSen: 8_400 },
+      { fiscalYear: 2027, kind: 'revised', annualAmountSen: 9_000 },
+    ];
+    expect(selectLatestActualDividend(records)).toBeNull();
+  });
+
+  it('レコードが空なら null', () => {
+    expect(selectLatestActualDividend([])).toBeNull();
+  });
+
+  it('金額が null の実績は採用しない', () => {
+    const records: DividendRecord[] = [
+      actual(2027, null),
+      actual(2026, 5_000),
+    ];
+    expect(selectLatestActualDividend(records)).toEqual({
+      fiscalYear: 2026,
+      amountSen: 5_000,
+    });
+  });
+
+  it('年度が壊れたレコードは採用しない', () => {
+    const records: DividendRecord[] = [
+      { fiscalYear: Number.NaN, kind: 'actual', annualAmountSen: 9_999 },
+      actual(2026, 5_000),
+    ];
+    expect(selectLatestActualDividend(records)).toEqual({
+      fiscalYear: 2026,
+      amountSen: 5_000,
     });
   });
 });

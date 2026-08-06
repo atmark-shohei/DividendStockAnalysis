@@ -24,6 +24,9 @@ export function App() {
   const [loadingScoring, setLoadingScoring] = useState(false);
 
   const selectedCode = route.kind === 'list' ? route.selectedCode : null;
+  // ③ 予想配当性向の採点に実績を使うか。URL が正（`.claude/rules/frontend.md`
+  // 「選択中の銘柄コードは URL に置く」と同じ扱い。Manager決定、2026-08-06）
+  const useActualForScoring = route.kind === 'list' ? route.useActualForScoring : false;
 
   const reload = useCallback(async () => {
     try {
@@ -52,7 +55,7 @@ export function App() {
     let cancelled = false;
     setLoadingScoring(true);
     api
-      .getCompany(selectedCode)
+      .getCompany(selectedCode, useActualForScoring)
       .then((result) => {
         if (!cancelled) setScoring(result);
       })
@@ -69,7 +72,7 @@ export function App() {
       // 続けて別の銘柄を選んだとき、古い応答で上書きさせない
       cancelled = true;
     };
-  }, [selectedCode]);
+  }, [selectedCode, useActualForScoring]);
 
   const handleSubmit = (payload: AnalyzeCompanyRequest) => {
     setBusy(true);
@@ -78,7 +81,8 @@ export function App() {
       .analyzeCompany(payload)
       .then(async () => {
         await reload();
-        navigate({ kind: 'list', selectedCode: payload.code });
+        // 解析直後は既定（予想優先）で表示する。実績を使うかは会社詳細側で選び直す
+        navigate({ kind: 'list', selectedCode: payload.code, useActualForScoring: false });
       })
       .catch((cause: unknown) => {
         // 失敗時は入力画面に留まる。遷移すると入力内容が失われる
@@ -91,7 +95,14 @@ export function App() {
 
   const handleSelect = (code: string) => {
     setError(null);
-    navigate({ kind: 'list', selectedCode: code });
+    // 銘柄を切り替えたら実績優先の指定は false に戻す（`payout-ratio-scoring.md` §7 決定5。
+    // 「リクエスト単位の一時指定」であり、別銘柄に持ち越さない）
+    navigate({ kind: 'list', selectedCode: code, useActualForScoring: false });
+  };
+
+  const handleToggleUseActualForScoring = (checked: boolean) => {
+    if (selectedCode === null) return;
+    navigate({ kind: 'list', selectedCode, useActualForScoring: checked });
   };
 
   const handleDelete = (code: string) => {
@@ -101,7 +112,9 @@ export function App() {
       .then(async () => {
         await reload();
         // 表示中の銘柄を消したら選択を解除する。無い銘柄を URL に残さない
-        if (code === selectedCode) navigate({ kind: 'list', selectedCode: null });
+        if (code === selectedCode) {
+          navigate({ kind: 'list', selectedCode: null, useActualForScoring: false });
+        }
       })
       .catch((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : '削除に失敗しました');
@@ -125,6 +138,10 @@ export function App() {
         <ListPage
           companies={companies}
           selected={{ code: selectedCode, scoring, loading: loadingScoring }}
+          payoutRatioSourceControl={{
+            checked: useActualForScoring,
+            onToggle: handleToggleUseActualForScoring,
+          }}
           onSelect={handleSelect}
           onDelete={handleDelete}
         />
