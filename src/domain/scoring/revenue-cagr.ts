@@ -17,6 +17,12 @@ export interface RevenueCagrInput {
   readonly revenueCurrent: number | null;
   /** 5年前の売上高（銭） */
   readonly revenueFiveYearsAgo: number | null;
+  /**
+   * EDINET取り込みの重複4期突き合わせで遡及修正が検出されたか
+   * （`docs/02_design/logic/edinet-history-import.md` §4.3）。`true` なら
+   * 系列の連続性が保証できないため判定不能に倒す。
+   */
+  readonly historyRestated: boolean;
 }
 
 /**
@@ -33,6 +39,8 @@ export function calculateRevenueCagr(input: RevenueCagrInput): MetricScore {
   if (revenueCurrent === null || revenueFiveYearsAgo === null) {
     return unavailable('input-missing');
   }
+  // 6期そろわない銘柄は input-missing が先に返る（設計書 §4.3・§7.2 と同じ順序を④に揃える）
+  if (input.historyRestated) return unavailable('restated-history');
   if (revenueFiveYearsAgo === 0) return unavailable('division-by-zero');
   if (revenueFiveYearsAgo < 0) return unavailable('undefined-growth');
   if (revenueCurrent < 0) return unavailable('undefined-growth');

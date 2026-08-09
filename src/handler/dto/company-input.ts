@@ -84,6 +84,15 @@ export const analyzeCompanyRequest = z.object({
    * handler 側で `?? false` として既定値を適用すればよい。
    */
   useActualForScoring: z.boolean().optional(),
+  /**
+   * ④用。EDINET取り込みの重複4期突き合わせで遡及修正が検出されたか
+   * （`docs/02_design/logic/edinet-history-import.md` §4.3）。FE が EDINET 取り込み
+   * （`GET /api/edinet/:code`）の結果から渡す想定。未指定なら EDINET 未実施として `false`。
+   * `useActualForScoring` と同じ理由で `.optional()` にする
+   */
+  epsHistoryRestated: z.boolean().optional(),
+  /** ⑦用。同上 */
+  revenueHistoryRestated: z.boolean().optional(),
 });
 
 export type AnalyzeCompanyRequest = z.infer<typeof analyzeCompanyRequest>;
@@ -114,6 +123,8 @@ export function toCompany(request: AnalyzeCompanyRequest, fetchedAt: string): Co
     multiples: request.multiples,
     priceSen: request.priceSen,
     fetchedAt,
+    epsHistoryRestated: request.epsHistoryRestated ?? false,
+    revenueHistoryRestated: request.revenueHistoryRestated ?? false,
   };
 }
 

@@ -11,18 +11,36 @@
 import { Hono } from 'hono';
 
 import { type CompanyRepository } from '../domain/company/company-repository';
+import {
+  type EdinetDocumentIndexLookup,
+  type EdinetDocumentIndexRepository,
+  type EdinetDocumentsListSource,
+} from '../domain/company/edinet-document-index';
+import { type EdinetHistorySource } from '../domain/company/edinet-history-source';
 import { type FinancialSource } from '../domain/company/financial-source';
 import { type MarketDataSource } from '../domain/company/market-data-source';
 import { analyzeCompany } from '../usecase/analyze-company';
+import { importEdinetHistory } from '../usecase/import-edinet-history';
 import { importFromIrBank } from '../usecase/import-from-irbank';
 import { importMarketData } from '../usecase/import-market-data';
 import { deleteCompany, getCompanyScoring, listCompanies } from '../usecase/read-companies';
+import { refreshEdinetDocumentIndex } from '../usecase/refresh-edinet-document-index';
 import {
   analyzeCompanyRequest,
   toCompany,
   toScoringResponse,
   useActualForScoringQuery,
 } from './dto/company-input';
+import {
+  isExternalFactor as isEdinetExternalFactor,
+  toEdinetErrorResponse,
+  toEdinetImportResponse,
+} from './dto/edinet-import';
+import {
+  refreshDateQuery,
+  toEdinetIndexRefreshErrorResponse,
+  toEdinetIndexRefreshResponse,
+} from './dto/edinet-index-refresh';
 import {
   isExternalFactor,
   toIrBankErrorResponse,
@@ -43,8 +61,24 @@ export interface AppDependencies {
   readonly financialSource: FinancialSource;
   /** Yahoo からの市場データ取り込み。**インターフェースで**受け取る */
   readonly marketDataSource: MarketDataSource;
+  /** EDINET からの財務履歴取り込み。**インターフェースで**受け取る */
+  readonly edinetHistorySource: EdinetHistorySource;
+  /** EDINET docIDインデックスの読み取り窓口。**インターフェースで**受け取る */
+  readonly edinetDocumentIndexLookup: EdinetDocumentIndexLookup;
   /** 現在時刻。テストから固定できるように注入する */
   readonly now: () => Date;
+  /**
+   * docIDインデックスの管理用リフレッシュ（過去日の一括バックフィル）に必要な一式。
+   *
+   * **省略可**。渡さない、または `token` が未設定なら管理用エンドポイントは
+   * 503 を返して無効化される（`src/index.ts` が `EDINET_ADMIN_TOKEN` から組み立てる）。
+   */
+  readonly edinetIndexAdmin?: {
+    readonly documentsListSource: EdinetDocumentsListSource;
+    readonly indexRepository: EdinetDocumentIndexRepository;
+    /** 共有シークレット。`X-Admin-Token` ヘッダと突き合わせる */
+    readonly token: string | undefined;
+  };
 }
 
 /**
@@ -159,6 +193,82 @@ export function createApp(dependencies: AppDependencies): Hono {
     }
 
     return context.json(toMarketDataImportResponse(result.value));
+  });
+
+  /**
+   * EDINET から④⑦用の履歴・⑥用の貸借対照表項目（流動資産・投資有価証券）を取り込む。
+   * **保存はしない**（設計書 §4.6。IRバンク・Yahoo と同じ「取得するだけで保存しない」原則）。
+   *
+   * docIDインデックス（`edinetDocumentIndexLookup`）は日次バッチ（`scheduled` ハンドラ）が
+   * 事前に構築している前提。インデックスが無ければ `document-not-found` を返す
+   * （設計書 §7.3。例外にしない）。
+   */
+  app.get('/api/edinet/:code', async (context) => {
+    const code = context.req.param('code');
+    const result = await importEdinetHistory(
+      dependencies.edinetHistorySource,
+      code,
+      dependencies.edinetDocumentIndexLookup,
+    );
+
+    if (!result.ok) {
+      if (isEdinetExternalFactor(result.error)) {
+        // 外部要因の失敗はサーバー側にだけ詳細を残す（`.claude/rules/backend.md`）
+        console.error('edinet import failed', result.error.kind);
+      }
+      const { body, status } = toEdinetErrorResponse(result.error);
+      return context.json(body, status);
+    }
+
+    return context.json(toEdinetImportResponse(result.value));
+  });
+
+  /**
+   * docIDインデックスへ、**指定した1日ぶん**の有価証券報告書を取り込む（管理用）。
+   *
+   * 日次 Cron は「前日1日ぶん」しか走査しないため、既に提出済みの過去の有報は
+   * 永久にインデックスへ入らない。過去日を外から1日ずつ指定して埋めるための口
+   * （`scripts/backfill-edinet-index.mjs` がこれを日付ループで叩く。設計書 §4.4）。
+   *
+   * 認証は共有シークレット1本（`X-Admin-Token`）。このアプリ自体に認証が無いため
+   * （T-003/T-004 未決）、EDINET の API キーを他人に消費されないための最低限の柵に留める。
+   */
+  app.post('/api/admin/edinet/index/refresh', async (context) => {
+    const admin = dependencies.edinetIndexAdmin;
+    if (admin?.token === undefined) {
+      return context.json(
+        {
+          error:
+            '管理用エンドポイントが無効です。EDINET_ADMIN_TOKEN を設定して再デプロイしてください',
+        },
+        503,
+      );
+    }
+    if (context.req.header('X-Admin-Token') !== admin.token) {
+      return context.json({ error: '管理用トークンが一致しません' }, 401);
+    }
+
+    const parsed = refreshDateQuery.safeParse(context.req.query('date'));
+    if (!parsed.success) {
+      return context.json({ error: 'date は YYYY-MM-DD 形式の実在する日付で指定する' }, 400);
+    }
+
+    const result = await refreshEdinetDocumentIndex({
+      documentsListSource: admin.documentsListSource,
+      indexRepository: admin.indexRepository,
+      companyRepository: dependencies.repository,
+      now: dependencies.now,
+      targetDate: parsed.data,
+    });
+
+    if (!result.ok) {
+      // 外部要因の失敗はサーバー側にだけ詳細を残す（`.claude/rules/backend.md`）
+      console.error('edinet index refresh failed', parsed.data, result.error.kind);
+      const { body, status } = toEdinetIndexRefreshErrorResponse(result.error);
+      return context.json(body, status);
+    }
+
+    return context.json(toEdinetIndexRefreshResponse(parsed.data, result.value));
   });
 
   /**

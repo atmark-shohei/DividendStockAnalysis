@@ -3,7 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import { type PbrSource, type PerSource } from '@/domain/company/company';
 import { deriveMarketMultiples } from '@/domain/company/market-multiples';
 
-import type { AnalyzeCompanyRequest, IrBankImportResponse, MarketDataImportResponse } from '../api';
+import type {
+  AnalyzeCompanyRequest,
+  EdinetImportResponse,
+  IrBankImportResponse,
+  MarketDataImportResponse,
+} from '../api';
 import * as api from '../api';
 import {
   fiscalPeriodLabel,
@@ -11,8 +16,10 @@ import {
   formatSen,
   multipleSourceText,
   ratioToEditableText,
+  reasonText,
   senToEditableText,
 } from '../format';
+import { BalanceSheetFields } from './BalanceSheetFields';
 
 /**
  * 銘柄データの入力フォーム。
@@ -99,6 +106,24 @@ type MarketDataSplitView = MarketDataImportResponse['splits'][number];
  * 体裁で表の外に出す（同設計書 §5.5）。
  */
 type MarketDataDiagnostic = MarketDataImportResponse['diagnostics'][number];
+
+/**
+ * EDINET由来の年度別データ（④EPS・⑦売上高の古い年度）。ROE・営業利益率は持たない
+ * （`docs/02_design/logic/edinet-history-import.md` §4.6）。domain から直接 import せず
+ * BE確定DTO（`src/handler/dto/edinet-import.ts`）から導出する（`ImportedRecord` と同じ方針）。
+ *
+ * `sourceDocId` は貸借対照表側のみ画面表示する決定（Manager決定。fe-review 推測仕様#2）
+ * のため、年度別データ側では未使用のまま保持する（型は持つが表示には使わない）。
+ */
+type ImportedEdinetYear = EdinetImportResponse['years'][number];
+
+/**
+ * EDINET取り込みの取得診断（BE確定DTO。2026-08-09）。IRバンクの `CellWarning` と違い
+ * 画面のセルへは解決しない（`valueKept` を持たず、値を採用したかの分岐が無い）ため、
+ * `MarketDataDiagnostic` と同じ「表の外に1件ずつ列挙」の体裁で出す
+ * （`docs/02_design/logic/import-review.md` §5.3「件数だけに潰さない」）。
+ */
+type EdinetImportDiagnostic = EdinetImportResponse['diagnostics'][number];
 
 /** 行そのものが落ちたことを示す列名（`src/infra/irbank/parse-fy-data.ts` と同じ値） */
 const ROW_LEVEL_COLUMNS = new Set(['年度', '備考']);
@@ -317,6 +342,362 @@ export function mergeRowsWithImport(
     rows: [...mergedRows, ...addedRows].sort(byForecastThenYearDesc),
     overwrittenCount,
   };
+}
+
+export interface MergeRowsWithEdinetResult {
+  readonly rows: readonly YearRow[];
+  /** 空欄を取り込み値で埋めたセル数。呼び出し側が通知に使う */
+  readonly filledCount: number;
+}
+
+/**
+ * EDINET取り込み結果（④EPS・⑦売上高の古い年度）を既存行にマージする。
+ *
+ * **`mergeRowsWithImport`（IRバンク）とは異なる方針にしてある。** IRバンクの規則1
+ * （取り込みが値を持てば無条件で上書きする。同 §5.5）をそのまま流用すると、設計書
+ * §4.6「同じ年度が重なったら EDINET を優先して上書きする」を字面どおりフォーム内でも
+ * 実装することになる。しかし §4.6 が指すのは **DB層（`financial_records`）のマージ**
+ * であり、保存前のフォーム編集中に手入力を無条件で消してよい根拠にはならない
+ * （fe-plan.md §2 の整合確認）。フォーム内マージは安全側に倒し、**空欄のときだけ埋める**
+ * （`resolveImportedAmount`/`resolveImportedPriceYen` と同じ思想）。Manager決定
+ * （2026-08-08。fe-plan.md §5.3 の暫定案をそのまま採用）。
+ *
+ * EDINETは ROE・営業利益率を返さない（設計書 §4.6）ので、その2列には触れない
+ * （既存の IRバンク由来・手入力値をそのまま残す）。行の同一性は年度だけで決める
+ * （`mergeRowsWithImport` と同じ）。React の state を知らない純粋関数。
+ */
+export function mergeRowsWithEdinetImport(
+  existingRows: readonly YearRow[],
+  years: readonly ImportedEdinetYear[],
+): MergeRowsWithEdinetResult {
+  const importedByYear = new Map(years.map((year) => [year.fiscalYear, year]));
+  let filledCount = 0;
+
+  const mergedRows = existingRows.map((existing) => {
+    const imported = importedByYear.get(fiscalYearOf(existing));
+    if (imported === undefined) return existing;
+
+    let merged = existing;
+    if (merged.epsYen === '' && imported.epsSen !== null) {
+      merged = { ...merged, epsYen: senToEditableText(imported.epsSen) };
+      filledCount += 1;
+    }
+    if (merged.revenueYen === '' && imported.revenueSen !== null) {
+      merged = { ...merged, revenueYen: senToEditableText(imported.revenueSen) };
+      filledCount += 1;
+    }
+    return merged;
+  });
+
+  // 取り込みにあって既存に無い年度は行を追加する（`mergeRowsWithImport` と同じ規則）。
+  // EDINETは予想値を返さない（設計書 §1.2）ので追加行は必ず実績
+  const existingYears = new Set(existingRows.map(fiscalYearOf));
+  const addedRows = years
+    .filter((year) => !existingYears.has(year.fiscalYear))
+    .map((year) => {
+      let added = emptyRow(year.fiscalYear, false);
+      if (year.epsSen !== null) {
+        added = { ...added, epsYen: senToEditableText(year.epsSen) };
+        filledCount += 1;
+      }
+      if (year.revenueSen !== null) {
+        added = { ...added, revenueYen: senToEditableText(year.revenueSen) };
+        filledCount += 1;
+      }
+      return added;
+    });
+
+  return {
+    rows: [...mergedRows, ...addedRows].sort(byForecastThenYearDesc),
+    filledCount,
+  };
+}
+
+/**
+ * EDINET取り込みが検出した遡及修正の通知文言（設計書 §4.3・§2.6）。
+ *
+ * ④EPS・⑦売上高は独立に判定不能へ倒れる（同 §4.3「EPS・売上高は独立に判定する」）ので、
+ * どちらが影響を受けたかを明示する（`.claude/rules/frontend.md`「色だけで表現しない」。
+ * ⚠記号+文言で伝える）。文言は `format.ts` の `reasonText('restated-history')` を再利用し、
+ * 画面文言の定義箇所を1つに保つ（二重定義しない）。
+ *
+ * 両方 false（遡及修正なし）は通知不要として `null` を返す
+ * （`importedAmountNoteText` と同じ「`null` で表示の有無を判定する」方針）。
+ */
+export function edinetRestatedNoticeText(eps: boolean, revenue: boolean): string | null {
+  if (!eps && !revenue) return null;
+  return `⚠ ${restatedTargetLabels(eps, revenue).join('・')}: ${reasonText('restated-history')}`;
+}
+
+/**
+ * 遡及修正の影響を受ける指標。④EPS・⑦売上高は独立に判定する（設計書 §4.3）ので、
+ * **まとめて扱う経路を作らない**（解除もそれぞれ独立に行う。Manager決定 2026-08-09）。
+ */
+export type EdinetRestatedTarget = 'eps' | 'revenue';
+
+/** 画面に出す指標名。文言の定義箇所を1つに保つ（`warningReasonText` と同じ方針） */
+const RESTATED_TARGET_LABEL: Record<EdinetRestatedTarget, string> = {
+  eps: '④EPS CAGR',
+  revenue: '⑦売上高CAGR',
+};
+
+export function restatedTargetLabel(target: EdinetRestatedTarget): string {
+  return RESTATED_TARGET_LABEL[target];
+}
+
+function restatedTargetLabels(eps: boolean, revenue: boolean): readonly string[] {
+  return [
+    eps ? RESTATED_TARGET_LABEL.eps : null,
+    revenue ? RESTATED_TARGET_LABEL.revenue : null,
+  ].filter((label): label is string => label !== null);
+}
+
+/**
+ * ④⑦それぞれについての真偽値の組。**同じ形だが意味の異なる2つの用途がある**ため、
+ * 用途ごとにブランドを付けた派生型（`EdinetDetectedRestated` /
+ * `EdinetRestatedRelease`）で区別する。TypeScript は構造的型付けなので、
+ * 別名の型に分けただけでは相互に代入できてしまい取り違えを防げない（fe-review CR-1）。
+ */
+export interface EdinetRestatedFlags {
+  readonly eps: boolean;
+  readonly revenue: boolean;
+}
+
+/**
+ * EDINET取り込みが検出した遡及修正という**事実**（重複4期が一致しなかった。設計書 §4.3）。
+ * `null` は取り込み未実施。
+ *
+ * `__brand` は**実行時には存在しない**（型だけの目印。`src/domain/shared/sen.ts` と同じ流儀）。
+ * 生成は必ず `createDetectedRestated` を通す。
+ */
+export type EdinetDetectedRestated = EdinetRestatedFlags & {
+  readonly __brand: 'EdinetDetectedRestated';
+};
+
+/**
+ * 人が「原典を確認した」として判定不能を解除したという**判断**
+ * （Manager決定 2026-08-09・案C）。
+ *
+ * `__brand` は実行時には存在しない。生成は必ず `createRestatedRelease` を通す。
+ */
+export type EdinetRestatedRelease = EdinetRestatedFlags & {
+  readonly __brand: 'EdinetRestatedRelease';
+};
+
+/**
+ * 検出結果の生成。**キャストはこの中だけ**（`.claude/CLAUDE.md`）。
+ * 真偽値2つに不正値は無いので `Result` は返さない（`createSen` と違い守る不変条件が無い）。
+ */
+export function createDetectedRestated(eps: boolean, revenue: boolean): EdinetDetectedRestated {
+  return { eps, revenue } as EdinetDetectedRestated;
+}
+
+/** 解除操作の生成。**キャストはこの中だけ** */
+export function createRestatedRelease(eps: boolean, revenue: boolean): EdinetRestatedRelease {
+  return { eps, revenue } as EdinetRestatedRelease;
+}
+
+/** 解除操作の初期値（何も解除していない） */
+export const NO_RESTATED_RELEASE: EdinetRestatedRelease = createRestatedRelease(false, false);
+
+/**
+ * 解除の状態遷移。**検出結果（`detected`）は書き換えない。**
+ * 「EDINETの重複4期が一致しなかった」という事実と「人が確認して解除した」という
+ * 判断は別物であり、事実を上書きすると解除を取り消せなくなる（`docs/glossary.md`）。
+ * 引数・戻り値を `EdinetRestatedRelease` に限ることで、検出結果を誤って渡す改修を
+ * 型で弾く（fe-review CR-1）。
+ */
+export function toggleRestatedRelease(
+  released: EdinetRestatedRelease,
+  target: EdinetRestatedTarget,
+  release: boolean,
+): EdinetRestatedRelease {
+  // スプレッド + 計算プロパティではブランド付きの型に合わせるためのキャストが
+  // ファクトリ外に漏れる。生成はファクトリへ寄せる（返す値は従来と同じ）
+  return createRestatedRelease(
+    target === 'eps' ? release : released.eps,
+    target === 'revenue' ? release : released.revenue,
+  );
+}
+
+/**
+ * 画面と送信ペイロードが見る、解除を反映した後の状態。
+ *
+ * - `pending` … 検出済みかつ未解除。⚠警告を出し、**保存時もこの値を送る**
+ * - `released` … 検出済みかつ解除済み。解除した旨の告知と「戻す」ボタンを出す
+ *
+ * `detected` が `null`（取り込み未実施）と `{eps:false,revenue:false}`（取り込み済み・
+ * 検出なし）はどちらも両方 `false` になるが、**どちらの場合も解除UIを出さない**
+ * （解除する対象が無い）。両者を混同して「解除しました」と言わないための唯一の判定箇所。
+ *
+ * **ブランドを付けない。** これは検出でも解除操作でもなく、両者から導出した
+ * 表示・送信用の状態であり、どちらの入力としても使わない。
+ */
+export interface EdinetRestatedView {
+  readonly pending: EdinetRestatedFlags;
+  readonly released: EdinetRestatedFlags;
+}
+
+export function resolveRestatedView(
+  detected: EdinetDetectedRestated | null,
+  released: EdinetRestatedRelease,
+): EdinetRestatedView {
+  const detectedEps = detected?.eps ?? false;
+  const detectedRevenue = detected?.revenue ?? false;
+  return {
+    pending: {
+      eps: detectedEps && !released.eps,
+      revenue: detectedRevenue && !released.revenue,
+    },
+    released: {
+      eps: detectedEps && released.eps,
+      revenue: detectedRevenue && released.revenue,
+    },
+  };
+}
+
+/**
+ * 判定不能を解除したことの告知（設計書 §4.3・案C）。**警告ではないので ⚠ を付けない。**
+ * 「⚠が消えるだけ」にすると、解除できたのか取り込みがやり直されたのかを人が区別できない。
+ *
+ * **「④が算出されます」と断言しない。** 解除しても6期そろっていなければ
+ * `insufficient-history` で判定不能のまま（同 §4.3 のコード断片。`insufficient-history` の
+ * 判定が先）。**数値（0点など）も出さない**（`edinetAmountNoteText` の `unavailable` と
+ * 同じ方針。`.claude/rules/frontend.md`）。
+ */
+export function edinetRestatedReleasedText(eps: boolean, revenue: boolean): string | null {
+  if (!eps && !revenue) return null;
+  return `${restatedTargetLabels(eps, revenue).join('・')}: 原典を確認済みとして扱い、判定不能を解除しました（6期分の値がそろっていない場合は判定不能のままです）`;
+}
+
+/** 解除ボタンのラベル。対象を文字で書く（色・記号だけで表現しない） */
+export function restatedReleaseButtonText(target: EdinetRestatedTarget): string {
+  return `${restatedTargetLabel(target)} の判定不能を解除する`;
+}
+
+/** 「戻す」ボタンのラベル。誤解除を取り返せるようにする（Manager決定 2026-08-09） */
+export function restatedRestoreButtonText(target: EdinetRestatedTarget): string {
+  return `${restatedTargetLabel(target)} の解除を戻す`;
+}
+
+/**
+ * `resolveImportedEdinetAmount` の結果。⑥用の流動資産・投資有価証券に使う。
+ *
+ * `resolveImportedAmount`（IRバンク）と役割は同じ（空欄のときだけ埋める）が、
+ * EDINETの `EdinetBalanceSheetSnapshot` は決算年度を持たず（「前期末時点」固定の
+ * スナップショット。設計書 §5）代わりに `sourceDocId`（監査目的。Manager決定）を持つため、
+ * 注記に出す出所情報が異なる。**3状態のみ**（IRバンク版にある編集後の `edited` 状態は
+ * 対象外。Manager指示のスコープに合わせた）。
+ */
+export type ResolveEdinetAmountResult =
+  | { readonly yen: string; readonly noteKind: 'unavailable' }
+  | {
+      readonly yen: string;
+      readonly noteKind: 'filled' | 'kept-existing';
+      readonly sourceDocId: string;
+    };
+
+/**
+ * 取り込んだ ⑥ 用の金額（流動資産・投資有価証券）を入力欄へ反映するかどうかの判定。
+ * **空欄のときだけ埋める。手入力は破壊しない**（`resolveImportedAmount` と同じ規則）。
+ *
+ * `valueSen === null`（IFRS採用企業で投資有価証券タグが無い等。設計書 §2.7）のとき、
+ * **入力欄に `'0'` を書き込まない。** 無借金相当（`valueSen: 0`）は値なので `'0'` を入れる。
+ */
+export function resolveImportedEdinetAmount(
+  currentYen: string,
+  valueSen: number | null,
+  sourceDocId: string,
+): ResolveEdinetAmountResult {
+  if (valueSen === null) return { yen: currentYen, noteKind: 'unavailable' };
+  if (currentYen !== '') return { yen: currentYen, noteKind: 'kept-existing', sourceDocId };
+  return { yen: senToEditableText(valueSen), noteKind: 'filled', sourceDocId };
+}
+
+/**
+ * どちらの欄の注記を組み立てているか（`YearRowField` と同じ命名思想）。
+ * `unavailable` の理由が項目ごとに異なるため導入した（設計書 §2.7）。
+ */
+export type EdinetAmountField = 'currentAssets' | 'investmentSecurities';
+
+/**
+ * ⑥ の入力欄の直下に出す注記（EDINET版）。`sourceDocId` を監査目的で小さく併記する
+ * （Manager決定。fe-plan.md §3確認事項2「表示する」を採用）。
+ * **`unavailable` に数値を出さない**（データが無いのに `0` を見せない。
+ * `.claude/rules/frontend.md`）。
+ *
+ * `unavailable` の理由は項目ごとに異なる（設計書 §2.7。IFRS採用企業で構造的に
+ * 取得できないのは投資有価証券タグのみ。流動資産は `CurrentAssetsIFRS` で取得できる）。
+ * 流動資産側に投資有価証券の理由を誤って出していた問題（fe-review CR-2）への対応。
+ */
+export function edinetAmountNoteText(
+  result: ResolveEdinetAmountResult | null,
+  field: EdinetAmountField,
+): string {
+  if (result === null) return '';
+  switch (result.noteKind) {
+    case 'unavailable':
+      return field === 'investmentSecurities'
+        ? 'EDINETからは取得できませんでした（IFRS採用企業では投資有価証券が取得できません。原典を確認し手入力してください）'
+        : 'EDINETからは取得できませんでした。原典を確認し手入力してください';
+    case 'kept-existing':
+      return `入力済みのため入れ替えていません（EDINET取り込み値の出所: docID ${result.sourceDocId}）`;
+    case 'filled':
+      return `EDINET取り込み: 値を入れました（出所: docID ${result.sourceDocId}）`;
+  }
+}
+
+/** 診断が指す項目の画面名。④⑦は指標名、⑥は入力欄名（`BalanceSheetFields` のラベルと揃える） */
+const EDINET_DIAGNOSTIC_FIELD_LABEL: Record<EdinetImportDiagnostic['field'], string> = {
+  eps: '④EPS',
+  revenue: '⑦売上高',
+  currentAssets: '⑥流動資産',
+  investmentSecurities: '⑥投資有価証券',
+};
+
+/**
+ * 診断の理由。**`reason` の生の英字を画面に出さない。**
+ * `CellWarning['reason']` と重なる種別は `warningReasonText` に委譲し、
+ * 文言の定義箇所を1つに保つ（`format.ts` の `reasonText` と同じ方針）。
+ */
+function edinetDiagnosticReasonText(reason: EdinetImportDiagnostic['reason']): string {
+  if (reason === 'unit-mismatch') return '想定していない単位で記載されていました';
+  return warningReasonText(reason);
+}
+
+/**
+ * EDINET取り込みの診断1件の文言。**捨てない・件数に潰さない**
+ * （`.claude/rules/backend.md`・`docs/02_design/logic/import-review.md` §5.3）。
+ * `marketDiagnosticText` と同じ体裁で表の外に列挙する。
+ *
+ * `fiscalYear` が `null`（貸借対照表項目。「前期末時点」のスナップショットで決算年度を
+ * 持たない。設計書 §5）のときは**年度を書かない**。
+ * `elementId`（XBRL要素ID）と `sourceDocId` は原因調査用なので、`edinetAmountNoteText` の
+ * docID と同じく括弧内へ小さく併記する（Manager決定 2026-08-09）。
+ *
+ * **値の代わりに `0` を出さない。** 診断は「値が取れなかった」ことの記録であり、
+ * 出せるのは原典の生値（`raw`）だけ（`.claude/rules/frontend.md`）。
+ */
+/**
+ * 診断の枠（`<ul>`）を出すか。**0件のときは枠ごと出さない**（設計書 §7.2）。
+ * 中身の無い枠だけが残ると「診断があるのに読めない」ように見え、取り込みが
+ * 失敗したのかどうかを人が判断できなくなる。`marketDiagnostics` と同じ体裁。
+ *
+ * 判定を JSX から純粋関数へ出しているのは、テストで固定するため
+ * （`shouldShowConfirmation` と同じ方針。fe-review CR-2）。
+ */
+export function shouldShowEdinetDiagnostics(
+  diagnostics: readonly EdinetImportDiagnostic[],
+): boolean {
+  return diagnostics.length > 0;
+}
+
+export function edinetDiagnosticText(diagnostic: EdinetImportDiagnostic): string {
+  const year = diagnostic.fiscalYear === null ? '' : `${String(diagnostic.fiscalYear)}年度の`;
+  const label = EDINET_DIAGNOSTIC_FIELD_LABEL[diagnostic.field];
+  // 空文字をそのまま出すと「元の値: 」で切れて読めない。原典が空だったことを言葉で書く
+  const raw = diagnostic.raw === '' ? '元の値: 空欄' : `元の値: ${diagnostic.raw}`;
+  return `⚠ ${year}${label}はEDINETから取り込めませんでした: ${edinetDiagnosticReasonText(diagnostic.reason)}（${raw} / 出所: docID ${diagnostic.sourceDocId} / XBRL要素ID: ${diagnostic.elementId}）`;
 }
 
 export interface MergeDividendYearsResult {
@@ -613,9 +994,18 @@ export function CompanyForm({
   const [totalLiabilitiesYen, setTotalLiabilitiesYen] = useState('');
   const [previousDividendTotalYen, setPreviousDividendTotalYen] = useState('');
   /**
-   * ⑥ の2欄の最新値を同期的に読むための ref。`priceYenRef` と同じ理由
-   * （`handleImport` は `await` を挟むので closure の値は古くなりうる）。
+   * ⑥ の4欄の最新値を同期的に読むための ref。`priceYenRef` と同じ理由
+   * （取り込みハンドラは `await` を挟むので closure の値は古くなりうる）。
+   * 流動資産・投資有価証券は EDINET取り込み（`handleEdinetImport`）が読む。
    */
+  const currentAssetsYenRef = useRef(currentAssetsYen);
+  useEffect(() => {
+    currentAssetsYenRef.current = currentAssetsYen;
+  }, [currentAssetsYen]);
+  const investmentSecuritiesYenRef = useRef(investmentSecuritiesYen);
+  useEffect(() => {
+    investmentSecuritiesYenRef.current = investmentSecuritiesYen;
+  }, [investmentSecuritiesYen]);
   const totalLiabilitiesYenRef = useRef(totalLiabilitiesYen);
   useEffect(() => {
     totalLiabilitiesYenRef.current = totalLiabilitiesYen;
@@ -632,6 +1022,15 @@ export function CompanyForm({
     useState<ResolveImportedAmountResult | null>(null);
   const [previousDividendTotalNote, setPreviousDividendTotalNote] =
     useState<ResolveImportedAmountResult | null>(null);
+  /**
+   * ⑥ の残り2欄（流動資産・投資有価証券）の EDINET取り込み結果（出所の docID を
+   * 注記に出すために持つ。監査目的。Manager決定）。取り込み前は `null`
+   */
+  const [currentAssetsNote, setCurrentAssetsNote] = useState<ResolveEdinetAmountResult | null>(
+    null,
+  );
+  const [investmentSecuritiesNote, setInvestmentSecuritiesNote] =
+    useState<ResolveEdinetAmountResult | null>(null);
   const [rows, setRows] = useState<readonly YearRow[]>(() => [
     emptyRow(THIS_YEAR + 1, true),
     ...Array.from({ length: DEFAULT_ROWS }, (_, index) => emptyRow(THIS_YEAR - index)),
@@ -690,6 +1089,32 @@ export function CompanyForm({
   const [marketImportNotice, setMarketImportNotice] = useState<string | null>(null);
   const [marketSplits, setMarketSplits] = useState<readonly MarketDataSplitView[]>([]);
   const [marketDiagnostics, setMarketDiagnostics] = useState<readonly MarketDataDiagnostic[]>([]);
+
+  /**
+   * IRバンク・Yahooとは別系統の state（`.claude/rules/frontend.md`。片方の失敗が
+   * 他方を巻き込まない）。EDINETは④EPS・⑦売上高の古い年度と⑥流動資産・投資有価証券を
+   * 取り込む（`docs/02_design/logic/edinet-history-import.md`）。
+   */
+  const [edinetImporting, setEdinetImporting] = useState(false);
+  const [edinetImportError, setEdinetImportError] = useState<string | null>(null);
+  const [edinetImportNotice, setEdinetImportNotice] = useState<string | null>(null);
+  /**
+   * ④⑦用。EDINET取り込みが重複4期の突き合わせで遡及修正を検出したか（設計書 §4.3）。
+   * 取り込み未実施は `null`（送信時は false 扱い。`handleSubmit` 参照）。
+   */
+  const [edinetHistoryRestated, setEdinetHistoryRestated] = useState<EdinetDetectedRestated | null>(
+    null,
+  );
+  /**
+   * ④⑦の判定不能を人が明示的に解除したか（Manager決定 2026-08-09・案C）。
+   * **検出結果（`edinetHistoryRestated`）とは別に持つ。** 検出は「EDINETの重複4期が
+   * 一致しなかった」という事実、こちらは「原典を確認した」という人の判断であり、
+   * 事実を上書きすると解除を戻せなくなる。判定は `resolveRestatedView`（純粋関数）に置く。
+   */
+  const [edinetRestatedRelease, setEdinetRestatedRelease] =
+    useState<EdinetRestatedRelease>(NO_RESTATED_RELEASE);
+  /** EDINET取り込みで読めなかった値の診断（設計書 §4.2）。**捨てずに画面へ出す** */
+  const [edinetDiagnostics, setEdinetDiagnostics] = useState<readonly EdinetImportDiagnostic[]>([]);
 
   /**
    * 判定は `fillBlankMultiples`（純粋関数）に置き、ここは state への反映だけ。
@@ -871,6 +1296,79 @@ export function CompanyForm({
     }
   };
 
+  /**
+   * EDINET（金融庁の有価証券報告書）から④EPS・⑦売上高の古い年度、⑥流動資産・
+   * 投資有価証券を取り込む。**保存はしない**
+   * （`docs/02_design/logic/edinet-history-import.md`）。
+   *
+   * IRバンク・Yahooとは独立した state を使う。片方の取り込み失敗がもう片方の表示を
+   * 巻き込まない（同設計書と同じ方針）。
+   */
+  const handleEdinetImport = async () => {
+    setEdinetImportError(null);
+    setEdinetImportNotice(null);
+    setEdinetHistoryRestated(null);
+    // 前の銘柄・前回の取り込みに対する解除の判断を、新しい検出結果へ持ち越さない
+    setEdinetRestatedRelease(NO_RESTATED_RELEASE);
+    setEdinetDiagnostics([]);
+    setCurrentAssetsNote(null);
+    setInvestmentSecuritiesNote(null);
+
+    const normalizedCode = toHalfWidth(code).toUpperCase();
+    if (!/^\d{3}[0-9A-Z]$/.test(normalizedCode)) {
+      setEdinetImportError(
+        '銘柄コードは4文字（先頭3桁は数字、末尾1桁は数字か英大文字）で入力してください',
+      );
+      return;
+    }
+
+    setEdinetImporting(true);
+    try {
+      const result = await api.importFromEdinet(normalizedCode);
+      setCode(normalizedCode);
+      // `rows` は待機開始時点の closure 値なので、`await` 完了時点の最新値
+      // （`rowsRef.current`）を基準にマージしてから非関数型で確定する
+      // （`handleImport` と同じ理由。fe-review-round2.md 指摘#1）
+      const merged = mergeRowsWithEdinetImport(rowsRef.current, result.years);
+      setRows(merged.rows);
+      setEdinetHistoryRestated(
+        createDetectedRestated(result.epsHistoryRestated, result.revenueHistoryRestated),
+      );
+      // 読めなかった値は件数に潰さず1件ずつ出す（同設計書 §4.2・`import-review.md` §5.3）
+      setEdinetDiagnostics(result.diagnostics);
+
+      // ⑥の残り2欄は空欄のときだけ埋める。手入力は破壊しない（同設計書 §4.6）。
+      // 貸借対照表そのものが取れない銘柄（IFRS採用企業等）は `balanceSheet` が
+      // `null` になる。項目単位でも `null` になりうる（§2.7）ので、それぞれ独立に判定する
+      const currentAssets = resolveImportedEdinetAmount(
+        currentAssetsYenRef.current,
+        result.balanceSheet?.currentAssetsSen ?? null,
+        result.balanceSheet?.sourceDocId ?? '',
+      );
+      setCurrentAssetsYen(currentAssets.yen);
+      setCurrentAssetsNote(currentAssets);
+      const investmentSecurities = resolveImportedEdinetAmount(
+        investmentSecuritiesYenRef.current,
+        result.balanceSheet?.investmentSecuritiesSen ?? null,
+        result.balanceSheet?.sourceDocId ?? '',
+      );
+      setInvestmentSecuritiesYen(investmentSecurities.yen);
+      setInvestmentSecuritiesNote(investmentSecurities);
+
+      // 手入力を置き換えていない（空欄だけを埋めた）ことが分かるよう、件数を伝える
+      // （`mergeRowsWithImport` 系の通知と同じ体裁。文言だけ「置き換え」ではなく「埋めた」）
+      setEdinetImportNotice(
+        merged.filledCount > 0
+          ? `${String(merged.filledCount)}件の空欄をEDINET取り込み値で埋めました`
+          : null,
+      );
+    } catch (cause) {
+      setEdinetImportError(cause instanceof Error ? cause.message : '取り込みに失敗しました');
+    } finally {
+      setEdinetImporting(false);
+    }
+  };
+
   const updateRow = (index: number, patch: Partial<YearRow>) => {
     const edited = rows[index];
     setRows((previous) =>
@@ -899,6 +1397,21 @@ export function CompanyForm({
     ));
 
   const warningsOutsideTable = rowlessWarnings(cellWarnings);
+
+  /**
+   * 検出結果と解除操作をまとめた表示・送信用の状態。判定は純粋関数側に置き、
+   * ここは state を渡すだけ（`cellWarningsOf` と同じ方針）。
+   */
+  const restatedView = resolveRestatedView(edinetHistoryRestated, edinetRestatedRelease);
+  const restatedPendingText = edinetRestatedNoticeText(
+    restatedView.pending.eps,
+    restatedView.pending.revenue,
+  );
+  const restatedReleasedText = edinetRestatedReleasedText(
+    restatedView.released.eps,
+    restatedView.released.revenue,
+  );
+  const restatedTargets: readonly EdinetRestatedTarget[] = ['eps', 'revenue'];
 
   /**
    * 入力を受け付けられないときの共通処理。**確認待ちを必ず解除する。**
@@ -1014,6 +1527,11 @@ export function CompanyForm({
       balanceSheet: balance as AnalyzeCompanyRequest['balanceSheet'],
       multiples,
       priceSen,
+      // ④⑦用。EDINET取り込みで遡及修正を検出していて、かつ人が解除していなければ true
+      // （設計書 §4.3・§5）。取り込みを実行していなければ `pending` は両方 false になる。
+      // 判定は `resolveRestatedView`（純粋関数）に閉じている
+      epsHistoryRestated: restatedView.pending.eps,
+      revenueHistoryRestated: restatedView.pending.revenue,
     };
 
     // 確認バナーの「確認した」は type="submit" なので、ここへ戻ってくる（同設計書 §5.6）
@@ -1043,11 +1561,15 @@ export function CompanyForm({
         >
           {marketImporting ? '取り込み中…' : 'Yahoo Financeから株価・配当を取り込む'}
         </button>
+        <button type="button" onClick={() => void handleEdinetImport()} disabled={edinetImporting}>
+          {edinetImporting ? '取り込み中…' : 'EDINET（有価証券報告書）から取り込む'}
+        </button>
         <p className="meta">
           銘柄コードから業績・配当を取り込み、年度別データへ反映します（取り込みに値が無い
           欄の手入力は残ります。株価・PER・PBR は対象外。株価を先に入力しておくと PER/PBR
-          も算出します）。貸借対照表は負債総額・前期末の配当総額だけを取り込みます。
-          流動資産・投資有価証券は取り込めないので手入力してください。
+          も算出します）。貸借対照表は負債総額・前期末の配当総額をIRバンクから取り込みます。
+          流動資産・投資有価証券はEDINET（有価証券報告書）から取り込めます（下のボタン。
+          日本基準の事業会社のみ対象。IFRS採用企業は投資有価証券が取得できません）。
         </p>
         {importError !== null && (
           <p className="error" role="alert">
@@ -1087,6 +1609,75 @@ export function CompanyForm({
               </li>
             ))}
           </ul>
+        )}
+        <p className="meta">
+          金融庁EDINETの有価証券報告書から、④EPS・⑦売上高の6期以上前の年度、
+          ⑥流動資産・投資有価証券を取り込みます（予想値は取れません。空欄のセルだけを
+          埋め、手入力・IRバンク取り込み済みの値は上書きしません）。
+        </p>
+        {edinetImportError !== null && (
+          <p className="error" role="alert">
+            {edinetImportError}
+          </p>
+        )}
+        {edinetImportNotice !== null && <p className="meta">{edinetImportNotice}</p>}
+        {/* 読めなかった値の診断。0件なら枠ごと出さない（`marketDiagnostics` と同じ体裁） */}
+        {shouldShowEdinetDiagnostics(edinetDiagnostics) && (
+          <ul className="warning">
+            {edinetDiagnostics.map((diagnostic, order) => (
+              <li key={`${diagnostic.field}-${diagnostic.elementId}-${String(order)}`}>
+                {edinetDiagnosticText(diagnostic)}
+              </li>
+            ))}
+          </ul>
+        )}
+        {/* 遡及修正の警告と、人が明示的に解除する導線（設計書 §4.3・案C）。
+            自動解除にしない。「嘘の連続性を持つ系列でCAGRを計算するより判定不能が安全側」
+            という原則を、人の判断を1回記録することでだけ超えられるようにする。
+            ④⑦は別々に解除する（同 §4.3「EPS・売上高は独立に判定する」） */}
+        {restatedPendingText !== null && (
+          <div className="warning" role="alert">
+            <p>{restatedPendingText}</p>
+            <p>
+              原典（有価証券報告書）を確認して系列が正しいと判断できる場合は、指標ごとに
+              判定不能を解除できます。解除すると保存時にその指標の判定を有効にします。
+            </p>
+            {restatedTargets
+              .filter((target) => restatedView.pending[target])
+              .map((target) => (
+                <button
+                  type="button"
+                  key={target}
+                  onClick={() =>
+                    setEdinetRestatedRelease((previous) =>
+                      toggleRestatedRelease(previous, target, true),
+                    )
+                  }
+                >
+                  {restatedReleaseButtonText(target)}
+                </button>
+              ))}
+          </div>
+        )}
+        {restatedReleasedText !== null && (
+          <div className="meta">
+            <p>{restatedReleasedText}</p>
+            {restatedTargets
+              .filter((target) => restatedView.released[target])
+              .map((target) => (
+                <button
+                  type="button"
+                  key={target}
+                  onClick={() =>
+                    setEdinetRestatedRelease((previous) =>
+                      toggleRestatedRelease(previous, target, false),
+                    )
+                  }
+                >
+                  {restatedRestoreButtonText(target)}
+                </button>
+              ))}
+          </div>
         )}
         <label>
           銘柄名
@@ -1133,57 +1724,53 @@ export function CompanyForm({
           />
         </label>
         <p className="meta">{multipleSourceText(pbrSource)}</p>
-        <label>
-          流動資産（円）
-          <input
-            value={currentAssetsYen}
-            onChange={(event) => setCurrentAssetsYen(event.target.value)}
-            inputMode="decimal"
-          />
-        </label>
-        {/* 4欄のうち2欄は取り込めない。埋まった2欄を見て「⑥ は揃った」と誤解させない
-            （`docs/02_design/logic/balance-sheet-derivation.md` §1・§7.3） */}
-        <p className="meta">IRバンクからは取り込めません（手入力）</p>
-        <label>
-          投資有価証券（円）
-          <input
-            value={investmentSecuritiesYen}
-            onChange={(event) => setInvestmentSecuritiesYen(event.target.value)}
-            inputMode="decimal"
-          />
-        </label>
-        <p className="meta">IRバンクからは取り込めません（手入力）</p>
-        <label>
-          負債総額（円）
-          <input
-            value={totalLiabilitiesYen}
-            onChange={(event) => setTotalLiabilitiesYen(event.target.value)}
-            inputMode="decimal"
-          />
-        </label>
-        {/* 採用した決算年度を欄の直下に出す。2欄の年度ずれは人が見比べて判断する（同 §2.3）。
+        {/* IRバンクからは取り込めない（4欄のうち2欄。同 §1・§7.3）が、EDINETからは
+            取り込める（`docs/02_design/logic/edinet-history-import.md` §2.7）。
+            `sourceDocId` を監査目的で小さく併記する（Manager決定）。
+            採用した決算年度を欄の直下に出す。2欄の年度ずれは人が見比べて判断する（同 §2.3）。
             注記は現在値からの派生（`resolveEditedAmountNote`）。手で書き換えられた欄に
-            取り込み時点の由来を出したままにしない（fe-review CR-1） */}
-        <p className="meta">
-          {importedAmountNoteText(
-            resolveEditedAmountNote(totalLiabilitiesNote, totalLiabilitiesYen),
-            fiscalYearEndMonth,
-          )}
-        </p>
-        <label>
-          前期末の配当総額（円）
-          <input
-            value={previousDividendTotalYen}
-            onChange={(event) => setPreviousDividendTotalYen(event.target.value)}
-            inputMode="decimal"
-          />
-        </label>
-        <p className="meta">
-          {importedAmountNoteText(
-            resolveEditedAmountNote(previousDividendTotalNote, previousDividendTotalYen),
-            fiscalYearEndMonth,
-          )}
-        </p>
+            取り込み時点の由来を出したままにしない（fe-review CR-1）。
+            注記の文言計算はここ（呼び出し元）で行い、`BalanceSheetFields` へは
+            完成済みの文字列だけを渡す（fe-fix-plan.md §4。データ取得・計算をしない
+            表示専用コンポーネントに保つため） */}
+        <BalanceSheetFields
+          currentAssets={{
+            yen: currentAssetsYen,
+            onChange: setCurrentAssetsYen,
+            notes: [
+              'IRバンクからは取り込めません（EDINETから取り込み可。上のボタン。手入力も可）',
+              edinetAmountNoteText(currentAssetsNote, 'currentAssets'),
+            ],
+          }}
+          investmentSecurities={{
+            yen: investmentSecuritiesYen,
+            onChange: setInvestmentSecuritiesYen,
+            notes: [
+              'IRバンクからは取り込めません（EDINETから取り込み可。上のボタン。手入力も可）',
+              edinetAmountNoteText(investmentSecuritiesNote, 'investmentSecurities'),
+            ],
+          }}
+          totalLiabilities={{
+            yen: totalLiabilitiesYen,
+            onChange: setTotalLiabilitiesYen,
+            notes: [
+              importedAmountNoteText(
+                resolveEditedAmountNote(totalLiabilitiesNote, totalLiabilitiesYen),
+                fiscalYearEndMonth,
+              ),
+            ],
+          }}
+          previousDividendTotal={{
+            yen: previousDividendTotalYen,
+            onChange: setPreviousDividendTotalYen,
+            notes: [
+              importedAmountNoteText(
+                resolveEditedAmountNote(previousDividendTotalNote, previousDividendTotalYen),
+                fiscalYearEndMonth,
+              ),
+            ],
+          }}
+        />
       </fieldset>
 
       <fieldset>

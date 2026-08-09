@@ -74,6 +74,9 @@ function toDividendKind(raw: string): DividendRecordKind | null {
   return DIVIDEND_KINDS.includes(raw as DividendRecordKind) ? (raw as DividendRecordKind) : null;
 }
 
+/** `listFiscalYearEndMonths` の暫定実装が返す定数（1〜12月すべて） */
+const ALL_MONTHS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
 const PER_SOURCES: readonly PerSource[] = ['forecast-eps', 'actual-eps', 'manual'];
 const PBR_SOURCES: readonly PbrSource[] = ['actual-bps', 'manual'];
 
@@ -114,6 +117,8 @@ export class D1CompanyRepository implements CompanyRepository {
           investmentSecuritiesSen: company.balanceSheet.investmentSecuritiesSen,
           totalLiabilitiesSen: company.balanceSheet.totalLiabilitiesSen,
           previousDividendTotalSen: company.balanceSheet.previousDividendTotalSen,
+          epsHistoryRestated: company.epsHistoryRestated ? 1 : 0,
+          revenueHistoryRestated: company.revenueHistoryRestated ? 1 : 0,
           fetchedAt: company.fetchedAt,
           createdAt: now,
           updatedAt: now,
@@ -131,6 +136,8 @@ export class D1CompanyRepository implements CompanyRepository {
             investmentSecuritiesSen: company.balanceSheet.investmentSecuritiesSen,
             totalLiabilitiesSen: company.balanceSheet.totalLiabilitiesSen,
             previousDividendTotalSen: company.balanceSheet.previousDividendTotalSen,
+            epsHistoryRestated: company.epsHistoryRestated ? 1 : 0,
+            revenueHistoryRestated: company.revenueHistoryRestated ? 1 : 0,
             fetchedAt: company.fetchedAt,
             updatedAt: now,
           },
@@ -253,6 +260,8 @@ export class D1CompanyRepository implements CompanyRepository {
       },
       priceSen: row.priceSen,
       fetchedAt: row.fetchedAt,
+      epsHistoryRestated: row.epsHistoryRestated === 1,
+      revenueHistoryRestated: row.revenueHistoryRestated === 1,
     };
   }
 
@@ -280,6 +289,14 @@ export class D1CompanyRepository implements CompanyRepository {
         fetchedAt: row.fetchedAt,
       }))
       .sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt));
+  }
+
+  /**
+   * TODO(be-developer, 2026-08-08): 推測実装。決算月を保存する列が無いため、常に
+   * 1〜12月すべてを返す（`CompanyRepository.listFiscalYearEndMonths` のコメント参照）。
+   */
+  async listFiscalYearEndMonths(): Promise<readonly number[]> {
+    return ALL_MONTHS;
   }
 
   async deleteByCode(code: string): Promise<void> {

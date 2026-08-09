@@ -1,9 +1,14 @@
 # 銘柄・スコアリング API 仕様
 
 > ステータス: 🟢 実装済み（2026-07-28。IRバンク・Yahoo取り込みの契約記載は2026-08-04追加。
-> ③ 実績配当性向・`useActualForScoring` の契約記載は2026-08-06追加）
+> ③ 実績配当性向・`useActualForScoring` の契約記載は2026-08-06追加。
+> EDINET 取り込み（`GET /api/edinet/:code`）の契約記載は2026-08-09追加）
 > 実装: `src/handler/app.ts` / DTO: `src/handler/dto/company-input.ts`, `src/handler/dto/price-input.ts`,
-> `src/handler/dto/irbank-import.ts`, `src/handler/dto/market-data-import.ts`
+> `src/handler/dto/irbank-import.ts`, `src/handler/dto/market-data-import.ts`,
+> `src/handler/dto/edinet-import.ts`
+>
+> 管理用の `POST /api/admin/edinet/index/refresh`（docIDインデックスのバックフィル）は
+> **この文書では未記載**。別タスクで起こす。
 
 ## 共通仕様
 
@@ -38,7 +43,7 @@
 | 404        | 対象なし                                                                            |
 | 422        | `GET /api/irbank/:code` 固有。検証を通った決算年度が1件も無かった                   |
 | 500        | 想定外のサーバーエラー                                                              |
-| 502        | `GET /api/irbank/:code` / `GET /api/market-data/:code` 固有。外部データ源の取得失敗 |
+| 502        | `GET /api/irbank/:code` / `GET /api/market-data/:code` / `GET /api/edinet/:code` 固有。外部データ源の取得失敗 |
 
 ---
 
@@ -234,6 +239,80 @@ Yahoo Finance から株価・配当履歴・株式分割イベントを取り込
 | 400        | `invalid-fiscal-year-end-month`                                  | `fiscalYearEndMonth` の指定が不正（zod で1〜12に絞るため通常は届かない防御的分岐）                |
 | 404        | `source-not-found`                                               | 指定された銘柄のデータが見つからない                                                              |
 | 502        | `source-unreachable` / `malformed-response` / `unexpected-shape` | 市場データの取得に失敗（文言:「市場データの取得に失敗しました。時間をおいて再試行してください」） |
+
+---
+
+## GET /api/edinet/:code
+
+> ステータス: 🟢 実装済み（節の記載は2026-08-09追加。`diagnostics` も同日追加）
+
+金融庁 EDINET の有価証券報告書から、④⑦用の EPS・売上高の履歴（最大6期）と
+⑥用の貸借対照表項目（前期末の流動資産・投資有価証券）を取り込む。**保存はしない。**
+実装: `src/handler/app.ts` / DTO: `src/handler/dto/edinet-import.ts` /
+ロジック: [edinet-history-import.md](../logic/edinet-history-import.md)
+
+docID インデックス（`edinet_document_index`）は日次バッチが事前に構築している前提。
+インデックスに該当エントリが無ければ 404（`document-not-found`）を返す。
+
+パスパラメータ:
+
+| 項目   | 制約                                                            |
+| ------ | --------------------------------------------------------------- |
+| `code` | 4文字固定。先頭3桁は数字、末尾1桁は数字か英大文字（例: `130A`） |
+
+クエリパラメータ: なし。
+
+レスポンス（200）— `EdinetImportResponse`:
+
+```json
+{
+  "years": [
+    { "fiscalYear": 2026, "epsSen": 18359, "revenueSen": 607191500000000, "sourceDocId": "S100YKG2" }
+  ],
+  "epsHistoryRestated": false,
+  "revenueHistoryRestated": false,
+  "balanceSheet": {
+    "currentAssetsSen": 470650700000000,
+    "investmentSecuritiesSen": null,
+    "sourceDocId": "S100YKG2"
+  },
+  "diagnostics": []
+}
+```
+
+| フィールド               | 意味                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `years`                  | 年度降順。最大6件。`epsSen` / `revenueSen` は銭。取れなければ `null`（**無配・0円と `null` は別物**）             |
+| `years[].sourceDocId`    | その年度の値をどの有報（docID）から採ったか                                                                      |
+| `epsHistoryRestated`     | ④用。重複4期の突き合わせで遡及修正が検出されたか。比較できなければ `false`                                       |
+| `revenueHistoryRestated` | ⑦用。同上                                                                                                        |
+| `balanceSheet`           | ⑥用。前期末時点。取得できなければ `null`。IFRS企業は `investmentSecuritiesSen` が項目単位で `null` になりうる     |
+| `diagnostics`            | 取り込めなかった値の記録。**捨てない・丸めない・0件でも空配列でキーを残す**（`GET /api/market-data/:code` と同じ） |
+
+`diagnostics[]` の各要素（`EdinetImportDiagnostic`。domain 型をそのまま公開する）:
+
+| 項目          | 型                                                            | 意味                                                                                   |
+| ------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `field`       | `eps` / `revenue` / `currentAssets` / `investmentSecurities`  | どの項目の話か                                                                         |
+| `offset`      | `number \| null`                                              | その有報の当期を 0 とする相対年度（0〜4）。貸借対照表項目は `null`                     |
+| `fiscalYear`  | `number \| null`                                              | 絶対年度（`有報の当期年度 - offset`）。貸借対照表項目は `null`（§5 の型が年度を持たない） |
+| `elementId`   | `string`                                                      | XBRL 要素ID。原因調査はタグ単位でないと成立しないため落とさない                        |
+| `reason`      | `unit-mismatch` / `unsafe-integer` / `unparsable-value`       | 採用しなかった理由                                                                     |
+| `raw`         | `string`                                                      | 採用しなかった生の値（単位不整合時は `unitId=...` / `unit=...`）                       |
+| `sourceDocId` | `string`                                                      | どの有報由来か。最新有報と1年前有報の診断が**1つの配列に混ざる**ため、これで区別する   |
+
+> `reason` の語彙は IRバンク・Yahoo が共有する `ImportDiagnostic['reason']` とは**別物**。
+> `unit-mismatch`（XBRL のユニットID／単位が期待と違う）は EDINET でしか起きないため、
+> 共有型に混ぜず EDINET 専用型にしている（`import-review.md` §3.2 の表は EDINET には適用されない）。
+
+エラー:
+
+| ステータス | `kind`                                     | 意味                                                                                                      |
+| ---------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| 400        | `invalid-code`                             | 銘柄コードの形式が不正                                                                                    |
+| 404        | `document-not-found`                       | docIDインデックスに該当エントリが無い（未上場・上場廃止・インデックス未整備）                             |
+| 502        | `authentication-failed`                    | EDINET が購読キーを受け付けなかった（文言:「EDINETの認証が通りませんでした。EDINET_API_KEY の設定を確認してください」） |
+| 502        | `source-unreachable` / `malformed-response` | EDINET からの取得に失敗（文言:「EDINETからのデータ取得に失敗しました。時間をおいて再試行してください」）  |
 
 ---
 

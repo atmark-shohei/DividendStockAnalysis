@@ -81,6 +81,13 @@ export interface Company {
   readonly priceSen: number | null;
   /** 入力（解析）した日時。UTC の ISO 8601 文字列 */
   readonly fetchedAt: string;
+  /**
+   * ④用。EDINET取り込みの重複4期突き合わせで遡及修正が検出されたか
+   * （`docs/02_design/logic/edinet-history-import.md` §4.3）。EDINET未実施なら `false`
+   */
+  readonly epsHistoryRestated: boolean;
+  /** ⑦用。同上 */
+  readonly revenueHistoryRestated: boolean;
 }
 
 /** 実績のレコードだけを年度降順で返す。平均・CAGR 系は予想を混ぜない */

@@ -28,6 +28,22 @@ export const companies = sqliteTable('companies', {
   investmentSecuritiesSen: integer('investment_securities_sen'),
   totalLiabilitiesSen: integer('total_liabilities_sen'),
   previousDividendTotalSen: integer('previous_dividend_total_sen'),
+  /**
+   * ④用。EDINET取り込みの重複4期突き合わせで遡及修正が検出されたか
+   * （`docs/02_design/logic/edinet-history-import.md` §4.3）。0/1。既定 0（EDINET未実施）
+   */
+  epsHistoryRestated: integer('eps_history_restated').notNull().default(0),
+  /** ⑦用。同上 */
+  revenueHistoryRestated: integer('revenue_history_restated').notNull().default(0),
+  /**
+   * ⑥用。`currentAssetsSen` / `investmentSecuritiesSen` の出所（EDINET有報のdocID）。
+   * IRバンク・手入力由来、または未取り込みなら NULL。
+   *
+   * TODO(be-developer, 2026-08-08): 現時点ではこの列へ書き込む経路がまだ無い
+   * （`GET /api/edinet/:code` は取得のみで保存しない。§4.6）。保存・マージの実行契機は
+   * 本仕様のスコープ外（§1.2）のため、列だけ先に用意しておく（マイグレーション不要な追加を避ける）。
+   */
+  bsSourceDocId: text('bs_source_doc_id'),
   /** 入力（解析）した日時。UTC。**古いデータを最新として表示しないため必須** */
   fetchedAt: text('fetched_at').notNull(),
   createdAt: text('created_at')
@@ -51,6 +67,12 @@ export const financialRecords = sqliteTable(
     roePercent: real('roe_percent'),
     revenueSen: integer('revenue_sen'),
     operatingMarginPercent: real('operating_margin_percent'),
+    /**
+     * EDINET取り込みの出所（有報のdocID）。IRバンク由来・手入力なら NULL。
+     *
+     * TODO(be-developer, 2026-08-08): `bsSourceDocId` と同じ理由でまだ書き込み経路が無い。
+     */
+    sourceDocId: text('source_doc_id'),
   },
   (table) => [
     // 同じ会社・同じ年度・同じ区分は1行だけ。二重取り込みを DB で防ぐ
@@ -106,3 +128,43 @@ export const transformedMetrics = sqliteTable(
     index('idx_transformed_metrics_metric').on(table.metricKey),
   ],
 );
+
+/**
+ * EDINET有価証券報告書のdocIDインデックス（`docs/02_design/logic/edinet-history-import.md` §4.4）。
+ *
+ * 主キーは `(company_code, fiscal_year)`。**`edinet_code` ではなく当アプリの銘柄コード。**
+ * `documents.json` レスポンスの `secCode`（証券コード＋チェックディジット）から変換して
+ * 保存するため、EDINETコードリスト（Shift_JIS ZIP）の取得・デコードが不要になる
+ * （実装時の発見。設計書ドラフトの `edinetCode` 主キーからの変更）。
+ *
+ * **`company_code` 単独のインデックスは張らない。** 複合主キーの先頭列が `company_code`
+ * なので、`findLatest`（`WHERE company_code = ? ORDER BY fiscal_year DESC LIMIT 1`）も
+ * `findDocId`（`WHERE company_code = ? AND fiscal_year = ?`）も複合PKの前方一致で賄える。
+ * 単独インデックスは書き込みコストを増やすだけで読み取りを速くしない
+ * （設計書 §4.4。0004 のマイグレーションで DROP 済み）。
+ */
+export const edinetDocumentIndex = sqliteTable(
+  'edinet_document_index',
+  {
+    companyCode: text('company_code').notNull(),
+    fiscalYear: integer('fiscal_year').notNull(),
+    docId: text('doc_id').notNull(),
+    /** UTC の ISO 8601。`documents.json` の `submitDateTime`（JST）から変換する */
+    submittedAt: text('submitted_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.companyCode, table.fiscalYear] })],
+);
+
+/**
+ * 日次バッチ（`refresh-edinet-document-index`）の最終成功時刻を保持する追記専用テーブル。
+ *
+ * `edinet_document_index.submitted_at` は書類の提出日時であってバッチの実行日時ではない。
+ * 「バッチが1回も成功していない」と「今日はたまたま対象書類が0件だった」を区別するため、
+ * 専用テーブルに分ける（`EdinetDocumentIndexRepository.lastRefreshedAt()` が読む）。
+ */
+export const edinetRefreshLog = sqliteTable('edinet_refresh_log', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  refreshedAt: text('refreshed_at').notNull(),
+  /** その回で取り込んだ件数。障害調査用 */
+  entryCount: integer('entry_count').notNull(),
+});

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { type Company } from '@/domain/company/company';
 import { type CompanyRepository, type CompanySummary } from '@/domain/company/company-repository';
+import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document-index';
+import { type EdinetHistorySource } from '@/domain/company/edinet-history-source';
 import {
   type FinancialSource,
   type FinancialSourceError,
@@ -29,6 +31,7 @@ function unusedRepository(): CompanyRepository {
     findByCode: (): Promise<Company | null> => fail(),
     listSummaries: (): Promise<readonly CompanySummary[]> => fail(),
     deleteByCode: (): Promise<void> => fail(),
+    listFiscalYearEndMonths: (): Promise<readonly number[]> => fail(),
   };
 }
 
@@ -54,11 +57,29 @@ function unusedMarketDataSource(): MarketDataSource {
   };
 }
 
+/** このテストファイルは EDINET 取り込みを対象にしないので、呼ばれたら落とす */
+function unusedEdinetHistorySource(): EdinetHistorySource {
+  return {
+    fetchHistory: (): never => {
+      throw new Error('このテストで EdinetHistorySource が呼ばれるのは想定外');
+    },
+  };
+}
+
+function unusedEdinetDocumentIndexLookup(): EdinetDocumentIndexLookup {
+  const fail = (): never => {
+    throw new Error('このテストで EdinetDocumentIndexLookup が呼ばれるのは想定外');
+  };
+  return { findDocId: fail, findLatest: fail };
+}
+
 function app(financialSource: FinancialSource) {
   return createApp({
     repository: unusedRepository(),
     financialSource,
     marketDataSource: unusedMarketDataSource(),
+    edinetHistorySource: unusedEdinetHistorySource(),
+    edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup(),
     now: () => new Date('2026-07-28T00:00:00.000Z'),
   });
 }

@@ -16,10 +16,16 @@
     {
       "binding": "DB",
       "database_name": "dividend-stock-analysis",
-      // ローカル開発では未使用のプレースホルダ。
-      // リモートへ deploy する前に `wrangler d1 create` で採番した ID に差し替える
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // ✅ 2026-08-08: `wrangler d1 create dividend-stock-analysis` で採番した実ID
+      "database_id": "a46f0e15-f367-4981-aaa0-0679468d3d64",
       "migrations_dir": "db/migrations",
     },
   ],
+  "triggers": {
+    // EDINET docIDインデックスの日次バッチ（"refresh-edinet-document-index"）。
+    // UTC 21:00 = JST 翌06:00（Cron は常に UTC。実装者の提案値。設計書§8-5が未決のため
+    // 本番反映後に運用状況を見て調整の余地あり。
+    // docs/02_design/logic/edinet-history-import.md §4.4）
+    "crons": ["0 21 * * *"],
+  },
 }

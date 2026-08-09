@@ -24,6 +24,12 @@ export const EPS_CAGR_YEARS = 5;
 export interface EpsCagrInput {
   /** 年度降順の EPS（銭）。最低6年分が必要 */
   readonly epsHistory: readonly (number | null)[];
+  /**
+   * EDINET取り込みの重複4期突き合わせで遡及修正が検出されたか
+   * （`docs/02_design/logic/edinet-history-import.md` §4.3）。`true` なら
+   * 系列の連続性が保証できないため判定不能に倒す。
+   */
+  readonly historyRestated: boolean;
 }
 
 /**
@@ -41,6 +47,8 @@ export interface EpsCagrInput {
 export function calculateEpsCagr(input: EpsCagrInput): MetricScore {
   const window = takeCompleteYears(input.epsHistory, EPS_REQUIRED_YEARS);
   if (window === null) return unavailable('insufficient-history');
+  // 6期そろわない銘柄は insufficient-history が先に返る（設計書 §4.3・§7.2）
+  if (input.historyRestated) return unavailable('restated-history');
 
   const recentMedian = median(window.slice(0, EPS_MEDIAN_WINDOW));
   const baseMedian = median(window.slice(EPS_MEDIAN_WINDOW, EPS_REQUIRED_YEARS));

@@ -81,6 +81,18 @@ export default tseslint.config(
     },
   },
   {
+    // 運用スクリプト（アプリのコードではない）。Node の実行環境を前提にする
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        console: 'readonly',
+        fetch: 'readonly',
+        process: 'readonly',
+        setTimeout: 'readonly',
+      },
+    },
+  },
+  {
     files: ['frontend/**/*.{ts,tsx}', 'vite.config.ts'],
     languageOptions: {
       parserOptions: { project: './tsconfig.frontend.json', tsconfigRootDir: import.meta.dirname },

@@ -1,23 +1,38 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  NO_RESTATED_RELEASE,
   cellWarningText,
   confirmWarningsText,
+  createDetectedRestated,
+  createRestatedRelease,
   dropEditedWarnings,
+  edinetAmountNoteText,
+  edinetDiagnosticText,
+  edinetRestatedNoticeText,
+  edinetRestatedReleasedText,
   fillBlankMultiples,
   hasUnconfirmedWarnings,
   importedAmountNoteText,
   marketDiagnosticText,
   mergeDividendYears,
+  mergeRowsWithEdinetImport,
   mergeRowsWithImport,
   resolveEditedAmountNote,
   resolveImportedAmount,
+  resolveImportedEdinetAmount,
   resolveImportedPriceYen,
+  resolveRestatedView,
+  restatedReleaseButtonText,
+  restatedRestoreButtonText,
+  restatedTargetLabel,
   rowlessWarningText,
   rowlessWarnings,
   shouldShowConfirmation,
+  shouldShowEdinetDiagnostics,
   splitEventText,
   toYearRow,
+  toggleRestatedRelease,
   warningsForCell,
 } from '../../frontend/components/CompanyForm';
 
@@ -233,6 +248,231 @@ describe('mergeRowsWithImport', () => {
     expect(result.rows[0]?.fiscalYear).toBe(String(THIS_YEAR + 1));
     expect(result.rows[0]?.isForecast).toBe(false);
     expect(result.rows[0]?.epsYen).toBe('183.59');
+  });
+});
+
+/**
+ * EDINET取り込み結果（④EPS・⑦売上高の古い年度）のマージ
+ * （`docs/02_design/logic/edinet-history-import.md` §4.6）。
+ *
+ * `mergeRowsWithImport`（IRバンク）とは方針が異なる。**空欄のときだけ埋める。
+ * 手入力済みセルは上書きしない**（Manager決定、2026-08-08。`resolveImportedAmount`
+ * と同じ思想）。ROE・営業利益率は EDINET が返さないので触れない。
+ */
+type ImportedEdinetYear = Parameters<typeof mergeRowsWithEdinetImport>[1][number];
+
+function edinetYear(
+  fiscalYear: number,
+  values: Partial<Omit<ImportedEdinetYear, 'fiscalYear'>> = {},
+): ImportedEdinetYear {
+  return {
+    fiscalYear,
+    epsSen: null,
+    revenueSen: null,
+    sourceDocId: 'S100YKG2',
+    ...values,
+  };
+}
+
+describe('mergeRowsWithEdinetImport', () => {
+  it('EDINET由来の値が null のセルは既存行（IRバンク由来 or 手入力）を残す', () => {
+    const result = mergeRowsWithEdinetImport(
+      [row(2019, { epsYen: '183.59', revenueYen: '6071915000000' })],
+      [edinetYear(2019)],
+    );
+
+    expect(result.rows[0]?.epsYen).toBe('183.59');
+    expect(result.rows[0]?.revenueYen).toBe('6071915000000');
+    expect(result.filledCount).toBe(0);
+  });
+
+  it('EDINET由来の値があり既存行が空なら埋まる', () => {
+    const result = mergeRowsWithEdinetImport([row(2019)], [edinetYear(2019, { epsSen: 15001 })]);
+
+    expect(result.rows[0]?.epsYen).toBe('150.01');
+    expect(result.filledCount).toBe(1);
+  });
+
+  it('EDINET由来の値があっても既存に手入力済みの値があれば上書きしない（規則2。IRバンクの規則1とは異なる）', () => {
+    const result = mergeRowsWithEdinetImport(
+      [row(2019, { epsYen: '100' })],
+      [edinetYear(2019, { epsSen: 15001 })],
+    );
+
+    expect(result.rows[0]?.epsYen).toBe('100');
+    expect(result.filledCount).toBe(0);
+  });
+
+  it('EPS・売上高は独立に判定する（EPSだけ埋まり、売上高は既存を残す）', () => {
+    const result = mergeRowsWithEdinetImport(
+      [row(2019, { revenueYen: '999' })],
+      [edinetYear(2019, { epsSen: 15001, revenueSen: 500_000 })],
+    );
+
+    expect(result.rows[0]?.epsYen).toBe('150.01');
+    expect(result.rows[0]?.revenueYen).toBe('999');
+    expect(result.filledCount).toBe(1);
+  });
+
+  it('ROE・営業利益率には触れない（EDINETは返さない。既存値がそのまま残る）', () => {
+    const result = mergeRowsWithEdinetImport(
+      [row(2019, { roePercent: '13.93', operatingMarginPercent: '18.1' })],
+      [edinetYear(2019, { epsSen: 15001 })],
+    );
+
+    expect(result.rows[0]?.roePercent).toBe('13.93');
+    expect(result.rows[0]?.operatingMarginPercent).toBe('18.1');
+  });
+
+  it('EDINET側の years が0件でも既存行がそのまま残る（冪等）', () => {
+    const existing = [row(2019, { epsYen: '100' }), row(2018, { revenueYen: '200' })];
+    const result = mergeRowsWithEdinetImport(existing, []);
+
+    expect(result.rows).toEqual(existing);
+    expect(result.filledCount).toBe(0);
+  });
+
+  it('取り込みにあって既存に無い年度は行を追加する（予想扱いにしない。EDINETは予想値を返さない）', () => {
+    const result = mergeRowsWithEdinetImport(
+      [row(2024)],
+      [edinetYear(2019, { epsSen: 15001, revenueSen: 500_000 })],
+    );
+
+    const added = result.rows.find((merged) => merged.fiscalYear === '2019');
+    expect(added?.isForecast).toBe(false);
+    expect(added?.epsYen).toBe('150.01');
+    expect(added?.revenueYen).toBe('5000');
+  });
+
+  it('EPS=0円（判定可）は null と混同せず埋める（無配ではなく無配とは別軸だが、0を空文字にしない回帰）', () => {
+    const result = mergeRowsWithEdinetImport([row(2019)], [edinetYear(2019, { epsSen: 0 })]);
+
+    expect(result.rows[0]?.epsYen).toBe('0');
+    expect(result.filledCount).toBe(1);
+  });
+
+  it('同じ年度の行を2つ作らない', () => {
+    const result = mergeRowsWithEdinetImport(
+      [row(2019, { epsYen: '100' })],
+      [edinetYear(2019, { epsSen: 15001 })],
+    );
+
+    const years = result.rows.map((merged) => merged.fiscalYear);
+    expect(new Set(years).size).toBe(years.length);
+  });
+});
+
+/**
+ * EDINET遡及修正の通知文言（設計書 §4.3・§2.6）。④EPS・⑦売上高は独立に判定不能へ
+ * 倒れるため、4パターン（④のみ・⑦のみ・両方・なし）を出し分ける。
+ * 文言は `reasonText('restated-history')` を再利用する（二重定義しない）。
+ */
+describe('edinetRestatedNoticeText', () => {
+  it('④EPSのみ検出: ④EPS CAGR とだけ言及する', () => {
+    const text = edinetRestatedNoticeText(true, false);
+    expect(text).toContain('④EPS CAGR');
+    expect(text).not.toContain('⑦売上高CAGR');
+    expect(text).toContain('有価証券報告書の記載が年度をまたいで一致しないため、算出できません');
+  });
+
+  it('⑦売上高のみ検出: ⑦売上高CAGR とだけ言及する', () => {
+    const text = edinetRestatedNoticeText(false, true);
+    expect(text).toContain('⑦売上高CAGR');
+    expect(text).not.toContain('④EPS CAGR');
+  });
+
+  it('両方検出: ④⑦両方に言及する', () => {
+    const text = edinetRestatedNoticeText(true, true);
+    expect(text).toContain('④EPS CAGR');
+    expect(text).toContain('⑦売上高CAGR');
+  });
+
+  it('検出なし（両方 false）: 通知不要として null を返す', () => {
+    expect(edinetRestatedNoticeText(false, false)).toBeNull();
+  });
+
+  it('⚠記号を必ず添える（色だけで表現しない）', () => {
+    expect(edinetRestatedNoticeText(true, false)).toContain('⚠');
+  });
+});
+
+/**
+ * ⑥用（流動資産・投資有価証券）のEDINET取り込み。`resolveImportedAmount`（IRバンク）と
+ * 同じ「空欄のときだけ埋める」方針だが、決算年度ではなく `sourceDocId`（監査目的。
+ * Manager決定）を出所として持つ点が異なる。3状態（unavailable/filled/kept-existing）。
+ */
+describe('resolveImportedEdinetAmount', () => {
+  it('取得できない（IFRS企業等で valueSen: null）ら空欄のまま。"0" を書き込まない', () => {
+    const result = resolveImportedEdinetAmount('', null, 'S100YKG2');
+    expect(result.yen).toBe('');
+    expect(result.noteKind).toBe('unavailable');
+  });
+
+  it('空欄なら取り込み値を銭→円で入れ、noteKind は filled', () => {
+    const result = resolveImportedEdinetAmount('', 1_347_067_400_000_000, 'S100YKG2');
+    expect(result.yen).toBe('13470674000000');
+    expect(result.noteKind).toBe('filled');
+    expect(result.noteKind === 'filled' && result.sourceDocId).toBe('S100YKG2');
+  });
+
+  it('valueSen: 0 は値。"0" を入れる（null 扱いにしない）', () => {
+    const result = resolveImportedEdinetAmount('', 0, 'S100YKG2');
+    expect(result.yen).toBe('0');
+    expect(result.noteKind).toBe('filled');
+  });
+
+  it('手入力済みなら取り込み値で上書きしない（kept-existing）', () => {
+    const result = resolveImportedEdinetAmount('123', 456_00, 'S100YKG2');
+    expect(result.yen).toBe('123');
+    expect(result.noteKind).toBe('kept-existing');
+  });
+
+  it('取得できなくても手入力は消さない', () => {
+    const result = resolveImportedEdinetAmount('123', null, 'S100YKG2');
+    expect(result.yen).toBe('123');
+    expect(result.noteKind).toBe('unavailable');
+  });
+});
+
+describe('edinetAmountNoteText', () => {
+  it('取り込み前（null）は何も出さない', () => {
+    expect(edinetAmountNoteText(null, 'investmentSecurities')).toBe('');
+  });
+
+  it('投資有価証券の unavailable は取得できなかった旨を言葉で示し、数字を出さない（0 と表示しない）', () => {
+    const text = edinetAmountNoteText(
+      resolveImportedEdinetAmount('', null, 'S100YKG2'),
+      'investmentSecurities',
+    );
+    expect(text).toContain('取得できません');
+    expect(text).not.toContain('0');
+  });
+
+  it('流動資産の unavailable は「投資有価証券」に言及しない（CR-2 回帰）', () => {
+    const text = edinetAmountNoteText(
+      resolveImportedEdinetAmount('', null, 'S100YKG2'),
+      'currentAssets',
+    );
+    expect(text).toContain('取得できません');
+    expect(text).not.toContain('投資有価証券');
+  });
+
+  it('filled は sourceDocId を監査目的で併記する', () => {
+    const text = edinetAmountNoteText(
+      resolveImportedEdinetAmount('', 1_347_067_400_000_000, 'S100YKG2'),
+      'investmentSecurities',
+    );
+    expect(text).toContain('値を入れました');
+    expect(text).toContain('S100YKG2');
+  });
+
+  it('kept-existing も sourceDocId を併記する（入れ替えなかった出所を示す）', () => {
+    const text = edinetAmountNoteText(
+      resolveImportedEdinetAmount('123', 456_00, 'S100YKG2'),
+      'investmentSecurities',
+    );
+    expect(text).toContain('入れ替えていません');
+    expect(text).toContain('S100YKG2');
   });
 });
 
@@ -1033,4 +1273,408 @@ describe('confirmWarningsText', () => {
     expect(text).toContain('⚠');
     expect(text).toContain('2 件');
   });
+});
+
+/**
+ * 遡及修正で倒れた④⑦の判定不能を、人が明示的に解除する仕組み
+ * （設計書 §4.3・案C。ユーザー決定 2026-08-09）。
+ *
+ * **検出（EDINETの重複4期が一致しなかったという事実）と解除（原典を確認したという
+ * 人の判断）を別の値として保つ**のがこの関数群の要点。事実を書き換える実装にすると
+ * 「戻す」が成立せず、`null`（取り込み未実施）との区別も付かなくなる。
+ */
+type DetectedRestated = NonNullable<Parameters<typeof resolveRestatedView>[0]>;
+type RestatedRelease = Parameters<typeof resolveRestatedView>[1];
+
+describe('resolveRestatedView', () => {
+  const detectedBoth: DetectedRestated = createDetectedRestated(true, true);
+  const detectedEpsOnly: DetectedRestated = createDetectedRestated(true, false);
+
+  const cases: readonly {
+    readonly name: string;
+    readonly detected: DetectedRestated | null;
+    readonly released: RestatedRelease;
+    readonly expected: ReturnType<typeof resolveRestatedView>;
+  }[] = [
+    {
+      // #16: 取り込み未実施（null）と「取り込み済み・検出なし」を混同しない
+      name: '取り込み未実施（null）: 警告も解除UIも出さない',
+      detected: null,
+      released: NO_RESTATED_RELEASE,
+      expected: {
+        pending: { eps: false, revenue: false },
+        released: { eps: false, revenue: false },
+      },
+    },
+    {
+      // #16: 検出なしは「解除できる対象が無い」。解除済みと言ってはいけない
+      name: '取り込み済み・検出なし（両方 false）: 解除UIを出さない',
+      detected: createDetectedRestated(false, false),
+      released: NO_RESTATED_RELEASE,
+      expected: {
+        pending: { eps: false, revenue: false },
+        released: { eps: false, revenue: false },
+      },
+    },
+    {
+      name: '両方検出・未解除: 両方が警告のまま残る',
+      detected: detectedBoth,
+      released: NO_RESTATED_RELEASE,
+      expected: { pending: { eps: true, revenue: true }, released: { eps: false, revenue: false } },
+    },
+    {
+      // #8: ④だけ解除しても⑦の警告は残る
+      name: '両方検出・④だけ解除: ④は解除済み、⑦は警告のまま',
+      detected: detectedBoth,
+      released: createRestatedRelease(true, false),
+      expected: { pending: { eps: false, revenue: true }, released: { eps: true, revenue: false } },
+    },
+    {
+      // #9: 対称。⑦だけ解除しても④の警告は残る
+      name: '両方検出・⑦だけ解除: ⑦は解除済み、④は警告のまま',
+      detected: detectedBoth,
+      released: createRestatedRelease(false, true),
+      expected: { pending: { eps: true, revenue: false }, released: { eps: false, revenue: true } },
+    },
+    {
+      // #10: 両方解除したら警告は消える
+      name: '両方検出・両方解除: 警告は残らない',
+      detected: detectedBoth,
+      released: createRestatedRelease(true, true),
+      expected: { pending: { eps: false, revenue: false }, released: { eps: true, revenue: true } },
+    },
+    {
+      name: '④のみ検出のときに⑦を解除しても、⑦は解除済みにならない（検出していないものは解除できない）',
+      detected: detectedEpsOnly,
+      released: createRestatedRelease(false, true),
+      expected: {
+        pending: { eps: true, revenue: false },
+        released: { eps: false, revenue: false },
+      },
+    },
+    {
+      name: '取り込み未実施のまま解除操作が残っていても解除済みにしない',
+      detected: null,
+      released: createRestatedRelease(true, true),
+      expected: {
+        pending: { eps: false, revenue: false },
+        released: { eps: false, revenue: false },
+      },
+    },
+  ];
+
+  for (const { name, detected, released, expected } of cases) {
+    it(name, () => {
+      expect(resolveRestatedView(detected, released)).toEqual(expected);
+    });
+  }
+
+  it('送信値は pending をそのまま使える（未実施・検出なし・解除済みはいずれも false）', () => {
+    expect(resolveRestatedView(null, NO_RESTATED_RELEASE).pending).toEqual({
+      eps: false,
+      revenue: false,
+    });
+    expect(
+      resolveRestatedView(createDetectedRestated(true, true), createRestatedRelease(true, true))
+        .pending,
+    ).toEqual({ eps: false, revenue: false });
+  });
+});
+
+describe('toggleRestatedRelease', () => {
+  it('④を解除しても⑦の解除状態は変わらない（④⑦は独立。設計書 §4.3）', () => {
+    expect(toggleRestatedRelease(NO_RESTATED_RELEASE, 'eps', true)).toEqual({
+      eps: true,
+      revenue: false,
+    });
+  });
+
+  it('⑦を解除しても④の解除状態は変わらない', () => {
+    expect(toggleRestatedRelease(NO_RESTATED_RELEASE, 'revenue', true)).toEqual({
+      eps: false,
+      revenue: true,
+    });
+  });
+
+  // #15: 誤解除を取り返せること
+  it('「戻す」で解除を取り消せる（④だけ戻しても⑦の解除は残る）', () => {
+    const released = toggleRestatedRelease(
+      toggleRestatedRelease(NO_RESTATED_RELEASE, 'eps', true),
+      'revenue',
+      true,
+    );
+    expect(toggleRestatedRelease(released, 'eps', false)).toEqual({ eps: false, revenue: true });
+  });
+
+  it('同じ操作を繰り返しても結果は変わらない（冪等）', () => {
+    const once = toggleRestatedRelease(NO_RESTATED_RELEASE, 'eps', true);
+    expect(toggleRestatedRelease(once, 'eps', true)).toEqual(once);
+  });
+
+  it('元の値を破壊しない（state を直接書き換えない）', () => {
+    const released: RestatedRelease = createRestatedRelease(false, false);
+    toggleRestatedRelease(released, 'eps', true);
+    expect(released).toEqual({ eps: false, revenue: false });
+  });
+
+  // fe-review CR-1: 「検出という事実」と「人の解除判断」は同じ形なので、
+  // 型を分けておかないと将来の改修で取り違えても静的検査を素通りする
+  it('検出結果を解除操作として渡せない（取り違えを型で弾く）', () => {
+    const detected = createDetectedRestated(true, true);
+    // @ts-expect-error 検出（EDINETが見つけた事実）は解除（人の判断）として渡せない
+    const misused = toggleRestatedRelease(detected, 'eps', true);
+    expect(misused).toEqual({ eps: true, revenue: true });
+  });
+});
+
+/**
+ * 解除を反映した後の警告文言。`edinetRestatedNoticeText` は `pending` を受け取るので、
+ * 解除した指標が警告文から消え、解除していない指標だけが残る。
+ */
+describe('edinetRestatedNoticeText（解除後）', () => {
+  const detected: DetectedRestated = createDetectedRestated(true, true);
+
+  // #8
+  it('④だけ解除したら警告文は⑦だけに言及する', () => {
+    const view = resolveRestatedView(detected, createRestatedRelease(true, false));
+    const text = edinetRestatedNoticeText(view.pending.eps, view.pending.revenue);
+    expect(text).toContain('⑦売上高CAGR');
+    expect(text).not.toContain('④EPS CAGR');
+  });
+
+  // #9
+  it('⑦だけ解除したら警告文は④だけに言及する', () => {
+    const view = resolveRestatedView(detected, createRestatedRelease(false, true));
+    const text = edinetRestatedNoticeText(view.pending.eps, view.pending.revenue);
+    expect(text).toContain('④EPS CAGR');
+    expect(text).not.toContain('⑦売上高CAGR');
+  });
+
+  // #10
+  it('両方解除したら警告文は null（何も出さない）', () => {
+    const view = resolveRestatedView(detected, createRestatedRelease(true, true));
+    expect(edinetRestatedNoticeText(view.pending.eps, view.pending.revenue)).toBeNull();
+  });
+});
+
+/**
+ * 解除したことの告知。**⚠が消えるだけにしない**（解除できたのか取り込みがやり直されたのかを
+ * 人が区別できない）。警告ではないので ⚠ は付けない。
+ */
+describe('edinetRestatedReleasedText', () => {
+  // #11: 対象を文字で書く（色だけで表現しない）
+  it('④だけ解除: ④EPS CAGR を文字で書く', () => {
+    const text = edinetRestatedReleasedText(true, false);
+    expect(text).toContain('④EPS CAGR');
+    expect(text).not.toContain('⑦売上高CAGR');
+  });
+
+  it('⑦だけ解除: ⑦売上高CAGR を文字で書く', () => {
+    const text = edinetRestatedReleasedText(false, true);
+    expect(text).toContain('⑦売上高CAGR');
+    expect(text).not.toContain('④EPS CAGR');
+  });
+
+  it('両方解除: ④⑦の両方に言及する', () => {
+    const text = edinetRestatedReleasedText(true, true);
+    expect(text).toContain('④EPS CAGR');
+    expect(text).toContain('⑦売上高CAGR');
+  });
+
+  it('解除していなければ告知は出さない（null）', () => {
+    expect(edinetRestatedReleasedText(false, false)).toBeNull();
+  });
+
+  // #12: 警告と告知を取り違えない
+  it('告知には ⚠ を付けない（警告ではない）。警告文には必ず付ける', () => {
+    expect(edinetRestatedReleasedText(true, true)).not.toContain('⚠');
+    expect(edinetRestatedNoticeText(true, true)).toContain('⚠');
+  });
+
+  // #13: `null`（判定不能）を 0 と言い換えない
+  it('告知に「0 点」も裸の 0 も出さない（判定不能は0点ではない）', () => {
+    const text = edinetRestatedReleasedText(true, true);
+    expect(text).not.toContain('0 点');
+    expect(text).not.toContain('0');
+  });
+
+  // #14: 解除しても 6期そろわなければ insufficient-history で判定不能のまま
+  it('「算出されます」と断言せず、判定不能のままになりうることを書く', () => {
+    const text = edinetRestatedReleasedText(true, false);
+    expect(text).not.toContain('算出されます');
+    expect(text).toContain('判定不能のままです');
+  });
+});
+
+describe('解除ボタンのラベル', () => {
+  it('指標名は1箇所の定義から出す（警告文と食い違わせない）', () => {
+    expect(restatedTargetLabel('eps')).toBe('④EPS CAGR');
+    expect(restatedTargetLabel('revenue')).toBe('⑦売上高CAGR');
+  });
+
+  it('解除ボタンは対象と操作を文字で書く', () => {
+    expect(restatedReleaseButtonText('eps')).toContain('④EPS CAGR');
+    expect(restatedReleaseButtonText('eps')).toContain('解除');
+    expect(restatedReleaseButtonText('revenue')).toContain('⑦売上高CAGR');
+  });
+
+  it('戻すボタンは「解除を戻す」と分かる文言にする（解除ボタンと同じ文言にしない）', () => {
+    expect(restatedRestoreButtonText('eps')).toContain('戻す');
+    expect(restatedRestoreButtonText('eps')).not.toBe(restatedReleaseButtonText('eps'));
+  });
+});
+
+/**
+ * EDINET取り込みの診断表示（BE確定DTO。2026-08-09）。
+ * `marketDiagnosticText` と同じく**捨てない・件数に潰さない**
+ * （`docs/02_design/logic/import-review.md` §5.3）。
+ * `reason` の生の英字を画面に出さないことと、値の代わりに `0` を出さないことを固定する。
+ */
+type EdinetDiagnostic = Parameters<typeof edinetDiagnosticText>[0];
+
+function edinetDiagnostic(values: Partial<EdinetDiagnostic> = {}): EdinetDiagnostic {
+  return {
+    field: 'eps',
+    offset: 0,
+    fiscalYear: 2025,
+    elementId: 'jpcrp_cor:BasicEarningsLossPerShareSummaryOfBusinessResults',
+    reason: 'unparsable-value',
+    raw: '△1,234',
+    sourceDocId: 'S100YKG2',
+    ...values,
+  };
+}
+
+describe('edinetDiagnosticText', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly diagnostic: EdinetDiagnostic;
+    readonly contains: readonly string[];
+    readonly notContains: readonly string[];
+  }[] = [
+    {
+      name: '④EPS: 年度と項目名と理由を日本語で出す',
+      diagnostic: edinetDiagnostic({ fiscalYear: 2021, reason: 'unparsable-value' }),
+      contains: ['2021年度', '④EPS', '数値として読めない値でした'],
+      notContains: ['unparsable-value'],
+    },
+    {
+      name: '⑦売上高: 単位違いは「unit-mismatch」ではなく日本語で出す',
+      diagnostic: edinetDiagnostic({
+        field: 'revenue',
+        fiscalYear: 2020,
+        elementId: 'jpcrp_cor:NetSalesSummaryOfBusinessResults',
+        reason: 'unit-mismatch',
+        raw: 'unit=千円',
+      }),
+      contains: ['2020年度', '⑦売上高', '想定していない単位で記載されていました', 'unit=千円'],
+      notContains: ['unit-mismatch'],
+    },
+    {
+      name: '桁あふれは「桁が大きすぎて取り込めない金額でした」と出す',
+      diagnostic: edinetDiagnostic({
+        field: 'revenue',
+        fiscalYear: 2024,
+        reason: 'unsafe-integer',
+        raw: '99999999999999999',
+      }),
+      contains: ['桁が大きすぎて取り込めない金額でした'],
+      notContains: ['unsafe-integer'],
+    },
+    {
+      // 貸借対照表項目は「前期末時点」のスナップショットで決算年度を持たない（設計書 §5）
+      name: '⑥流動資産（fiscalYear: null）: 年度を書かない',
+      diagnostic: edinetDiagnostic({
+        field: 'currentAssets',
+        offset: null,
+        fiscalYear: null,
+        elementId: 'jppfs_cor:CurrentAssets',
+        reason: 'unit-mismatch',
+        raw: 'unit=千円',
+      }),
+      contains: ['⑥流動資産'],
+      notContains: ['年度'],
+    },
+    {
+      name: '⑥投資有価証券（fiscalYear: null）: 年度を書かない',
+      diagnostic: edinetDiagnostic({
+        field: 'investmentSecurities',
+        offset: null,
+        fiscalYear: null,
+        elementId: 'jppfs_cor:InvestmentSecurities',
+        reason: 'unparsable-value',
+        raw: '－',
+      }),
+      contains: ['⑥投資有価証券', '－'],
+      notContains: ['年度'],
+    },
+  ];
+
+  for (const { name, diagnostic, contains, notContains } of cases) {
+    it(name, () => {
+      const text = edinetDiagnosticText(diagnostic);
+      for (const fragment of contains) expect(text).toContain(fragment);
+      for (const fragment of notContains) expect(text).not.toContain(fragment);
+    });
+  }
+
+  it('⚠記号を必ず添える（色だけで表現しない）', () => {
+    expect(edinetDiagnosticText(edinetDiagnostic())).toContain('⚠');
+  });
+
+  it('原因調査用の docID と XBRL要素ID を併記する', () => {
+    const text = edinetDiagnosticText(
+      edinetDiagnostic({ sourceDocId: 'S100VXGZ', elementId: 'jppfs_cor:CurrentAssets' }),
+    );
+    expect(text).toContain('docID S100VXGZ');
+    expect(text).toContain('jppfs_cor:CurrentAssets');
+  });
+
+  // 決算年度・docID には数字の 0 が入りうるので、それらを含まない診断で固定する
+  it('取り込めなかった値の代わりに 0 を出さない（診断は「値が無い」記録）', () => {
+    const text = edinetDiagnosticText(
+      edinetDiagnostic({
+        field: 'investmentSecurities',
+        offset: null,
+        fiscalYear: null,
+        elementId: 'jppfs_cor:InvestmentSecurities',
+        raw: '△1,234',
+        sourceDocId: 'S1YKGZ',
+      }),
+    );
+    expect(text).not.toContain('0');
+    expect(text).toContain('元の値: △1,234');
+  });
+
+  it('原典が空だったときは「元の値: 」で切らず、空欄だったと書く', () => {
+    const text = edinetDiagnosticText(edinetDiagnostic({ raw: '' }));
+    expect(text).toContain('元の値: 空欄');
+  });
+});
+
+/**
+ * 診断の枠を出すかどうか（設計書 §7.2「診断が0件のときは枠ごと出さない」）。
+ * 空の `<ul className="warning">` だけが残ると、警告の体裁の枠が中身なしで出て
+ * 「読めない診断がある」ように見える。
+ */
+describe('shouldShowEdinetDiagnostics', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly diagnostics: readonly Parameters<typeof edinetDiagnosticText>[0][];
+    readonly expected: boolean;
+  }[] = [
+    { name: '0件: 枠ごと出さない', diagnostics: [], expected: false },
+    { name: '1件: 枠を出す', diagnostics: [edinetDiagnostic()], expected: true },
+    {
+      name: '複数件: 枠を出す（件数に潰さず1件ずつ出す前提）',
+      diagnostics: [edinetDiagnostic(), edinetDiagnostic({ field: 'revenue' })],
+      expected: true,
+    },
+  ];
+
+  for (const { name, diagnostics, expected } of cases) {
+    it(name, () => {
+      expect(shouldShowEdinetDiagnostics(diagnostics)).toBe(expected);
+    });
+  }
 });

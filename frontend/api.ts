@@ -6,11 +6,18 @@
  */
 
 import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/company-input';
+import type { EdinetImportResponse } from '@/handler/dto/edinet-import';
 import type { IrBankImportResponse } from '@/handler/dto/irbank-import';
 import type { MarketDataImportResponse } from '@/handler/dto/market-data-import';
 import type { CompanySummary } from '@/domain/company/company-repository';
 
-export type { AnalyzeCompanyRequest, ScoringResponse, IrBankImportResponse, MarketDataImportResponse };
+export type {
+  AnalyzeCompanyRequest,
+  ScoringResponse,
+  IrBankImportResponse,
+  MarketDataImportResponse,
+  EdinetImportResponse,
+};
 
 /** 失敗しうる外部呼び出しは必ず結果を検査する（`.claude/rules/coding-style.md`） */
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
@@ -78,6 +85,15 @@ export function importMarketData(
   return request<MarketDataImportResponse>(
     `/api/market-data/${encodeURIComponent(code)}${query}`,
   );
+}
+
+/**
+ * EDINET（金融庁の有価証券報告書）から④EPS CAGR・⑦売上高CAGRの古い年度の値、
+ * ⑥配当維持可能年数が要求する流動資産・投資有価証券を取り込む。**保存はしない**
+ * （`docs/02_design/logic/edinet-history-import.md`。`importFromIrBank` と同じ方針）。
+ */
+export function importFromEdinet(code: string): Promise<EdinetImportResponse> {
+  return request<EdinetImportResponse>(`/api/edinet/${encodeURIComponent(code)}`);
 }
 
 export async function deleteCompany(code: string): Promise<void> {

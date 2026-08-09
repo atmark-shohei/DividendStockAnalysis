@@ -43,16 +43,14 @@ function company(records: readonly FinancialRecord[]): Company {
     multiples: { per: null, perSource: null, pbr: null, pbrSource: null },
     priceSen: null,
     fetchedAt: '2026-07-28T00:00:00.000Z',
+    epsHistoryRestated: false,
+    revenueHistoryRestated: false,
   };
 }
 
 describe('latestActualRecord — ③ 実績側が使う最新の実績レコード', () => {
   it('最新年度の実績レコードを返す', () => {
-    const target = company([
-      record(2023, false),
-      record(2025, false),
-      record(2024, false),
-    ]);
+    const target = company([record(2023, false), record(2025, false), record(2024, false)]);
     expect(latestActualRecord(target)?.fiscalYear).toBe(2025);
   });
 
@@ -87,11 +85,7 @@ describe('latestActualRecord — ③ 実績側が使う最新の実績レコー�
 
 describe('latestForecastRecord — ③ 予想側が使う最新の予想レコード', () => {
   it('最新年度の予想レコードを返す', () => {
-    const target = company([
-      record(2026, true),
-      record(2027, true),
-      record(2025, false),
-    ]);
+    const target = company([record(2026, true), record(2027, true), record(2025, false)]);
     expect(latestForecastRecord(target)?.fiscalYear).toBe(2027);
   });
 

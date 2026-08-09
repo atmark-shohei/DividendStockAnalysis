@@ -96,8 +96,12 @@
 
 - [ ] スコア表の境界値・穴・負値の扱い（[§0](./scoring-requirements.md#0-未解決の仕様曖昧点)）
 - [x] 外部 API からの自動取得を将来行うか →
-      **2026-07-28 決定。** IRバンクの静的 JSON に限り Worker から直接取得する
-      （[ADR-0007](../adr/0007-irbank-json-direct-fetch.md)）。認証・課金を伴う
-      外部 API は引き続き使わない
+      **2026-07-28 決定、2026-08-07 改定。** IRバンクの静的 JSON
+      （[ADR-0007](../adr/0007-irbank-json-direct-fetch.md)）、Yahoo Finance の
+      チャートエンドポイント（[ADR-0010](../adr/0010-yahoo-chart-endpoint.md)）に加え、
+      EDINET API（認証つき。[ADR-0011](../adr/0011-edinet-financial-history-api.md)）を
+      個人利用に限って Worker から直接取得する。判断基準を「認証の有無」から
+      **「課金を伴う、または再利用可否が規約上不明な外部 API は使わない」**に改めた
+      （ADR-0011）
 - [ ] 対象は日本株のみか
 - [ ] 単一ユーザー前提か、認証を伴う複数ユーザーか

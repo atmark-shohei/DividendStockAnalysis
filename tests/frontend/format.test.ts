@@ -6,6 +6,7 @@ import {
   formatPriceAsOf,
   payoutRatioBreakdownText,
   ratioToEditableText,
+  reasonText,
   senToEditableText,
 } from '../../frontend/format';
 
@@ -160,6 +161,40 @@ describe('payoutRatioBreakdownText', () => {
     );
     expect(text).toBe('予想 0.00% / 0 点／実績 0.00% / 0 点／採用: 予想');
     expect(text).not.toContain(NO_DATA);
+  });
+});
+
+/**
+ * ④EPS CAGR・⑦売上高CAGR専用の判定不能理由
+ * （`docs/02_design/logic/edinet-history-import.md` §4.3）。
+ *
+ * `reasonText` は `REASON_TEXT` に無いキーへ既定文言（「判定できません」）へ
+ * フォールバックする（`format.ts:30-33`）。`restated-history` を追加しても
+ * この後方互換が壊れないことを合わせて固定する。
+ */
+describe('reasonText', () => {
+  const cases: readonly { readonly name: string; readonly reason: string; readonly expected: string }[] =
+    [
+      {
+        name: 'restated-history は遡及修正の専用文言（フォールバックの「判定できません」にしない）',
+        reason: 'restated-history',
+        expected: '有価証券報告書の記載が年度をまたいで一致しないため、算出できません',
+      },
+      {
+        name: '未知の理由コードはフォールバック文言のまま（restated-history追加後も壊れない）',
+        reason: 'some-future-reason',
+        expected: '判定できません',
+      },
+    ];
+
+  for (const { name, reason, expected } of cases) {
+    it(name, () => {
+      expect(reasonText(reason)).toBe(expected);
+    });
+  }
+
+  it('null は空文字（理由が無いこと自体を示す。既存の後方互換）', () => {
+    expect(reasonText(null)).toBe('');
   });
 });
 

@@ -45,6 +45,8 @@ function company(
     multiples: { per: null, perSource: null, pbr: null, pbrSource: null },
     priceSen: null,
     fetchedAt: '2026-07-28T00:00:00.000Z',
+    epsHistoryRestated: false,
+    revenueHistoryRestated: false,
   };
 }
 
@@ -234,8 +236,7 @@ describe('③ 予想配当性向は実績EPSと実績配当の年度が揃った
     annualAmountSen,
   });
 
-  const payoutRatioOf = (target: Company) =>
-    scoreCompany(target, true).card.metrics.payoutRatio;
+  const payoutRatioOf = (target: Company) => scoreCompany(target, true).card.metrics.payoutRatio;
 
   it('実績EPSと実績配当が同じ年度で揃えばその年度で採点する', () => {
     const metric = payoutRatioOf(
@@ -320,10 +321,7 @@ describe('③ 予想配当性向のソース選択（useActualForScoring）', ()
   });
 
   it('useActualForScoring: false かつ予想不能・実績可能 → 実績にフォールバックし、payoutRatioSource が actual になる', () => {
-    const target = company(
-      [actualEps(2026, 30_000)],
-      [actualDividendRecord(2026, 12_000)],
-    );
+    const target = company([actualEps(2026, 30_000)], [actualDividendRecord(2026, 12_000)]);
     const scoring = scoreCompany(target, false);
     expect(scoring.payoutRatioSource).toBe('actual');
     // 120円 ÷ 300円 = 40%（実績側）
@@ -337,10 +335,7 @@ describe('③ 予想配当性向のソース選択（useActualForScoring）', ()
   });
 
   it('useActualForScoring: true かつ実績不能 → payoutRatio が null、payoutRatioSource も null（予想へフォールバックしない）', () => {
-    const target = company(
-      [forecastEps(2027, 30_000)],
-      [forecastDividendRecord(2027, 9_000)],
-    );
+    const target = company([forecastEps(2027, 30_000)], [forecastDividendRecord(2027, 9_000)]);
     const scoring = scoreCompany(target, true);
     expect(scoring.card.metrics.payoutRatio.score).toBeNull();
     expect(scoring.payoutRatioSource).toBeNull();
@@ -375,5 +370,51 @@ describe('スコアカードの組み立て', () => {
     expect(scoring.card.totalScore).toBe(0);
     expect(scoring.card.maxTotalScore).toBe(100);
     expect(scoring.card.effectiveMetricCount).toBe(0);
+  });
+});
+
+/**
+ * `company.epsHistoryRestated` / `revenueHistoryRestated` の配線確認
+ * （`docs/02_design/logic/edinet-history-import.md` §4.3・§9。判定ロジックそのものは
+ * `tests/domain/scoring/eps-cagr.test.ts` / `revenue-cagr.test.ts` で尽くしてある）。
+ */
+describe('EDINET遡及修正フラグの配線（company.epsHistoryRestated / revenueHistoryRestated）', () => {
+  // 6年分そろった、成長率20%ちょうどの系列（判定不能に落ちないための土台）
+  const sixYearHistory = (base: number) =>
+    [2025, 2024, 2023, 2022, 2021, 2020].map((year, index) =>
+      record(year, { epsSen: base * 2 ** (5 - index), revenueSen: base * 2 ** (5 - index) }),
+    );
+
+  it('company.epsHistoryRestated: true → ④だけが restated-history、⑦は影響を受けない', () => {
+    const target: Company = {
+      ...company(sixYearHistory(1_000)),
+      epsHistoryRestated: true,
+      revenueHistoryRestated: false,
+    };
+    const scoring = scoreCompany(target);
+    expect(scoring.card.metrics.epsCagr.unavailableReason).toBe('restated-history');
+    expect(scoring.card.metrics.revenueCagr.unavailableReason).not.toBe('restated-history');
+  });
+
+  it('company.revenueHistoryRestated: true → ⑦だけが restated-history、④は影響を受けない', () => {
+    const target: Company = {
+      ...company(sixYearHistory(1_000)),
+      epsHistoryRestated: false,
+      revenueHistoryRestated: true,
+    };
+    const scoring = scoreCompany(target);
+    expect(scoring.card.metrics.revenueCagr.unavailableReason).toBe('restated-history');
+    expect(scoring.card.metrics.epsCagr.unavailableReason).not.toBe('restated-history');
+  });
+
+  it('両方 false（既定）なら通常どおり採点する（回帰確認）', () => {
+    const target: Company = {
+      ...company(sixYearHistory(1_000)),
+      epsHistoryRestated: false,
+      revenueHistoryRestated: false,
+    };
+    const scoring = scoreCompany(target);
+    expect(scoring.card.metrics.epsCagr.unavailableReason).toBeNull();
+    expect(scoring.card.metrics.revenueCagr.unavailableReason).toBeNull();
   });
 });

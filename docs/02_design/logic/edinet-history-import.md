@@ -1,0 +1,1121 @@
+# EDINET 財務履歴データ取り込み 設計書（④ EPS CAGR・⑦ 売上高CAGR・⑥ 配当維持可能年数の入力）
+
+> 2026-08-06 起票。2026-08-07 改訂（`/review-spec` の🔴7件の指摘に対するユーザー決定を反映）。
+> 実データで取得可能性を検証したうえで書いている（§2）。
+> 財務諸表の直近データの取り込みは [irbank-json-import.md](./irbank-json-import.md)、
+> 株価・配当・分割は [market-data-source.md](./market-data-source.md) が正で、
+> **本仕様はどちらも置き換えない。④⑦ が要求する「6期以上前」、および ⑥ が要求する
+> 流動資産・投資有価証券（[balance-sheet-derivation.md](./balance-sheet-derivation.md) の
+> 範囲外だった2項目）を埋める補完。**
+>
+> ✅ **2026-08-07: 本仕様が依存する [ADR-0011](../../adr/0011-edinet-financial-history-api.md)
+> は起票・採用済み。** 実装に着手してよい。詳細は §1.4。
+>
+> ✅ **2026-08-09 改訂（コードレビュー指摘の反映）。** ①パース診断を
+> `GET /api/edinet/:code` の応答まで通した（§4.2.1・§5・§7.1）。②`edinet_document_index` の
+> `company_code` 単独インデックスを削除した（§4.4）。API 契約は
+> [company-api.md](../api/company-api.md) の `GET /api/edinet/:code` の節が正。
+
+## 1. 概要
+
+金融庁 EDINET の有価証券報告書（無料・公的データ）から、次の2種類を取得する。
+
+1. IRバンクで埋まらない**より古い年度の EPS・売上高**（④⑦ が要求する実績6期のうち、
+   直近4〜5期を超える分）
+2. IRバンクのどの経路にも無い**流動資産・投資有価証券**（⑥ が要求する4項目のうち
+   [balance-sheet-derivation.md](./balance-sheet-derivation.md) の範囲外だった2項目。
+   同 §7.3 の実測表が「XBRL 以外に手段が無い」と結論している）
+
+IRバンク（業績ブロック最大5期）・Yahoo Finance（EPS・売上高を扱わない）のどちらでも
+④⑦ が要求する**実績6期**は埋まらないことが判明済み
+（`irbank-json-import.md` §6.2、`market-data-source.md` §6）。
+
+### 1.1. スコープ
+
+- ④ EPS CAGR・⑦ 売上高CAGR が要求する実績6期のうち、IRバンクで埋まらない年度
+- ⑥ 配当維持可能年数が要求する4項目のうち **流動資産・投資有価証券の2項目**
+  （負債総額・前期末の配当総額は [balance-sheet-derivation.md](./balance-sheet-derivation.md)
+  が既に IRバンクから算出済み。本書はそれを置き換えない。
+  **⑥ の「計算」は同書が定め、本書は⑥の「入力の取得」のうち残りの2項目を定める**、
+  という役割分担にする）
+
+### 1.2. スコープ外
+
+- 予想値は取らない。有価証券報告書は決算確定後の書類であり、予想が載らない
+- 決算期変更（変則決算）企業への対応は本書では扱わない（`market-data-source.md` §8-5 と
+  同じ理由。相対年度の意味が崩れるため）
+- 配当・株価は取らない。既存2経路（IRバンク・Yahoo）で足りている
+- **既存登録済み銘柄への反映は本仕様の対象外。** EDINET連携は新規銘柄登録時のフォーム
+  （`frontend/components/CompanyForm.tsx`の「EDINET（有価証券報告書）から取り込む」ボタン）
+  でのみ機能する。ボタン押下でFEが`GET /api/edinet/:code`を呼び、結果をフォームの入力行に
+  マージ（`mergeRowsWithEdinetImport`）してから`POST /api/companies`で保存する、という
+  一連の操作が「新規登録（または全項目入力し直しての再登録）」の文脈でのみ成立する。
+  **既に登録済みの会社に対して「EDINETの新しいデータだけ追加で反映する」機能は無い。**
+  該当データを削除して再登録することで回避できる（2026-08-08決定）。
+
+### 1.3. なぜ別ポートにするか
+
+`FinancialSource`（IRバンク）・`MarketDataSource`（Yahoo）と同じ理由で分ける。
+**扱う関心事が違う。**
+
+|              | `FinancialSource`     | `MarketDataSource`   | `EdinetHistorySource`（本仕様）  |
+| :----------- | :--------------------- | :--------------------- | :--------------------------------- |
+| 返すもの     | 直近5期のEPS・ROE等   | 株価・配当・分割     | **6期以上前**のEPS・売上高、**⑥用の流動資産・投資有価証券** |
+| 取得元       | IRバンク               | Yahoo Finance           | EDINET（金融庁）                   |
+| 認証         | 不要                   | 不要（UA必須）        | **Subscription-Key 必須**（§2）    |
+| 失敗したとき | 取り込み自体が成立しない | 株価が無くても財務は使える | **④⑦、または⑥の一部だけが埋まらない**（他指標に影響しない） |
+
+### 1.4. ✅ 本仕様は ADR-0011 に依存する（起票・採用済み）
+
+`docs/01_requirements/features.md:98-101` はもともと次のとおり決定していた
+（**2026-08-07、下記のとおり改定済み**）。
+
+> - [x] 外部 API からの自動取得を将来行うか →
+>       **2026-07-28 決定。** IRバンクの静的 JSON に限り Worker から直接取得する
+>       （[ADR-0007](../../adr/0007-irbank-json-direct-fetch.md)）。**認証・課金を伴う
+>       外部 API は引き続き使わない**
+
+EDINET API v2 は**すべてのエンドポイントで Subscription-Key が必須**（§2.1）。上記の
+旧文言「認証・課金を伴う外部 API は引き続き使わない」に**そのまま反する**ため、
+[ADR-0011: EDINET API を認証つきで、日次バッチも伴って利用する](../../adr/0011-edinet-financial-history-api.md)
+を起票し、次を決定した。
+
+1. `features.md:98-101` の文言を「**課金を伴う、または再利用可否が規約上不明な外部 API は
+   使わない**」に改定した（適用済み）。EDINET は課金なし・官公庁の公開 API・二次利用が
+   明示的に許諾されているため、改定後の文言に適合する
+2. [ADR-0007](../../adr/0007-irbank-json-direct-fetch.md)（IRバンク）の該当条項の改定で
+   あることを ADR-0007 側にも追記済み
+3. [ADR-0010](../../adr/0010-yahoo-chart-endpoint.md) が「検討した代替案」で EDINET を
+   **案C として却下**していた経緯（却下理由は「株価が無い」「配当取得にタクソノミ解析が
+   要る」）に対し、**本仕様 §2.3（CSV変換済みで取得でき、タクソノミの生解析を避けられる）
+   がその却下理由を無効化した**ことを ADR-0010 側にも追記済み。ただし株価が無いことは
+   変わらないため、本仕様は株価・配当を対象にしない（§1.2）
+4. **ADR-0010 決定#3「ユーザーの操作1回につき1銘柄1リクエスト。一覧の全銘柄を
+   一括更新する機能・定期実行・クローリングは作らない」を EDINET 経路に限って改定した**
+   （ADR-0010 側にも追記済み）。本仕様は §4.4 の docID インデックスを**日次バッチ**で
+   構築する必要があり、これは旧決定#3が禁じる「定期実行・クローリング」に該当するが、
+   EDINET は公的機関の公開 API で二次利用も認められているため例外化できる
+   （Yahoo Finance 経路自体は変更しない）
+5. [balance-sheet-derivation.md:429](./balance-sheet-derivation.md) が
+   「EDINET の XBRL を採るかは本書の範囲外とし、別途 ADR で決める」と予定していた
+   その ADR が ADR-0011 にあたる
+
+## 2. 実データによる検証（2026-08-06 実施）
+
+**推測ではなく実際に叩いて確認した結果**を根拠にしている。対象は既存の検証と同じ
+サンプル銘柄から2社: **9433（KDDI・IFRS連結）**、**1301（極洋・日本基準）**。
+
+### 2.1. 認証
+
+EDINET API v2 は**すべてのエンドポイントで Subscription-Key が必須**（書類一覧
+`documents.json` すら401で弾かれる）。キーの発行はユーザー本人によるメール・
+電話番号での登録が必要で、代行できない。取得は無料。
+
+キーは `.dev.vars`（ローカル）/ `wrangler secret put`（本番）で `EDINET_API_KEY`
+として扱う（`.claude/rules/security.md`「APIキーは環境変数から読む」）。
+
+> **⚠️ 2026-08-09 追記: EDINET は認証失敗を HTTP 401 では返さない。**
+> `documents.json` / `documents/{docId}` のどちらも、キーが無効なとき **HTTP 200** で
+> 次の本文を返す（実測）。
+>
+> ```json
+> { "StatusCode": 401, "message": "Access denied due to invalid subscription key.…" }
+> ```
+>
+> HTTP ステータスだけで判定すると 200 を成功とみなして先へ進み、`results` が無いことで
+> `malformed-response`（応答が壊れている）に化ける。実際これで本番の原因調査が遠回りに
+> なった。`src/infra/edinet/edinet-client.ts` の `isAuthenticationFailure()` が本文の形で
+> 判定し、専用の種別 `authentication-failed` を返す。**この種別は外部要因ではなく
+> こちらの設定の問題**なので、画面には「時間をおいて再試行」ではなく
+> 「`EDINET_API_KEY` の設定を確認してください」を出す。
+
+唯一キー無しで取得できるのは**EDINETコードリスト**
+（`https://disclosure2dl.edinet-fsa.go.jp/searchdocument/codelist/Edinetcode.zip`）。
+証券コード↔EDINETコードの対応表で、実測 200 が返ることを確認した
+（`balance-sheet-derivation.md:435` の既存記録と一致）。**Shift_JIS** のCSVが入っている。
+
+### 2.2. docID の発見（銘柄コードから直接引けない）
+
+`documents.json?date=YYYY-MM-DD&type=2&Subscription-Key=...` は**その日に提出された
+全社ぶんの書類一覧**を返す（実測: 2025-06-25 で 1,807件、うち有価証券報告書
+`formCode=030000` が442件）。**銘柄単位の検索エンドポイントは無い。**
+
+実測した提出日（レスポンスの実フィールド構造は `tmp/edinet-verify/candidates.json` に
+保存済み。§4.4 で参照する）:
+
+| 銘柄 | EDINETコード | 決算期                      | 提出日     | docID    |
+| :--- | :----------- | :--------------------------- | :--------- | :------- |
+| 9433 | E04425       | 第42期(2025/04/01-2026/03/31) | 2026-06-25 | S100YKG2 |
+| 9433 | E04425       | 第41期(2024/04/01-2025/03/31) | 2025-06-13 | S100VXGZ |
+| 1301 | E00012       | 第103期(2025/04/01-2026/03/31)| 2026-06-22 | S100YE8K |
+
+3月決算企業は提出期限（決算後3ヶ月）の関係で6月中旬〜下旬に集中する傾向が見える
+（2社しか確認していないので断定はしない）。
+
+### 2.3. CSV形式で取得できる（生XBRLのタクソノミ解析を避けられる）
+
+`documents/{docID}?type=5&Subscription-Key=...` で、XBRLをタブ区切りCSVに変換済みの
+**ZIP**が返る（実測: 200、`XBRL_TO_CSV/*.csv` を含む）。**ZIP展開はどのみち必須**
+（`balance-sheet-derivation.md:432-433` で既知。Cloudflare Workers の
+`DecompressionStream` は ZIP非対応。`fflate` 等の依存追加が要る）。
+
+CSVは UTF-16（BOM付き）・タブ区切り。列構成（実測、両銘柄で共通）:
+
+```
+要素ID  項目名  コンテキストID  相対年度  連結・個別  期間・時点  ユニットID  単位  値
+```
+
+**`相対年度`列がそのまま「当期」「前期」「前々期」「三期前」「四期前」を表す。**
+IRバンクの年度キーのような月ズレの解釈が要らない。
+
+### 2.4. 1本の有報に5期分のハイライト表が入っている
+
+「経営指標等の推移」を表す標準タグ（`SummaryOfBusinessResults` を含む要素ID）が、
+`Prior4YearDuration`〜`CurrentYearDuration` の5コンテキストで**必ず5期分**入っている
+（実測: 両銘柄・両年度の有報で確認）。
+
+実測値（9433・第42期有報 `S100YKG2`、`tests/fixtures/edinet/9433-fy2026-S100YKG2.csv`）:
+
+| 相対年度 | 要素ID（一部）                                        | ユニットID / 単位 | 値                  |
+| :------- | :------------------------------------------------------ | :----------------- | :------------------- |
+| 四期前   | `RevenueIFRSSummaryOfBusinessResults`                   | `JPY` / `円`       | `5446708000000`      |
+| 三期前   | 同上                                                     | 同上                | `5630024000000`      |
+| 前々期   | 同上                                                     | 同上                | `5699724000000`      |
+| 前期     | 同上                                                     | 同上                | `5835525000000`      |
+| 当期     | 同上                                                     | 同上                | `6071915000000`      |
+| 四期前   | `BasicEarningsLossPerShareIFRSSummaryOfBusinessResults` | `JPYPerShares` / 空欄 | `150.01`         |
+| 前期     | 同上                                                     | 同上                | `161.86`             |
+| 当期     | 同上                                                     | 同上                | `183.59`             |
+
+> ⚠️ **2026-08-07 訂正。** 初版はこの表を「5,446,708百万円」のように**百万円単位に
+> 換算した見た目**で書いていたが、これは誤記である。**実測の「単位」列は `円` そのもの**
+> であり、`5446708000000` という生値がそのまま円額（5兆4467億800万円）である。
+> **百万円→円の変換は不要。** 誤記のまま実装すると100万倍の桁ずれが入る
+> （`.claude/rules/backend.md`「単位（円/千円/百万円、%と倍）を必ずチェックしてから
+> 永続化する」に違反する典型例）。EPS は「単位」列が空欄で、代わりに「ユニットID」列が
+> `JPYPerShares` になる。単位検証の実装は §4.2。
+
+④ が要求する`EPS_REQUIRED_YEARS = 6`（`src/domain/scoring/eps-cagr.ts:20`）には
+**1期足りない。** ただし1年前に提出された有報（例: 第41期・S100VXGZ）を追加取得すれば、
+その「四期前」が今回の「五期前」に相当し、**2本の取得で6期に届く**（4期分は重複）。
+⑦ 売上高CAGR も同じ構造で、**④と同じく2本の取得が必要**（2026-08-07決着。§8-6）。
+`revenue-cagr.ts` が参照する「5年前」（`score-company.ts`の`FIVE_YEARS_AGO_INDEX = 5`）は
+有報1本の最古「四期前」（4年前）には届かないため、最新有報1本だけでは足りない。
+
+### 2.5. タグ名が会計基準・業種で分岐する（実測で3パターン確認）
+
+| 項目               | 日本基準（連結）                              | IFRS（連結）                              | 個別（両基準共通）                      |
+| :----------------- | :---------------------------------------------- | :------------------------------------------- | :----------------------------------------- |
+| EPS                | `BasicEarningsLossPerShareSummaryOfBusinessResults`（member無し） | `BasicEarningsLossPerShareIFRSSummaryOfBusinessResults`（member無し） | 同一要素ID + `_NonConsolidatedMember` |
+| 売上高             | `NetSalesSummaryOfBusinessResults`（member無し）| `RevenueIFRSSummaryOfBusinessResults`（member無し） | 同一要素ID + `_NonConsolidatedMember` |
+| 売上高（通信・金融等の代替科目） | ―                                     | `OperatingRevenue1SummaryOfBusinessResults`（KDDIの個別で実測） | 同上 |
+
+KDDI（IFRS連結）は連結の `NetSalesSummaryOfBusinessResults` を持たず、個別は
+`NetSales` ではなく `OperatingRevenue1`（営業収益）を使っていた。**「売上高」に
+対応する要素IDは1つに決め打ちできず、フォールバック順が要る**（§4.1）。
+
+米国基準採用企業（JPXに少数存在）は未確認。
+
+### 2.6. ⚠️ 重要な発見: 同じ年度でも提出時期によって数値が異なる
+
+KDDIの「2025年3月期（第41期・FY2025）」実績を、**発表当時の有報**（第41期・S100VXGZ・
+2025-06-13提出）と**1年後の有報が参考値として載せる同じ年度**（第42期・S100YKG2・
+2026-06-25提出の「前期」）で比較すると、**両方とも一致しない**。
+
+| 項目     | 第41期有報の「当期」（発表当時） | 第42期有報の「前期」（1年後の参考値） | 差    |
+| :------- | :---------------------------------- | :---------------------------------------- | :---- |
+| 売上収益 | 5,917,953,000,000円                 | 5,835,525,000,000円                       | -1.4% |
+| EPS      | 169.33円                            | 161.86円                                  | -4.4% |
+
+原因は少なくとも2つ混在している（第42期有報の注記から）:
+
+1. **2025-04-01付の株式分割（1株→2株）を遡及調整**（EPSの計算基礎を株式分割後の
+   株数で再計算し直す。IFRS/日本基準共通の会計処理）
+2. **モバイル収入の定義変更に伴うセグメント区分の見直し**（売上高の内訳を組み替えており、
+   合計にも影響している可能性がある。第42期有報の注記に明記）
+
+**過去の年度の「正しい値」は1つに定まらない。** どの時点の有報を採用するかで
+④⑦の算出結果が変わりうる。`market-data-source.md` §8-6（Yahoo分割遡及調整の
+新旧混在）・`import-review.md`（複数取得源の食い違い）と同種の問題であり、
+**方針を決定した**（§4.3・決定5）。
+
+> ✅ **参考: 重複4期のうち1点だけは一致する。** 第42期有報の「四期前」（FY2022）と
+> 第41期有報の「三期前」（FY2022）は、EPS・売上収益とも完全に一致する
+> （150.01円=150.01円、5,446,708,000,000円=5,446,708,000,000円）。**この1点の一致は
+> 「遡及修正が無い」ことを意味しない。** §4.3 のとおり、重複4期のうち1点でも
+> 不一致なら遡及修正が入っていると判定する。
+
+### 2.7. ⑥用の貸借対照表タグ（2026-08-07 実測。着手順1番の実施結果）
+
+「経営指標等の推移」（`SummaryOfBusinessResults`）とは別に、有報のCSVには**貸借対照表
+そのもの**も含まれている。同じ2社のフィクスチャで、⑥が要求する流動資産・投資有価証券の
+要素IDを実測した。
+
+| 項目             | 日本基準（連結）                    | IFRS（連結）                     |
+| :--------------- | :------------------------------------ | :---------------------------------- |
+| 流動資産         | `jppfs_cor:CurrentAssets`             | `jpigp_cor:CurrentAssetsIFRS`       |
+| 投資有価証券     | `jppfs_cor:InvestmentSecurities`      | **対応タグなし**（9433のCSVに存在しない） |
+
+- コンテキストは「経営指標等の推移」と違い、**時点（Instant）**を表す
+  `Prior1YearInstant`（前期末）/ `CurrentYearInstant`（当期末）の2つだけ
+  （ハイライト表のような5期分の遡及は無い）。**⑥が要求するのは前期末時点**なので
+  `Prior1YearInstant` を使う（`Company.balanceSheet` は年度を持たないスナップショット型。
+  `company.ts:34-40`）
+- 1301（極洋）は「連結・個別」列が明示的に `連結` になっていた。IRバンクと同じく
+  **連結優先**の方針を踏襲する（§4.1と同じフォールバック順の考え方）
+- **IFRS企業（9433）には `InvestmentSecurities` に対応するタグが存在しない。**
+  IFRSの財務諸表には「投資有価証券」という単独の科目区分が無く、`OtherFinancialAssetsCAIFRS`
+  等に混在している可能性があるが、単純な代替タグは無い。これは
+  [balance-sheet-derivation.md §7.2](./balance-sheet-derivation.md) が既に決定していた
+  「⑥は日本基準の事業会社にしか定義できない」を実データで裏付ける結果であり、
+  **IFRS企業は本仕様でも⑥が`null`のままになる**（想定どおりで、追加対応は不要）
+- 個別（非連結）側のタグは未確認（§4.1のEPS・売上高と同様、`_NonConsolidatedMember`が
+  付く可能性が高いが、実測はしていない）
+
+## 3. 何が埋まり、何が埋まらないか
+
+| 指標         | 必要        | IRバンク単独 | 本仕様併用後 | 条件                                             |
+| :----------- | :----------- | :------------ | :------------ | :------------------------------------------------ |
+| ④ EPS CAGR   | 実績6期     | ❌            | ✅見込み      | 直近2期分の有報を取得できれば届く（§2.4）。ただし遡及修正を検出すると `unavailable('restated-history')`（§4.3） |
+| ⑦ 売上高CAGR | 実績6期     | ❌            | ✅見込み      | 同上（ただし要件次第で1本の有報で足りる可能性あり。§8-6） |
+| ⑥ 配当維持可能年数 | 流動資産・投資有価証券（残り2項目。負債総額・前期末配当総額は [balance-sheet-derivation.md](./balance-sheet-derivation.md) が充足済み） | ❌（同書 §7.3 の実測どおり IRバンクのどの経路にも項目が無い） | ✅見込み（タグ実測済み。§2.7） | **IFRS採用企業は投資有価証券タグが存在せず⑥自体が定義できない**ことを実測で確認（同書 §7.2 の決定を裏付け）。日本基準の事業会社のみ対象になる |
+
+「✅見込み」としているのは、1,000社規模での docID 発見（§4.4）が実装・検証できていない
+ため。2社の手動検証だけでは規模面の実現性を保証できない。
+
+> **表の「✅見込み」について。** これは「新規登録フォームでEDINET取り込みボタンを押し、
+> 取得結果をフォームに反映してから登録した場合」の見込みである。**バックエンド側に
+> `Company.records`への自動マージ経路は無い**（§1.2参照）。既存登録済み銘柄は
+> 削除・再登録が必要。
+
+> **役割分担（再掲）。** [balance-sheet-derivation.md](./balance-sheet-derivation.md) は
+> ⑥ の「計算」（ネットキャッシュの算出式・スコア判定）を定める。本書は ⑥ の
+> 「入力の取得」のうち、同書が対象外とした流動資産・投資有価証券の2項目を定める。
+> 負債総額・前期末の配当総額は引き続き同書が担当し、本書は変更しない。
+
+## 4. 正規化ロジック
+
+### 4.1. タグの解決（1系列につき1回だけ・決定7）
+
+**連結を優先し、無ければ個別にフォールバックする**（IRバンクが連結を優先しているのと
+同じ方針。`parse-fy-data.ts` の既存挙動に合わせる）。
+
+```
+売上高: NetSalesSummaryOfBusinessResults（連結・日本基準）
+      → RevenueIFRSSummaryOfBusinessResults（連結・IFRS）
+      → OperatingRevenue1SummaryOfBusinessResults（連結・代替科目）
+      → 上記3つの `_NonConsolidatedMember` 版（個別）
+EPS:   BasicEarningsLossPerShareSummaryOfBusinessResults（連結・日本基準）
+      → BasicEarningsLossPerShareIFRSSummaryOfBusinessResults（連結・IFRS）
+      → 上記2つの `_NonConsolidatedMember` 版（個別）
+```
+
+**IFRS移行企業では、同じ有報の中で古い年度が日本基準タグ、新しい年度がIFRSタグに
+分かれることがある。** 年度ごとに別々のタグへフォールバックして混ぜてはいけない。
+日本基準の「売上高」とIFRSの「売上収益」は範囲が違うので、混ぜてCAGRにかけると
+比較不能な値になる。
+
+> **決定（2026-08-07）: 最新年度の基準を採用し、そのタグが無い古い年度は `null` にする。
+> 年度ごとに解決して混ぜない。**
+>
+> 1. 対象銘柄の**最新実績年度（当期）**に対して、上のフォールバック順で最初に値が
+>    存在する要素IDを1つ選ぶ
+> 2. その要素IDを**固定**し、他の年度（三期前・前々期・前期・四期前、および
+>    1年前に提出された有報から取る「五期前」）は**同じ要素IDだけ**を読む。
+>    他の要素IDへは**フォールバックしない**
+> 3. 固定した要素IDの値がその年度に存在しなければ `null` にする
+>
+> 移行企業は④⑦が判定不能に倒れるが、**嘘の値を出すよりよい（安全側）**。
+> IFRS移行企業のフィクスチャは現時点で無く、この規則の実測検証は未了（§6）。
+
+値が `"－"`（未使用のタグ。§2.5 のKDDI連結`NetSales`のように、その基準では
+該当項目自体が存在しない）は `null` 扱いにする。**0 と混同しない**
+（`CLAUDE.md`「`null`と0点は別物」と同じ原則をパース層でも守る）。
+
+### 4.2. 単位検証と銭への変換（決定6）
+
+**§2.4 の訂正のとおり、単位列は実測で `円` である。** 百万円→円のような桁変換は
+**不要**。ただし将来レイアウトが変わる可能性はゼロではないため、**想定外の単位が
+来たら値を採用せず診断を残す**（`.claude/rules/backend.md`「単位（円/千円/百万円、
+%と倍）を必ずチェックしてから永続化する」）。
+
+- **売上高・貸借対照表項目（⑥用）**: 「単位」列が `円` 以外なら値を採用せず、
+  `null` にして診断を残す
+- **EPS**: 「ユニットID」列が `JPYPerShares` 以外なら同様に `null` にして診断を残す
+
+**変換は文字列のまま整数へ持ち上げる。** `Number(text) * 100` のような浮動小数点を
+経由する演算は書かない。`market-data-source.md` §3.4・§8-9 が「`JSON.parse` を通すと
+double の丸め誤差が乗る」ことを理由に文字列のまま扱う案Bを採用したのと同じ理由。
+EDINETのCSVは元からテキストなので `JSON.parse` の丸め誤差そのものは踏まないが、
+`Number("150.01") * 100` と書けば `Number()` の時点で誤差が復活する余地が残るため、
+**小数点の位置を文字列操作で数え、桁をそのままシフトして整数化する**
+（`parse-fy-data.ts` の `senFromText` と同様の発想。EDINETの値は常にテキストなので、
+`senFromNumber` 相当の分岐は不要）。
+
+**安全整数超過。** 銭化した結果が `Number.MAX_SAFE_INTEGER`（9,007,199,254,740,991）を
+超えたら `unsafe-integer` として値を `null` にし、診断を残す（`parse-fy-data.ts:199-201`
+と同じ扱い）。売上高は桁が大きく（トヨタ級45兆円 = 4.5×10^15銭。上限まで2倍を切る）、
+⑥用の貸借対照表項目（総資産・負債総額に相当する規模）は既存のIRバンク実装が
+**総資産で実際にこの上限を踏んでいる**（`balance-sheet-derivation.md` §3.2 の
+8306〈銀行〉の実測）。
+
+#### 4.2.1. 診断はどこまで届くか（✅ 2026-08-09 追加）
+
+**「診断を残す」の到達先は `GET /api/edinet/:code` の応答 DTO まで。**
+それ以前は `parseSummaryCsv` が返した診断が `EdinetClient.fetchHistory` で捨てられており、
+「取り込めなかった」事実が誰にも届かなかった（レビュー指摘2）。
+
+| 層                                     | 型                                                              | 何を持つか                                            |
+| -------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------- |
+| `infra/edinet/parse-summary-csv.ts`    | `SummaryCsvDiagnostic`（= `EdinetImportDiagnostic` から2項目除く） | `field` / `offset` / `elementId` / `reason` / `raw`   |
+| `infra/edinet/edinet-client.ts`        | `EdinetImportDiagnostic`                                        | 上記＋ `sourceDocId` / `fiscalYear` を肉付け          |
+| `domain` `EdinetHistoryResult`         | 同上                                                            | 2本の有報ぶんをフラットな1配列で保持                  |
+| `handler/dto/edinet-import.ts`         | 同上（そのまま公開）                                            | `diagnostics: []`（0件でもキーを消さない）            |
+
+- パース層は純粋関数で docID も当期年度も知らないため、`sourceDocId` / `fiscalYear` を
+  持たない形にとどめる。肉付けは `attributeDiagnostics()`（`edinet-client.ts` の純粋関数）が行う
+- `fiscalYear = 有報の当期年度 - offset`。**貸借対照表項目（`offset: null`）は `fiscalYear` も
+  `null`** にする（§5 の `EdinetBalanceSheetSnapshot` が年度を持たない設計と矛盾させないため）
+- 1年前有報の取得に失敗した場合、その有報の診断はそもそも存在しない（§4.5 の CR-5 決定どおり
+  最新有報ぶんだけで成功として返る）。**「1年前有報を取得できなかった」事実自体の記録は未実装**（§8-10）
+
+**2本の有報の診断は、使われない項目のぶんも載せる（✅ 2026-08-09 追記。ユーザー決定）**
+
+- `diagnostics` には**最新有報と1年前有報の両方**の診断が入る。そこには
+  **1年前有報のBS項目診断（`field: 'currentAssets'` / `'investmentSecurities'`）も含まれる**
+- 一方 `balanceSheet` は §4.5 手順2 のとおり**常に最新有報からのみ**組み立てる
+  （1年前有報のBS値は一切使わない。`balanceSheet.sourceDocId` は常に最新有報の docID）
+- したがって **`balanceSheet.sourceDocId` と、`diagnostics` 内のBS項目診断の `sourceDocId` が
+  食い違う場合がある。**「`balanceSheet` に正常値が入っているのに、`diagnostics` には
+  別の有報（1年前）のBS項目エラーが載る」という組み合わせが起こりうる
+- **原因調査のときは診断の `sourceDocId` を必ず見ること。**
+  `balanceSheet.sourceDocId` と一致しない診断は、`balanceSheet` の値の説明にはならない
+- 使われない側（1年前有報）のBS診断を除外しないのは、
+  「検証に落ちたデータは捨てずに記録する」（`.claude/rules/backend.md`）ため。
+  レイアウト変更・単位変更のような取り込み全体の異常は、使っていない項目に先に現れることがある
+
+#### 4.2.2. 画面での診断表示（FE。✅ 2026-08-09 追加）
+
+DTO まで届いた診断を**画面まで出す**。Yahoo の取得診断（`market-data-import.md` §5.5）と
+同じ「表の外に1件ずつ列挙する」体裁にする（`import-review.md` §5.3
+「**件数だけに潰さない**」）。IRバンクの `CellWarning` と違い `valueKept` を持たない
+＝「値を採用したか」の分岐が無いので、セルへは解決しない。
+
+- 置き場所: EDINET取り込みの通知（`edinetImportNotice`）の直下に `<ul className="warning">`
+- **診断が0件のときは何も出さない**（空の枠を出さない）
+- 文言: `⚠ {年度}{項目}はEDINETから取り込めませんでした: {理由}（元の値: {raw} / 出所: docID {sourceDocId} / XBRL要素ID: {elementId}）`
+- **`reason` の生の英字を画面に出さない。** 日本語へ変換する。`CellWarning['reason']` と
+  重なる種別（`unparsable-value` / `unsafe-integer`）は既存の `warningReasonText` へ委譲し、
+  文言の定義箇所を1つに保つ。`unit-mismatch` だけが EDINET 固有
+
+  | `reason`           | 文言                                         |
+  | :----------------- | :------------------------------------------- |
+  | `unit-mismatch`    | 想定していない単位で記載されていました       |
+  | `unparsable-value` | 数値として読めない値でした（共通）           |
+  | `unsafe-integer`   | 桁が大きすぎて取り込めない金額でした（共通） |
+
+- 項目名は `field` で出し分ける（`eps` → ④EPS、`revenue` → ⑦売上高、
+  `currentAssets` → ⑥流動資産、`investmentSecurities` → ⑥投資有価証券）
+- **`fiscalYear` が `null`（貸借対照表項目）のときは年度を書かない**（§4.2.1 のとおり
+  年度を持たない。勝手に埋めない）
+- `elementId` / `sourceDocId` は原因調査用。`edinetAmountNoteText` の docID と同じく
+  括弧内へ小さく併記する
+- **値の代わりに `0` を出さない。** 診断は「値が取れなかった」ことの記録であり、
+  出せるのは原典の生値（`raw`）だけ。`raw` が空文字のときは「元の値: 空欄」と書く
+  （「元の値: 」で切ると読めない）
+
+判定・文言組み立ては純粋関数 `edinetDiagnosticText()`
+（`frontend/components/CompanyForm.tsx`）に閉じる。
+
+### 4.3. 遡及修正の検出（案A＋C・決定5・2026-08-07決着）
+
+**§2.6 の実測が示すとおり、過去の年度の「正しい値」は1つに定まらない。** 次の
+2案を**両方**採用する。
+
+- **案A: 最新の有報が報告する値を正とする。** 追加取得は不要（重複4期を検算に
+  使うだけで済む）
+- **案C: 2本の有報の重複4期を突き合わせ、値が一致しない（＝遡及修正が入っている）と
+  判明した銘柄は、④⑦を `unavailable('restated-history')` に倒す。**
+
+「判定不能は0点ではない」というプロジェクト原則（`docs/01_requirements/scoring-requirements.md`
+§0.5、`CLAUDE.md`）に沿う。案Aだけを採用すると、④の base median・⑦の分母そのものに
+使う「五期前」（`src/domain/scoring/eps-cagr.ts:46`、`src/usecase/score-company.ts:44,150`
+の `FIVE_YEARS_AGO_INDEX = 5`）は**定義上必ず1年前の有報からしか取れず**、混在が
+系列の最も古い1点に移動するだけで解消しない。嘘の連続性を持つ系列でCAGRを計算する
+より、判定不能に倒すほうが安全側である。
+
+#### 突き合わせの対応関係
+
+最新有報（例: 第42期・S100YKG2）の「四期前・三期前・前々期・前期」の4点は、
+1年前に提出された有報（例: 第41期・S100VXGZ）の「三期前・前々期・前期・当期」の
+4点と**同じ決算年度**を指す。この4点をタグごと（EPS・売上高それぞれ独立に）
+突き合わせる。
+
+| 決算年度 | 最新有報（第42期）の相対年度 | 1年前有報（第41期）の相対年度 |
+| :------- | :---------------------------- | :------------------------------ |
+| FY2022   | 四期前                        | 三期前                          |
+| FY2023   | 三期前                        | 前々期                          |
+| FY2024   | 前々期                        | 前期                            |
+| FY2025   | 前期                          | 当期                            |
+
+判定は**銭化・円のまま変換した後の整数を厳密一致で比較する**（許容誤差を設けない。
+浮動小数点を経由しないので誤差自体が発生しない）。
+
+#### EPS・売上高は独立に判定する
+
+分割の遡及調整と売上高のセグメント区分見直しは**別の会計事象**であり、片方だけに
+影響することがありうる。したがって `epsHistoryRestated` / `revenueHistoryRestated`
+を**独立したフラグ**として持ち、④はEPS側の不一致だけで、⑦は売上高側の不一致だけで
+判定不能に倒す（9433 の実測ではどちらも不一致だったため区別がつかなかったが、
+設計としては分離しておく）。
+
+#### 反映先
+
+`unavailableReason` に新しい種別 `'restated-history'` を追加する（`metric-score.ts`
+の `UnavailableReason`。既存の命名パターン `'insufficient-history'` / `'undefined-growth'`
+に揃えた）。`EpsCagrInput` / `RevenueCagrInput` に `historyRestated: boolean` を追加し、
+`insufficient-history`（6期そろわない）の判定より**後**に、成長率計算より**前**に
+チェックする（型は §5、ユースケースでの結線は §9）。
+
+```ts
+// eps-cagr.ts（ドラフト）
+export function calculateEpsCagr(input: EpsCagrInput): MetricScore {
+  const window = takeCompleteYears(input.epsHistory, EPS_REQUIRED_YEARS);
+  if (window === null) return unavailable('insufficient-history');
+  if (input.historyRestated) return unavailable('restated-history');
+  // ...既存の計算
+}
+```
+
+④⑦以外の指標（①②③⑤⑥⑧⑨⑩）はこのフラグの影響を受けない。
+
+#### 画面での解除（FE・案C・ユーザー決定 2026-08-09）
+
+**遡及修正を検出した状態から抜ける経路が画面に無かった**（一度 `true` になると、
+値を手で直しても `false` に戻せなかった。code-review 指摘3、2026-08-09）。
+次の理由から、**自動解除ではなく明示的な解除操作**にする。
+
+- 混在の境目は**系列の最も古い点（五期前）**であり、直近年度のセルを直しても解消しない。
+  「1セル編集で自動解除」は、直っていない系列で CAGR を算出する経路を作る
+- どの年度が不一致だったかは FE に来ていない（DTO は boolean 2つのみ）。
+  年度を限定した自動解除は現行 DTO では実装できない
+- 本節の安全側原則（嘘の連続性より判定不能）を弱められるのは、**人が原典を確認した
+  という判断が1回記録されたときだけ**にする。既存の保存前確認バナー
+  （`import-review.md` §5.6）と同じ思想
+
+仕様:
+
+| 事項           | 決定                                                                                                                                                                                                                |
+| :------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 解除の単位     | **④と⑦を別々に解除する。** まとめて解除する UI は作らない（「EPS・売上高は独立に判定する」に従う）                                                                                                                  |
+| 検出結果の扱い | **人の解除操作で書き換えない。** 「EDINETの重複4期が一致しなかった」という事実（`edinetHistoryRestated`）と「原典を確認した」という判断（解除操作）を別の state に持つ                                              |
+| 取り消し       | **「戻す」ボタンを置く。** 誤解除が取り返せなくなるため                                                                                                                                                             |
+| 送信する値     | `epsHistoryRestated` = 検出済み **かつ** 未解除。取り込み未実施（`null`）は `false`                                                                                                                                 |
+| 再取り込み時   | 解除操作をリセットする（前の銘柄・前回の検出に対する判断を持ち越さない）                                                                                                                                            |
+| セル編集時     | **解除しない。** 年度セル（`fiscalYear`）の編集も含む。`dropEditedWarnings`（セル警告）とは別の扱いにする                                                                                                           |
+| 表示           | 未解除は `⚠` 付きの警告（`.warning`）、解除済みは告知（`.meta`）。**どちらも対象（④／⑦）を文字で書く**（色だけで表現しない）                                                                                        |
+| 告知の文言     | 「原典を確認済みとして扱い、判定不能を解除しました」。**「④が算出されます」と断言しない**（6期そろわなければ `insufficient-history` で判定不能のまま。判定順は上記コード断片のとおり）。**数値（0点等）を出さない** |
+
+判定は純粋関数 `resolveRestatedView(detected, released)` / `toggleRestatedRelease()`
+（`frontend/components/CompanyForm.tsx`）に閉じ、コンポーネントは state の反映だけを行う。
+
+> ⚠️ **BE の意味論とのズレ（未決）。** `Company.epsHistoryRestated` は本来
+> 「EDINET の突き合わせ結果」という事実を表す。解除して `false` を送ると、DB には
+> 「遡及修正は無かった」と事実と異なる値が入る。本来は3値（未検出／検出／検出したが
+> 人が確認して解消）が要るが、現行 DTO は `boolean` で表現できない。
+> **2026-08-09 時点は「`false` を送る＝④⑦の判定を有効にする」と読み替える**
+> （ユーザー決定。3値化は行わない）。
+>
+> なお §1.2 のとおり、**保存済み銘柄の `eps_history_restated` を後から画面で直す手段は
+> 無い**（削除して再登録する）。解除はフォームのセッション内でのみ有効。
+
+### 4.4. docIDインデックス（独立ポート・案B・決定4・2026-08-07決着）
+
+**銘柄ごとに日付を走査するのは非現実的。** 3月決算企業だけでも提出が6月に集中するとはいえ、
+銘柄ごとに独立して1ヶ月分（約20営業日）を走査すると 1,000社 × 20日 = 20,000リクエストになる。
+
+代わりに、**日付側から1回だけ走査して `companyCode → docID` のインデックスを作り、
+全銘柄がそれを引く**方式にする（`documents.json` は1回の呼び出しでその日の全社ぶんを
+返すため、日付を軸にすれば銘柄数に依存しない）。
+
+**採用したのは案B: インデックスを独立したポート/リポジトリとして切り出し、更新は
+専用ユースケースに分ける。** `fetchHistory(code)` の内側にインデックス構築を
+隠す設計（旧版）は、Cloudflare Workers がリクエスト間で状態を持てないため
+**毎回再構築になり**不採用にした。
+
+- **格納先は D1**（`src/infra/d1/schema.ts` に `edinetDocumentIndex` テーブルを追加。
+  §5・§9）
+- **主キーは `(company_code, fiscal_year)` → `doc_id`**
+- **`company_code` 単独のインデックスは張らない**（✅ 2026-08-09 追加）。`findLatest`
+  （`WHERE company_code = ? ORDER BY fiscal_year DESC LIMIT 1`）も `findDocId`
+  （`WHERE company_code = ? AND fiscal_year = ?`）も、複合主キーの先頭列が `company_code`
+  なので前方一致で賄える。単独インデックスは書き込みコストを増やすだけなので
+  `db/migrations/0004_zippy_zaran.sql` で DROP した
+- **更新は専用ユースケース `refresh-edinet-document-index` が日次バッチで行う。**
+  Cloudflare Workers の Cron Trigger（`wrangler.jsonc` の `triggers.crons`）を使う。
+  実行時刻・タイムゾーンの具体値は未決（§8-5）
+- **`fetchHistory` はインデックスを注入で受け取る。** 内部で構築しない（§5 の
+  `EdinetDocumentIndexLookup`）
+- **走査対象期間**は「登録済み企業の決算月一覧（IRバンクの`fiscalYearEndMonth`から
+  既知）+ 提出期限（決算後3ヶ月以内）」から絞り込む。3月決算企業なら6月1日〜6月30日を
+  走査する（§2.2の実測: 3社とも6月中旬〜下旬に提出）
+- **同一 `(companyCode, fiscalYear)` に複数の `formCode="030000"` 書類がある場合**
+  （訂正報告書を含みうる）、`submitDateTime` が最も新しいものを採用する。
+  `withdrawalStatus === "1"`（取下げ）の書類は候補から除外する
+  （フィールド名は実測レスポンス `tmp/edinet-verify/candidates.json` に基づく。
+  訂正報告書の正確な判別条件〈`docInfoEditStatus` 等の値の意味〉は実データで
+  確認できておらず、§8-7 の未決事項として残す）
+- **ADR-0010 決定#3「定期実行・クローリングは作らない」の改定が必要**（§1.4 の
+  ADR-0011 に含める）
+
+> **✅ 2026-08-08 訂正: 主キーは`edinetCode`ではなく`companyCode`（当アプリの銘柄コード）。**
+> 実装時に`documents.json`の各書類が`secCode`（証券コード＋チェックディジット。5桁）を
+> 含むことを発見した。`secCode`は「4桁の証券コード＋末尾チェックディジット」で、末尾が`0`の
+> 場合は先頭4桁がそのまま当アプリの`companyCode`と一致する（`94330` → `9433`）。これを使えば
+> `edinetCode`への変換（EDINETコードリスト・Shift_JIS ZIPの取得・デコード）が丸ごと不要になる。
+> 変換に失敗する`secCode`（末尾が`0`以外等）のエントリは診断を残さず静かに読み飛ばす
+> （`src/infra/edinet/parse-documents-list.ts`の`toCompanyCode`）。低頻度と想定している
+> （JPXが近年発行し始めた英字混じりコード〈`130A`等〉での`secCode`表現は未実測）。
+
+#### 4.4.1. 過去日の一括バックフィル（2026-08-09 追加）
+
+**日次バッチだけではインデックスは永久に埋まらない。** `refresh-edinet-document-index` は
+「前日1日ぶん」しか `documents.json` を走査しないため、**既に提出済み**の有価証券報告書
+（3月決算企業なら前年6月に提出済み）はインデックスに入らない。実際、本番デプロイ直後の
+`edinet_document_index` は 0 件で、どの銘柄も `document-not-found` になっていた
+（2026-08-09 実測）。
+
+対策として、**走査する日付を外から明示できる口**を追加した。
+
+- `refreshEdinetDocumentIndex` に `targetDate`（`YYYY-MM-DD`）を追加。
+  **指定した日は決算月の絞り込み（§4.4）を行わず無条件に走査する。** 呼び出し側が日付を
+  選んでいる以上、こちらで「その日は対象外」と判断する根拠が無いため
+- 管理用エンドポイント `POST /api/admin/edinet/index/refresh?date=YYYY-MM-DD`
+  （`src/handler/dto/edinet-index-refresh.ts` / `src/handler/app.ts`）
+- 日付ループは**ローカルのスクリプト** `scripts/backfill-edinet-index.mjs` が担う。
+  Workers 側にカーソル・チャンク分割・失敗再開を作り込むより小さく、Worker の
+  実行時間・サブリクエスト上限にも当たらない（1リクエスト＝EDINET 1回＋D1書き込み1回）
+
+**認証は共有シークレット1本**（`X-Admin-Token` ヘッダ ⇔ `EDINET_ADMIN_TOKEN`）。
+このアプリ自体の認証は未決（T-003/T-004・ADR-0005）のため、
+**EDINET の API キーを他人に消費されないための最低限の柵**に留める。
+未設定なら管理用エンドポイントは 503 を返して無効のままになる（既定で開かない）。
+
+| 走査範囲 | 日数（土日を除く） | 用途 |
+| --- | ---: | --- |
+| 3月決算のみ・2期分（2025年6月＋2026年6月） | 約44日 | 登録銘柄がほぼ3月決算ならこれで足りる |
+| 全決算月・2期分（26ヶ月） | 約565日 | 完全網羅。1req/秒で約10分 |
+
+`documents.json` は日付軸で1回叩けばその日の全社ぶんを返すため、**リクエスト数は
+銘柄数に依存しない**（§4.4 の「日付側から走査する」方針そのまま）。同じ範囲を再実行しても
+主キー `(company_code, fiscal_year)` の upsert なので二重登録にならない。
+
+バックフィルが済めば、以降の増分は既存の日次 Cron が拾う。
+
+### 4.5. 6期・⑥の入力を揃える取得手順（ドラフト）
+
+1. `EdinetDocumentIndexLookup.findLatest(companyCode)` を引き、対象銘柄の
+   最新有価証券報告書の docID を得る（見つからなければ `document-not-found`）
+2. その有報から5期分（当期〜四期前）の EPS・売上高を取得する（§4.1）。あわせて、
+   同じ有報の貸借対照表（前期末時点）から流動資産・投資有価証券を取得する
+   （⑥用。タグは未検証。§6）
+3. IRバンク由来の直近データと重複する期は、突き合わせに使う（§4.3）。
+   採用元は §4.6 の規則に従う
+4. 6期目（五期前）が必要なら、`findDocId(companyCode, fiscalYear)` で1年前に提出された
+   有報を同様に取得し、その「四期前」を採る
+
+   > **✅ 2026-08-08決定: 1年前有報の取得が失敗しても、最新有報の5期分は成功として返す。**
+   > インデックス未整備（`findDocId`が`null`を返す）場合と同じ扱いにする。一時的な
+   > ネットワーク障害で、本来使えるはずの5期分のデータまで無駄にしないため。
+5. 重複4期を §4.3 の規則で突き合わせ、`epsHistoryRestated` / `revenueHistoryRestated` を
+   確定する
+
+### 4.6. 保存とマージ（決定3・2026-08-07決着）
+
+`src/infra/d1/schema.ts:57` の `financial_records` 主キー `(company_code, fiscal_year,
+is_forecast)` に、EDINETの実績5期とIRバンクの実績4〜5期が衝突する。
+
+**決定: 同じ年度が重なったら EDINET を優先する**（有価証券報告書が法定開示の
+一次情報であるため）。
+
+- **重なる年度は EDINET の値（`epsSen` / `revenueSen`）で上書きする**
+- ただし **EDINET は ROE・営業利益率を返さない**（有報のハイライト表に無い）ので、
+  それらの列は [import-review.md](./import-review.md) §5.5 の**規則2**
+  （「取り込みが `null` のセルは既存を残す」）に従い、**IRバンク由来の値を保持する。
+  行ごと置換ではなく、列ごとに判断する**
+- ⑥用の `currentAssetsSen` / `investmentSecuritiesSen`（`companies` テーブル）も
+  同じ規則2に従う。EDINET取り込みが失敗・`null` を返した項目は既存の手入力値を残す
+- **`sourceDocId`（どの有報由来か）の保存先が必要。** `financial_records` にカラム
+  追加が要るか、別テーブルにするかは**未決**（§8-3）
+- **`fetched_at` の扱いも未決。** 現状 `companies.fetchedAt` しか無く、IRバンク・
+  Yahoo・EDINET の3つ目のデータ源が混ざると何を指すのか壊れる（§8-4）
+
+> ⚠️ **2026-08-08時点: 未実装。** 上記の列ごとマージ規則は、`Company.records` への
+> 実際の書き込み経路（§4.6が定める保存・マージの実行契機）が本仕様のスコープに含まれず
+> 未着手のため、まだコードに存在しない（CR-4のスコープ外決定。§1.2参照）。
+> **将来この経路を実装するときは、この節（列ごとの優先順位・§7.4の受入基準）をそのまま
+> 参照すること。** 過去に`src/domain/company/financial-record-merge.ts`として実装を
+> 試みたが、呼び出し元が存在せず未使用コードとなったため削除した
+> （純粋関数のロジック自体はこの節の記述で再現できる）。
+
+## 5. 型（ドラフト）
+
+`src/domain/company/edinet-history-source.ts`。**素TS。HTTP も EDINET も D1 も現れない。**
+
+```ts
+export interface EdinetHistoryYear {
+  /** 決算年度。IRバンクの `fiscalYear` と同じ意味（例: 2024年3月期なら 2024） */
+  readonly fiscalYear: number;
+  /** 銭。取れなければ `null` */
+  readonly epsSen: number | null;
+  /** 銭。取れなければ `null` */
+  readonly revenueSen: number | null;
+  /** どの有報（docID）由来か。§2.6 の食い違いを後から追跡できるようにする */
+  readonly sourceDocId: string;
+}
+
+/** ⑥用。前期末時点の貸借対照表項目。タグは未検証（§6） */
+export interface EdinetBalanceSheetSnapshot {
+  readonly currentAssetsSen: number | null;
+  readonly investmentSecuritiesSen: number | null;
+  readonly sourceDocId: string;
+}
+
+export interface EdinetHistoryResult {
+  /** 年度降順。最大6件（§2.4） */
+  readonly years: readonly EdinetHistoryYear[];
+  /** ④用。重複4期の突き合わせで遡及修正が検出されたか（§4.3）。比較できなければ `false` */
+  readonly epsHistoryRestated: boolean;
+  /** ⑦用。同上 */
+  readonly revenueHistoryRestated: boolean;
+  /** ⑥用。取得できなければ `null`（タグ未検証・§6。取れても項目単位で `null` になりうる） */
+  readonly balanceSheet: EdinetBalanceSheetSnapshot | null;
+  /**
+   * ✅ 2026-08-09 追加。取り込めなかった値の記録（§4.2）。**0件でも空配列**。
+   * 最新有報と1年前有報のぶんがフラットに混ざり、`sourceDocId` で区別する
+   */
+  readonly diagnostics: readonly EdinetImportDiagnostic[];
+}
+
+/**
+ * ✅ 2026-08-09 追加。値を採用しなかった記録（§4.2）。
+ *
+ * IRバンク・Yahoo が共有する `ImportDiagnostic`（`financial-source.ts`）とは**別型**。
+ * `unit-mismatch` は EDINET でしか起きず、共有型に混ぜると `import-review.md` §3.2 の
+ * `reason → valueKept` 表まで巻き添えになるため分けている。また XBRL の `elementId` は
+ * EDINET の原因調査に必須で、`ImportDiagnostic` には置き場が無い。
+ */
+export type EdinetImportDiagnosticField =
+  | 'eps'
+  | 'revenue'
+  | 'currentAssets'
+  | 'investmentSecurities';
+
+export type EdinetImportDiagnosticReason = 'unit-mismatch' | 'unsafe-integer' | 'unparsable-value';
+
+export interface EdinetImportDiagnostic {
+  readonly field: EdinetImportDiagnosticField;
+  /** 添字0=当期〜4=四期前。貸借対照表項目（前期末時点のみ）は `null` */
+  readonly offset: number | null;
+  /**
+   * 絶対年度（`有報の当期年度 - offset`）。2本の有報の診断が1配列に混ざるため、
+   * `offset` だけでは年度が特定できないことへの対処。
+   *
+   * **貸借対照表項目は `null`。** `Prior1YearInstant`（前期末時点）ではあるが、
+   * `EdinetBalanceSheetSnapshot` が年度を持たない設計と矛盾させないため埋めない
+   */
+  readonly fiscalYear: number | null;
+  /** XBRL 要素ID。どのタグで落ちたか */
+  readonly elementId: string;
+  readonly reason: EdinetImportDiagnosticReason;
+  /** 採用しなかった生の値（単位不整合時は `unitId=...` / `unit=...`） */
+  readonly raw: string;
+  /** どの有報（docID）由来か。`EdinetHistoryYear.sourceDocId` と同じ語彙 */
+  readonly sourceDocId: string;
+}
+
+export type EdinetHistoryError =
+  | { readonly kind: 'invalid-code'; readonly code: string }
+  | { readonly kind: 'document-not-found'; readonly code: string }
+  | { readonly kind: 'source-unreachable'; readonly detail: string }
+  /**
+   * ✅ 2026-08-09 追記。EDINET が購読キーを受け付けなかった。
+   * **外部要因ではなく、こちらの設定の問題**。EDINET は認証失敗を HTTP 401 ではなく
+   * **HTTP 200 + 本文 `{"StatusCode": 401, ...}`** で返す（2026-08-09 実測）。
+   * `malformed-response` と混ぜると「応答が壊れている」に化けて原因に辿り着けないため、
+   * 別の種別として扱う（HTTP 502。`company-api.md` の `GET /api/edinet/:code` エラー表）。
+   */
+  | { readonly kind: 'authentication-failed' }
+  | { readonly kind: 'malformed-response'; readonly detail: string };
+
+export interface EdinetHistorySource {
+  /**
+   * 保存はしない。取得だけ。
+   * `index` は呼び出し側が注入する（案B・§4.4）。ポート自身はインデックスを構築しない。
+   */
+  fetchHistory(
+    code: string,
+    index: EdinetDocumentIndexLookup,
+  ): Promise<Result<EdinetHistoryResult, EdinetHistoryError>>;
+}
+
+/** docIDインデックスの1エントリ */
+export interface EdinetDocumentIndexEntry {
+  /** 当アプリの銘柄コード（4文字）。`documents.json` の `secCode` から変換して保存する */
+  readonly companyCode: string;
+  readonly fiscalYear: number;
+  readonly docId: string;
+  /** UTC の ISO 8601。`documents.json` の `submitDateTime` から変換する */
+  readonly submittedAt: string;
+}
+
+/**
+ * `fetchHistory` が読むだけの窓口（案B）。書き込みは
+ * `refresh-edinet-document-index` 専用ユースケースに限る。
+ */
+export interface EdinetDocumentIndexLookup {
+  /** 特定の決算年度のエントリ。無ければ `null`（1年前の有報を探すのに使う） */
+  findDocId(companyCode: string, fiscalYear: number): Promise<EdinetDocumentIndexEntry | null>;
+  /** 対象銘柄の最新（決算年度が最大の）エントリ。無ければ `null` */
+  findLatest(companyCode: string): Promise<EdinetDocumentIndexEntry | null>;
+}
+
+/**
+ * 日次バッチが書き込む窓口。定義は domain に置くが、実装（D1）は
+ * `src/infra/d1/` に限る（`.claude/rules/path-conventions.md`）。
+ */
+export interface EdinetDocumentIndexRepository extends EdinetDocumentIndexLookup {
+  /** 主キー `(companyCode, fiscalYear)` で upsert する。同じキーへの再実行は上書きする */
+  upsertMany(entries: readonly EdinetDocumentIndexEntry[]): Promise<void>;
+  /** 鮮度判定用。最後にバッチが正常終了した日時。未実行なら `null` */
+  lastRefreshedAt(): Promise<string | null>;
+  /** バッチが1回正常終了したことを記録する（`entryCount` は障害調査用） */
+  recordRefresh(refreshedAt: string, entryCount: number): Promise<void>;
+}
+
+export type EdinetDocumentsListError =
+  | { readonly kind: 'source-unreachable'; readonly detail: string }
+  | { readonly kind: 'malformed-response'; readonly detail: string };
+
+/**
+ * 日次バッチ（`refresh-edinet-document-index`）が使う、書類一覧の取得ポート。
+ *
+ * `IrBankFinancialSource.fetchByCode` と同じ思想で、フィルタ・変換済みの
+ * `EdinetDocumentIndexEntry[]` を返す（`formCode` フィルタ・`secCode`→`companyCode` 変換・
+ * JST→UTC変換は取得層の実装〈`src/infra/edinet/parse-documents-list.ts`〉に閉じる。
+ * usecase は infra を import できないため、domain 型で受け渡す）。
+ */
+export interface EdinetDocumentsListSource {
+  /** 指定した暦日（`YYYY-MM-DD`）にEDINETへ提出された、有価証券報告書の候補一覧を取得する */
+  fetchByDate(
+    date: string,
+  ): Promise<Result<readonly EdinetDocumentIndexEntry[], EdinetDocumentsListError>>;
+}
+```
+
+**④⑦ の判定不能理由の追加。** `src/domain/shared/metric-score.ts` の
+`UnavailableReason` に `'restated-history'` を追加する（§4.3）。
+
+```ts
+export type UnavailableReason =
+  | 'input-missing'
+  | 'insufficient-history'
+  | 'division-by-zero'
+  | 'undefined-growth'
+  | 'input-invalid'
+  | 'value-out-of-band'
+  /** ④⑦専用。EDINETの重複4期が一致せず、系列の連続性が保証できない（§4.3） */
+  | 'restated-history';
+```
+
+**`EpsCagrInput` / `RevenueCagrInput` への追加。**
+
+```ts
+export interface EpsCagrInput {
+  readonly epsHistory: readonly (number | null)[];
+  /** §4.3。true なら判定不能に倒す */
+  readonly historyRestated: boolean;
+}
+
+export interface RevenueCagrInput {
+  readonly revenueCurrent: number | null;
+  readonly revenueFiveYearsAgo: number | null;
+  /** §4.3。true なら判定不能に倒す */
+  readonly historyRestated: boolean;
+}
+```
+
+**`Company`（`src/domain/company/company.ts`）への追加。** ④⑦の入力として
+`score-company.ts` が参照する（§9）。
+
+```ts
+export interface Company {
+  // ...既存のフィールド
+  /** ④用。§4.3 の突き合わせ結果 */
+  readonly epsHistoryRestated: boolean;
+  /** ⑦用。同上 */
+  readonly revenueHistoryRestated: boolean;
+}
+```
+
+`BalanceSheetSnapshot`（`src/domain/company/company.ts:34-40`）は変更しない。
+`currentAssetsSen` / `investmentSecuritiesSen` は既に型として存在しており
+（`companies` テーブルの列も既存。`src/infra/d1/schema.ts:27-28`）、**値の出所が
+「手入力のみ」から「手入力 + EDINET取り込み」に増える**だけである。
+
+## 6. 未検証・残課題（実装前に必ず潰すこと）
+
+- **1,000社規模でのレート制限・所要時間。** 今回は2社の手動検証のみ。
+  ✅ **2026-08-08決定: 自動テストでは1,000社規模の実データではなく、150件の構成フィクスチャ
+  （実測レスポンスの構造を踏襲した合成データ）で `upsertMany` のチャンク分割・冪等性を
+  検証する代替方針とする**（`tests/integration/edinet-document-index-repository.test.ts`）。
+  実測での所要時間・レート制限そのものはデプロイ後の手動運用検証に委ねる（§9着手順2）
+- **ZIP展開の依存追加。** `fflate` 等（`balance-sheet-derivation.md` 既知の課題と同じ）
+- **EDINETコードリストのエンコーディング（Shift_JIS）と取得頻度。** 569KB程度。
+  毎回ダウンロードするかキャッシュするか未検討
+- ✅ **⑥のタグは実測済み**（2026-08-07。§2.7）。`jppfs_cor:CurrentAssets` /
+  `jppfs_cor:InvestmentSecurities`（日本基準連結）、`jpigp_cor:CurrentAssetsIFRS`
+  （IFRS連結。投資有価証券は対応タグなし）。ただし**個別（非連結）側のタグは未確認**
+  （下記の既存項目と同じ課題として残る）。✅ **2026-08-08決定: ⑥用の候補要素IDは初回実装では
+  連結のみとする（個別へのフォールバックは実装しない）。** §4.1のEPS・売上高と異なり、⑥の
+  個別タグは実測できていないため、値を捏造しないよう安全側に倒す
+  （`src/infra/edinet/parse-summary-csv.ts` の `CURRENT_ASSETS_CANDIDATES` /
+  `INVESTMENT_SECURITIES_CANDIDATES`）
+- **IFRS移行企業のフィクスチャが無い。** §4.1 の「1回だけ解決する」規則
+  （決定7）は、同じ有報内で古い年度が日本基準・新しい年度がIFRSになる境界ケースを
+  一度も実測していない。サンプル2社（9433=全期間IFRS、1301=全期間日本基準）は
+  このケースを踏めていない。**着手順で実銘柄を探して実測すること**
+- **負値（赤字EPS）の表記が未実測。** `-123` か `△123` か全角マイナスかが分からない。
+  サンプル2社・3有報はいずれも黒字だった。✅ **2026-08-08決定: `-123.45` 形式（半角ハイフン
+  マイナス＋半角数字）のみをサポートする。** `△123` や全角マイナスは未実測のため、実装時に
+  パースできない形式が来たら値を採用せず `unparsable-value` 診断を残す安全側の実装にする
+  （`src/infra/edinet/parse-summary-csv.ts` の `NUMERIC_TEXT`）。実銘柄での赤字EPSの実測は
+  引き続き未了
+- **同日複数書類・訂正報告書の正確な判別条件。** `docInfoEditStatus` /
+  `withdrawalStatus` の値の意味は実データで確認できていない（§4.4・§8-7）
+- **個別（非連結）にしか値が無い小型株の扱い。** §4.1 のフォールバックで対応する想定だが
+  実銘柄での検証はしていない
+- **米国基準採用企業。** IFRS・日本基準以外のタグ体系は未確認
+- **決算期変更企業。** 相対年度（当期/前期/…）の意味が崩れる。`market-data-source.md`
+  §8-5 と同じ理由で本仕様の対象外とする
+
+## 7. 受入基準
+
+### 7.1. タグ解決とパース
+
+- [ ] 9433 fy2026 有報CSV「四期前」EPS行（要素ID
+      `BasicEarningsLossPerShareIFRSSummaryOfBusinessResults`、ユニットID
+      `JPYPerShares`、単位空欄、値 `"150.01"`）→ **15001銭**
+- [ ] 同CSV「四期前」売上収益行（要素ID `RevenueIFRSSummaryOfBusinessResults`、単位
+      `"円"`、値 `"5446708000000"`）→ **544,670,800,000,000銭**（百万円換算をしない。
+      §2.4 の訂正どおり実測値がそのまま円であることを確認する）
+- [ ] 1301 fy2026 有報CSV「四期前」EPS行（要素ID
+      `BasicEarningsLossPerShareSummaryOfBusinessResults`、値 `"430.83"`）→ **43083銭**
+- [ ] 1301 fy2026 有報CSV連結「四期前」売上高行（要素ID
+      `NetSalesSummaryOfBusinessResults`、値 `"253575000000"`）→
+      **25,357,500,000,000銭**
+- [ ] 単位列が `円` 以外（例: `百万円`）の売上高・貸借対照表項目行 → 採用せず
+      値は `null`、診断を残す
+- [ ] ユニットIDが `JPYPerShares` 以外のEPS行 → 同様に `null`、診断を残す
+- [ ] `"－"`（未使用タグ。9433連結の `NetSalesSummaryOfBusinessResults` 等）→ `null`。
+      0円/0銭と区別する
+- [ ] EPS=0円の行が来た場合、`null` と混同せず `0`（銭）として扱う
+- [ ] 変換は文字列のまま整数へ持ち上げる実装であること（`"150.01"` → `15001` が
+      `Number(text) * 100` を経由せず得られることを回帰テストで示す）
+- [ ] 銭化した結果が `Number.MAX_SAFE_INTEGER`（9,007,199,254,740,991）を超える →
+      `unsafe-integer` 診断を残し値は `null`
+- [ ] IFRS移行企業（9433）で最新年度の売上高タグが
+      `RevenueIFRSSummaryOfBusinessResults` と解決されたら、同じCSV内に
+      `NetSalesSummaryOfBusinessResults` が別途存在しても読まない（1系列1回だけ解決。
+      決定7）
+- [ ] 連結タグが無い銘柄で個別（`_NonConsolidatedMember`）へフォールバックする
+      （1301の個別EPS行、値 `"317.97"` 等で実測済み。§2.5）
+- [ ] 負値（赤字EPS）の表記は未実測（§6）。実装時に符号表現を確認し、パースできない
+      形式なら値を採用せず診断を残す
+
+診断の到達先（✅ 2026-08-09 追加。§4.2.1）:
+
+- [ ] 残した診断が `GET /api/edinet/:code` の応答 `diagnostics[]` に含まれる
+      （`EdinetHistoryResult` で捨てられない）
+- [ ] 各診断から**どの有報（docID）由来か**が `sourceDocId` で判別できる。最新有報と
+      1年前有報の診断が1配列に混ざっても取り違えない
+- [ ] `fiscalYear` が `有報の当期年度 - offset` になっている（offset 0 → 当期年度、
+      offset 4 → 当期年度 − 4）
+- [ ] 貸借対照表項目の診断は `offset` も `fiscalYear` も `null`（年度を勝手に埋めない）
+- [ ] 1年前有報の取得に失敗しても、最新有報側の診断が失われない（`ok` のまま返る）
+- [ ] 診断が0件のときは `diagnostics: []`（キーごと消さない・`undefined` にしない）
+
+### 7.2. 遡及修正の検出
+
+- [ ] 9433 の2本の有報フィクスチャ（`tests/fixtures/edinet/9433-fy2026-S100YKG2.csv` と
+      `9433-fy2025-S100VXGZ.csv`）で、重複4期のうち FY2025 の EPS が一致しない
+      （fy2026報告書の「前期」161.86円 vs fy2025報告書の「当期」169.33円）ことを検出し、
+      ④が `unavailable('restated-history')` になる
+- [ ] 同じ2本のフィクスチャで、FY2025 の売上収益が一致しない（fy2026報告書の「前期」
+      5,835,525,000,000円 vs fy2025報告書の「当期」5,917,953,000,000円）ことを検出し、
+      ⑦が `unavailable('restated-history')` になる
+- [ ] 同じ2本のフィクスチャの重複4期のうち FY2022（fy2026報告書の「四期前」・
+      fy2025報告書の「三期前」）は EPS・売上収益とも一致する（150.01円=150.01円、
+      5,446,708,000,000円=5,446,708,000,000円）。**この1点が一致しているだけでは
+      `restated-history` を解除しない**（4点のうち1点でも不一致なら検出したまま）
+- [ ] 重複4期すべてが一致する銘柄では `restated-history` にならない（実データで
+      両方の有報が揃うペアがまだ無いため、9433のCSV構造を踏襲した構成済みフィクスチャで
+      検証する。実銘柄の追加確認は §6 の残課題）
+- [ ] `historyRestated: true` でも、6期そろわない銘柄は `insufficient-history` が
+      `restated-history` より先に返る（§4.3 の実装順）
+- [ ] ①②③⑤⑥⑧⑨⑩ など④⑦以外の指標は `restated-history` の影響を受けない
+- [ ] EPS側だけ不一致・売上高側は一致、という銘柄では④だけが判定不能になり⑦は
+      影響を受けない（`epsHistoryRestated` / `revenueHistoryRestated` の独立性）
+
+画面での解除（✅ 2026-08-09 追加。§4.3「画面での解除」）:
+
+- [x] ④だけ解除すると⑦の警告は残り、⑦だけ解除すると④の警告が残る（独立に解除できる）
+- [x] 両方解除すると警告文が `null` になり、画面から警告が消える
+- [x] 「戻す」で解除前の状態へ戻る（④を戻しても⑦の解除は残る）
+- [x] 送信値は「検出済みかつ未解除」。取り込み未実施（`null`）でも検出なしでも `false`
+- [x] 取り込み未実施（`null`）と「取り込み済み・検出なし」を混同せず、
+      **どちらの場合も解除UI・解除の告知を出さない**
+- [x] 解除の告知に `⚠` を付けない（警告ではない）。警告文には必ず付ける
+- [x] 解除の告知に「0点」も裸の `0` も出さない（判定不能は0点ではない）
+- [x] 解除の告知が「④が算出されます」と断言しない（6期そろわなければ判定不能のまま）
+- [x] 解除ボタン・戻すボタンに対象（④／⑦）が**文字で**入る（色だけで表現しない）
+
+> ✅ 2026-08-09 検証済み。実装は `frontend/components/CompanyForm.tsx` の
+> `resolveRestatedView` / `toggleRestatedRelease` / `edinetRestatedReleasedText` /
+> `restatedReleaseButtonText` / `restatedRestoreButtonText`、テストは
+> `tests/frontend/company-form.test.tsx`。検出（EDINETが見つけた事実）と解除（人の判断）は
+> ブランド付きの別型（`EdinetDetectedRestated` / `EdinetRestatedRelease`）にしてあり、
+> 取り違えは型で弾かれる（`@ts-expect-error` のテストで固定）。
+
+画面での診断表示（✅ 2026-08-09 追加。§4.2.2）:
+
+- [x] `reason` の生の英字（`unit-mismatch` 等）が画面に出ない
+- [x] 貸借対照表項目（`fiscalYear: null`）の診断に年度を書かない
+- [x] 診断が0件のときは枠ごと出さない
+- [x] 取り込めなかった値の代わりに `0` を出さない（出すのは `raw` だけ）
+
+> ✅ 2026-08-09 検証済み。実装は同ファイルの `edinetDiagnosticText` /
+> `shouldShowEdinetDiagnostics`。0件ガードは JSX に直書きせず純粋関数へ出してテストで
+> 固定している（`tests/frontend/company-form.test.tsx` の
+> `describe('shouldShowEdinetDiagnostics')`）。
+
+### 7.3. docIDインデックス
+
+- [ ] `documents.json` のレスポンス（実測フィールド: `edinetCode` / `secCode` /
+      `docID` / `formCode` / `docTypeCode` / `periodEnd` / `submitDateTime` /
+      `withdrawalStatus`。`tmp/edinet-verify/candidates.json` 参照）から
+      `formCode="030000"` のみを候補にする（主キーには`secCode`由来の`companyCode`を
+      使う。§4.4の脚注参照。`edinetCode`はEDINETコードリスト変換が要るため使わない）
+- [ ] `withdrawalStatus === "1"`（取下げ）の書類は候補から除外する
+- [ ] 同一 `(companyCode, fiscalYear)` に複数の `formCode="030000"` 書類がある場合、
+      `submitDateTime` が最も新しいものを採用する（構成フィクスチャで検証。実データでの
+      重複は未観測。§6・§8-7）
+- [ ] インデックスの主キーは `(company_code, fiscal_year)`。同じキーへの再
+      `upsertMany` は上書きする（重複行を作らない）
+- [ ] `findDocId` が未登録の `(companyCode, fiscalYear)` に対し `null` を返す
+      （例外にしない）
+- [ ] 走査対象期間は「登録済み企業の決算月一覧 + 提出期限（決算後3ヶ月以内）」から
+      絞り込む。3月決算企業なら6月1日〜6月30日を走査対象にする（§2.2の実測: 3社とも
+      6月中旬〜下旬に提出）
+- [ ] 日次バッチが1回も成功していない状態（`lastRefreshedAt()` が `null`）で
+      `fetchHistory` を呼ぶと、`findDocId` が `null` を返し `document-not-found` に
+      なる（インデックス無しでも例外にしない）
+
+### 7.4. 保存とマージ
+
+- [ ] 同一 `(company_code, fiscal_year, is_forecast=0)` に IRバンクと EDINET の両方から
+      値が来たら、EDINET側の `epsSen` / `revenueSen` で上書きする
+- [ ] 同じ行の `roePercent` / `operatingMarginPercent` は EDINET が `null` を返しても、
+      IRバンク由来の既存値を残す（`import-review.md` §5.5 規則2。**行ごと置換ではなく
+      列ごとに判断する**）
+- [ ] EDINET が `epsSen` に `null` を返した年度（単位検証で弾かれた等）は、既存の
+      IRバンク値（あれば）を残す（同規則）
+- [ ] ⑥用: `currentAssetsSen` / `investmentSecuritiesSen`（`companies` テーブル）に
+      EDINET取り込み結果が入る。取り込みに失敗しても既存の手入力値は残る（同規則）
+- [ ] `sourceDocId` の値がEDINET取り込み結果から失われず、後段（保存前）まで
+      引き回されている（保存先の確定は §8-3 未決）
+
+### 7.5. 取得とネットワーク耐性
+
+- [ ] Subscription-Key が無効/期限切れ（401）→ 内部情報を含まないエラーメッセージで
+      `source-unreachable` を返す
+- [ ] docID が見つからない銘柄（未上場・上場廃止等、インデックスに該当エントリが無い）
+      → 例外にせず `document-not-found` を `Result` で返す
+- [ ] ZIP の展開に失敗した応答 → `malformed-response`
+- [ ] タイムアウト5秒・リトライは1回だけ（`.claude/rules/backend.md` と同じ既定）
+- [ ] 429 等のレート制限 → リトライを増やさず `source-unreachable`
+- [ ] テストで実APIを叩かない（`fetch` を注入する。フィクスチャは実物
+      （`tests/fixtures/edinet/*.csv`）から作る）
+- [ ] エラー本文に Subscription-Key や内部パスを含めない
+
+## 8. 未決事項
+
+1. ✅ **§2.6 の遡及修正をどう扱うか**（2026-08-07決着）。**案A＋C を採用。** 最新の
+   有報を正としつつ、重複4期の不一致を検出したら④⑦を `unavailable('restated-history')`
+   に倒す。詳細は §4.3・§7.2
+2. ✅ **認証を伴う外部API・定期実行の可否**（2026-08-07決着。
+   [ADR-0011](../../adr/0011-edinet-financial-history-api.md) 起票・採用済み）。
+   `features.md` の決定と ADR-0010 決定#3 の改定を適用済み。詳細は §1.4
+3. ✅ **`sourceDocId` の保存先**（2026-08-08決着）。`financial_records.source_doc_id` /
+   `companies.bs_source_doc_id` にカラムを追加した（`src/infra/d1/schema.ts`）。
+   **ただし書き込み経路は未実装。** §4.6のマージ規則自体を実行するユースケースが
+   本仕様のスコープ外（§1.2）のため、現時点ではどちらの列も常に `NULL` のまま
+   （CR-3・CR-4のスコープ外決定と合わせて次スプリントの対象）
+4. 🟡 **`fetched_at` の扱い。** IRバンク・Yahoo・EDINET の3データ源が混在したとき、
+   `companies.fetchedAt` が何を指すのか壊れる（§4.6）
+5. ✅ **docID発見の日次バッチの実行時刻・タイムゾーン**（2026-08-08決着）。
+   `wrangler.jsonc` の Cron Trigger を `"0 21 * * *"`（UTC 21:00 = JST 翌06:00）に
+   設定済み。本番反映後に運用状況を見て調整の余地あり
+6. ✅ **⑦売上高CAGRは④と同じく2本の有報が必要**（2026-08-07決着。`/implement`実行中に
+   be-developerが添字を検証した結果、`score-company.ts`の`FIVE_YEARS_AGO_INDEX = 5`
+   （5年前）は有報1本が提供する最古の年度「四期前」（添字4年分＝4年前）には届かないと
+   判明。§2.4の「1本で足りる可能性がある」という記述は誤りだった。④と同じく最新有報＋
+   1年前有報の2本を取得し、遡及修正の検出（§4.3）も④と同じ手順を適用する
+7. 🟡 **同日複数書類・訂正報告書の正確な判別条件。** `docInfoEditStatus` の値の意味を
+   実データで確認できていない（§4.4・§7.3）
+8. 🟡 **タグのフォールバック順の網羅性。** 2社でしか確認していない。決定7で
+   「1回だけ解決する」規則に変えたため、IFRS移行企業を含めて再検証が要る
+9. 🟡 **決算月による走査絞り込みが実質機能していない。** `CompanyRepository.
+   listFiscalYearEndMonths()`が、決算月を永続化する列がまだ無いため暫定的に常に
+   `[1, ..., 12]`（全月）を返す実装になっている（`src/infra/d1/company-repository.ts`）。
+   §4.4の「3月決算企業なら6月1日〜6月30日を走査する」という絞り込みは、この暫定実装の下では
+   常に条件を満たしてしまい、実質「毎日`documents.json`を1回叩く」動作になる（安全側だが
+   絞り込み効果はゼロ）。決算月を永続化する設計（`companies`テーブルへの列追加等）が決まり
+   次第、実際に絞り込みが効くようにする。
+10. 🟡 **「1年前有報を取得できなかった」事実そのものが応答に残らない**（2026-08-09 起票）。
+    §4.5 の CR-5 決定は「取得に失敗しても最新5期は成功として返す」とだけ定めており、
+    その事実の記録先を定めていない。現状は `epsHistoryRestated` が `false` になるだけで、
+    **「比較した結果一致した」のか「そもそも比較できなかった」のかが応答から区別できない。**
+    §4.2.1 の `diagnostics` は「値が読めなかった」ことの記録であって、
+    「有報そのものが取れなかった」ことは表現していない。別タスクで扱う。
+
+## 9. 実装（予定）
+
+| 対象                         | ファイル                                                                    |
+| :---------------------------- | :---------------------------------------------------------------------------- |
+| ポート（履歴取得）           | `src/domain/company/edinet-history-source.ts`（新規）                        |
+| ポート（docIDインデックス）  | `src/domain/company/edinet-document-index.ts`（新規。§4.4）                  |
+| パース                       | `src/infra/edinet/parse-summary-csv.ts`（新規）                              |
+| docIDインデックス実装        | `src/infra/d1/edinet-document-index-repository.ts`（新規）                   |
+| 取得                         | `src/infra/edinet/edinet-client.ts`（新規）                                  |
+| D1スキーマ                   | `src/infra/d1/schema.ts`（改修。`edinetDocumentIndex` テーブル追加。§4.4）   |
+| マイグレーション             | `db/migrations/`（`npm run db:generate` の生成物。§4.6・§4.4）               |
+| ユースケース（履歴取り込み） | `src/usecase/import-edinet-history.ts`（新規）                               |
+| ユースケース（インデックス再構築） | `src/usecase/refresh-edinet-document-index.ts`（新規。§4.4）           |
+| ドメイン（遡及修正の反映）   | `src/domain/scoring/eps-cagr.ts` / `revenue-cagr.ts`（改修。`historyRestated` 入力の追加。§4.3） |
+| ドメイン（判定不能理由の追加） | `src/domain/shared/metric-score.ts`（改修。`'restated-history'` 追加）      |
+| ドメイン（会社集約）         | `src/domain/company/company.ts`（改修。`epsHistoryRestated` / `revenueHistoryRestated` 追加） |
+| ユースケース（結合）         | `src/usecase/score-company.ts`（改修。上記フラグを `eps-cagr` / `revenue-cagr` へ渡す） |
+| 結線                         | `src/handler/app.ts` / `src/handler/dto/`（新規DTO）                         |
+| スケジュール実行             | `wrangler.jsonc`（Cron Trigger 追加。実行時刻は §8-5 で未決）                 |
+| フィクスチャ                 | `tests/fixtures/edinet/9433-fy2026-S100YKG2.csv` / `9433-fy2025-S100VXGZ.csv` / `1301-fy2026-S100YE8K.csv`（実物から作成済み） |
+| テスト                       | `tests/infra/edinet/*.test.ts` / `tests/domain/scoring/eps-cagr.test.ts` ・`revenue-cagr.test.ts`（改修） |
+
+### 着手順
+
+0. ✅ **ADR-0011 を適用する**（§1.4）。2026-08-07 起票・採用済み。実装に着手してよい
+1. ✅ **⑥のBSタグを実測する**（§2.7）。2026-08-07 実測済み
+2. §4.4 のdocIDインデックスを1,000社規模で試作し、所要時間・レート制限を実測する
+3. §4.1・§4.2 のタグ解決とパース（フィクスチャは実物から作る）
+4. §4.3 の遡及修正検出ロジック（ドメインの純粋関数）
+5. 結線（ユースケース・画面・日次バッチ）

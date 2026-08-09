@@ -108,9 +108,7 @@ export function scoreCompany(company: Company, useActualForScoring = false): Com
   const actual = latestActualRecord(company);
   const actualDividend = selectLatestActualDividend(company.dividends);
   const actualYearsMatch =
-    actual !== null &&
-    actualDividend !== null &&
-    actual.fiscalYear === actualDividend.fiscalYear;
+    actual !== null && actualDividend !== null && actual.fiscalYear === actualDividend.fiscalYear;
 
   const payoutRatioResult = calculatePayoutRatio({
     forecast: {
@@ -137,7 +135,10 @@ export function scoreCompany(company: Company, useActualForScoring = false): Com
     }),
     consecutiveYears: calculateConsecutiveYears({ dividendHistory: dividendSeries }),
     payoutRatio: payoutRatioToMetricScore(payoutRatioResult),
-    epsCagr: calculateEpsCagr({ epsHistory: epsSeries }),
+    epsCagr: calculateEpsCagr({
+      epsHistory: epsSeries,
+      historyRestated: company.epsHistoryRestated,
+    }),
     roeAverage: calculateRoeAverage({ roeHistory: roeSeries }),
     dividendSustainability: calculateDividendSustainability({
       currentAssets: company.balanceSheet.currentAssetsSen,
@@ -148,6 +149,7 @@ export function scoreCompany(company: Company, useActualForScoring = false): Com
     revenueCagr: calculateRevenueCagr({
       revenueCurrent: at(revenueSeries, 0),
       revenueFiveYearsAgo: at(revenueSeries, FIVE_YEARS_AGO_INDEX),
+      historyRestated: company.revenueHistoryRestated,
     }),
     operatingMargin: calculateOperatingMargin({ operatingMarginHistory: marginSeries }),
     mixCoefficient: calculateMixCoefficient({

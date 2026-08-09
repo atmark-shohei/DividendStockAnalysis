@@ -50,4 +50,19 @@ export interface CompanyRepository {
   /** 一覧。N+1 を作らないため要約だけを1クエリで取る */
   listSummaries(): Promise<readonly CompanySummary[]>;
   deleteByCode(code: string): Promise<void>;
+  /**
+   * 登録済み企業の決算月一覧（重複無し）。EDINET docIDインデックスの日次バッチ
+   * （`refresh-edinet-document-index`）が走査対象期間を絞り込むために使う
+   * （`docs/02_design/logic/edinet-history-import.md` §4.4）。
+   *
+   * TODO(be-developer, 2026-08-08): **推測実装。** `companies` テーブルに決算月を
+   * 保存する列が現状無い（IRバンク取り込みが返す `fiscalYearEndMonth` は画面へ返すだけで
+   * 永続化していない）。決算月を保存する経路（`AnalyzeCompanyRequest` への追加等）は
+   * 本タスクの指示範囲外（Manager指示は `epsHistoryRestated`/`revenueHistoryRestated` の
+   * 追加のみ）のため、この実装は**安全側に倒し、常に1〜12月すべてを返す**
+   * （`D1CompanyRepository` 参照）。「登録済み企業の決算月に絞り込んで走査を減らす」効果は
+   * 出ないが、**どの決算月の企業も取りこぼさない**という正しさは保つ。
+   * 決算月を永続化する設計が決まり次第、実際の一覧を返す実装に差し替えること。
+   */
+  listFiscalYearEndMonths(): Promise<readonly number[]>;
 }

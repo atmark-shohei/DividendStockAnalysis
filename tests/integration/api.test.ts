@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document-index';
+import { type EdinetHistorySource } from '@/domain/company/edinet-history-source';
 import { type FinancialSource } from '@/domain/company/financial-source';
 import { type MarketDataSource } from '@/domain/company/market-data-source';
 import { createApp } from '@/handler/app';
@@ -31,11 +33,29 @@ const unusedMarketDataSource: MarketDataSource = {
   },
 };
 
+/** このテストファイルは EDINET 取り込みを対象にしないので、呼ばれたら落とす */
+const unusedEdinetHistorySource: EdinetHistorySource = {
+  fetchHistory: () => {
+    throw new Error('このテストで EdinetHistorySource が呼ばれるのは想定外');
+  },
+};
+
+const unusedEdinetDocumentIndexLookup: EdinetDocumentIndexLookup = {
+  findDocId: () => {
+    throw new Error('このテストで EdinetDocumentIndexLookup が呼ばれるのは想定外');
+  },
+  findLatest: () => {
+    throw new Error('このテストで EdinetDocumentIndexLookup が呼ばれるのは想定外');
+  },
+};
+
 function app() {
   return createApp({
     repository: new D1CompanyRepository(env.DB),
     financialSource: unusedFinancialSource,
     marketDataSource: unusedMarketDataSource,
+    edinetHistorySource: unusedEdinetHistorySource,
+    edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup,
     now: () => FIXED_NOW,
   });
 }
@@ -251,7 +271,14 @@ function payoutRatioSamplePayload(
   return {
     ...base,
     records: [
-      { fiscalYear: 2026, isForecast: true, epsSen: 20_000, roePercent: null, revenueSen: null, operatingMarginPercent: null },
+      {
+        fiscalYear: 2026,
+        isForecast: true,
+        epsSen: 20_000,
+        roePercent: null,
+        revenueSen: null,
+        operatingMarginPercent: null,
+      },
       ...base.records.filter((r) => !r.isForecast),
     ],
     dividends: [
@@ -379,6 +406,8 @@ describe('GET /api/market-data/:code', () => {
       repository: new D1CompanyRepository(env.DB),
       financialSource: unusedFinancialSource,
       marketDataSource,
+      edinetHistorySource: unusedEdinetHistorySource,
+      edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup,
       now: () => FIXED_NOW,
     });
   }

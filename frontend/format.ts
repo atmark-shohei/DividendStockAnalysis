@@ -25,6 +25,12 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   'price-invalid': '株価が不正です',
   'dividend-missing': '配当データがありません',
   'dividend-invalid': '配当データが不正です',
+  /**
+   * ④EPS CAGR・⑦売上高CAGR専用（`docs/02_design/logic/edinet-history-import.md` §4.3）。
+   * EDINETの重複4期を突き合わせて遡及修正を検出したときに返る。文言は Manager決定
+   * （2026-08-08。fe-plan.md §4.1 のドラフト案を採用・確定）。
+   */
+  'restated-history': '有価証券報告書の記載が年度をまたいで一致しないため、算出できません',
 };
 
 export function reasonText(reason: string | null): string {

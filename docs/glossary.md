@@ -45,6 +45,32 @@
 | 決算月           | `fiscalYearEndMonth`    | 値オブジェクト   | 決算月（1〜12）。`ImportedFinancials` のフィールド。IRバンクの年度キーから導出し、Yahoo 側の集計に受け渡す。単一に定まらなければ `null`                                                                          |
 | 株価の観測時刻   | `priceAsOf`             | 値オブジェクト   | 株価が観測された時刻。**保存されるのは `fetchedAt`（取得時刻）のみで、`priceAsOf` 自体は保存されない一時的な参考情報**。画面表示のみに使い、`FinancialRecord` 等へ永続化しない                                   |
 
+## EDINET財務履歴データ取り込み
+
+> 仕様の正: `docs/02_design/logic/edinet-history-import.md`。IRバンク（`FinancialSource`）・
+> Yahoo（`MarketDataSource`）とは別の外部データ源ポート。④⑦が要求する「6期以上前」の
+> EPS・売上高、⑥が要求する流動資産・投資有価証券を補完する。
+
+| 日本語                     | 英語（コード名）                | 種別           | 定義                                                                                                     |
+| -------------------------- | -------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
+| EDINET履歴取得源           | `EdinetHistorySource`            | ポート         | EDINET有価証券報告書から④⑦用の年度別EPS・売上高、⑥用の貸借対照表項目を取得する。定義はdomain、実装は`src/infra/edinet/` |
+| EDINET年度別データ         | `EdinetHistoryYear`              | 値オブジェクト | 1年度ぶんのEDINET由来EPS・売上高（銭）と出所docID                                                        |
+| EDINET貸借対照表スナップショット | `EdinetBalanceSheetSnapshot`  | 値オブジェクト | ⑥用。前期末時点の流動資産・投資有価証券（銭）と出所docID                                                 |
+| EDINET履歴取得結果         | `EdinetHistoryResult`            | 値オブジェクト | `EdinetHistorySource.fetchHistory`の戻り値。年度別データ最大6件・遡及修正フラグ・貸借対照表を持つ         |
+| docIDインデックスの1件     | `EdinetDocumentIndexEntry`       | 値オブジェクト | `(companyCode, fiscalYear)` → `docId`の対応。`documents.json`の`secCode`から`companyCode`へ変換して保存する |
+| docIDインデックス読み取り  | `EdinetDocumentIndexLookup`      | ポート         | `fetchHistory`が読むだけの窓口。`findDocId`（特定年度）・`findLatest`（最新年度）を持つ                   |
+| docIDインデックス永続化    | `EdinetDocumentIndexRepository`  | ポート         | 日次バッチが書き込む窓口。`upsertMany`・`lastRefreshedAt`・`recordRefresh`を持つ。定義はdomain、実装はD1  |
+| 書類一覧取得源             | `EdinetDocumentsListSource`      | ポート         | 日次バッチ（`refresh-edinet-document-index`）が使う、指定日の書類一覧取得ポート。フィルタ・変換済みのdomain型を返す |
+| 遡及修正フラグ             | `historyRestated`                | 値オブジェクト | `EpsCagrInput`/`RevenueCagrInput`の入力。`true`なら`unavailable('restated-history')`に倒す               |
+| ④用遡及修正フラグ          | `epsHistoryRestated`             | 値オブジェクト | `Company`のフィールド。EDINET取り込みの重複4期突き合わせで検出。既定`false`（EDINET未実施）              |
+| ⑦用遡及修正フラグ          | `revenueHistoryRestated`         | 値オブジェクト | 同上（売上高）                                                                                            |
+| データ出所（明細）         | `sourceDocId`                    | 値オブジェクト | `financial_records`の1行がどの有報（docID）由来かを示す。IRバンク・手入力由来なら`NULL`。現状書き込み経路なし（CR-4スコープ外） |
+| データ出所（貸借対照表）   | `bsSourceDocId`                  | 値オブジェクト | `companies`テーブル。⑥用`currentAssetsSen`/`investmentSecuritiesSen`の出所。同上                          |
+| 遡及修正による判定不能     | `'restated-history'`             | 値オブジェクト | `UnavailableReason`の新種別。④⑦専用。EDINETの重複4期が一致せず系列の連続性が保証できない                  |
+| 履歴取り込み               | `importEdinetHistory`            | ユースケース   | `EdinetHistorySource`への薄い委譲。**保存はしない**（取得のみ）                                           |
+| docIDインデックス再構築    | `refreshEdinetDocumentIndex`     | ユースケース   | 日次バッチ本体。`documents.json`を走査し`EdinetDocumentIndexRepository.upsertMany()`を呼ぶ               |
+| EDINETフィルング突き合わせ | `mergeEdinetFilings`             | ドメインサービス | 最新有報＋1年前有報の重複4期を突き合わせ、6期分の年度別データと遡及修正フラグを組み立てる純粋関数        |
+
 ## スコアリング
 
 | 日本語               | 英語（コード名）           | 種別             | 定義                                                                                                                                                                                                            |

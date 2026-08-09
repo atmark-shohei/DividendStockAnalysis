@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document-index';
+import { type EdinetHistorySource } from '@/domain/company/edinet-history-source';
 import { type FinancialSource } from '@/domain/company/financial-source';
 import { type MarketDataSource } from '@/domain/company/market-data-source';
 import { createApp } from '@/handler/app';
@@ -37,11 +39,28 @@ const unusedMarketDataSource: MarketDataSource = {
   },
 };
 
+const unusedEdinetHistorySource: EdinetHistorySource = {
+  fetchHistory: () => {
+    throw new Error('このテストで EdinetHistorySource が呼ばれるのは想定外');
+  },
+};
+
+const unusedEdinetDocumentIndexLookup: EdinetDocumentIndexLookup = {
+  findDocId: () => {
+    throw new Error('このテストで EdinetDocumentIndexLookup が呼ばれるのは想定外');
+  },
+  findLatest: () => {
+    throw new Error('このテストで EdinetDocumentIndexLookup が呼ばれるのは想定外');
+  },
+};
+
 function app() {
   return createApp({
     repository: new D1CompanyRepository(env.DB),
     financialSource: unusedFinancialSource,
     marketDataSource: unusedMarketDataSource,
+    edinetHistorySource: unusedEdinetHistorySource,
+    edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup,
     now: () => FIXED_NOW,
   });
 }
@@ -164,6 +183,28 @@ describe('明細の一括 INSERT は D1 のバインド変数上限（100個/文
 
     const stored = await new D1CompanyRepository(env.DB).findByCode('8424');
     expect(stored?.dividends).toEqual(dividendRecords(3));
+  });
+});
+
+describe('epsHistoryRestated/revenueHistoryRestated（CR-11。EDINET取り込みの遡及修正フラグ）', () => {
+  it('epsHistoryRestated/revenueHistoryRestated が保存・再取得後も維持される', async () => {
+    const response = await post(
+      payload({ epsHistoryRestated: true, revenueHistoryRestated: true }),
+    );
+    expect(response.status).toBe(201);
+
+    const stored = await new D1CompanyRepository(env.DB).findByCode('8424');
+    expect(stored?.epsHistoryRestated).toBe(true);
+    expect(stored?.revenueHistoryRestated).toBe(true);
+  });
+
+  it('epsHistoryRestated/revenueHistoryRestated 未指定時は false のまま保存・再取得される', async () => {
+    const response = await post(payload());
+    expect(response.status).toBe(201);
+
+    const stored = await new D1CompanyRepository(env.DB).findByCode('8424');
+    expect(stored?.epsHistoryRestated).toBe(false);
+    expect(stored?.revenueHistoryRestated).toBe(false);
   });
 });
 

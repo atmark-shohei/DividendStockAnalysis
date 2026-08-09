@@ -33,7 +33,12 @@ export type UnavailableReason =
   /** NaN / Infinity / 安全整数の範囲外など、数値として壊れている */
   | 'input-invalid'
   /** 区分表のどこにも該当しなかった。表に穴がある兆候 */
-  | 'value-out-of-band';
+  | 'value-out-of-band'
+  /**
+   * ④⑦専用。EDINET取り込みで重複4期の突き合わせが一致せず、系列の連続性が
+   * 保証できない（`docs/02_design/logic/edinet-history-import.md` §4.3）。
+   */
+  | 'restated-history';
 
 export type MetricScore<R extends string = UnavailableReason> =
   | {
