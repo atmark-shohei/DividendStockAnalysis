@@ -439,6 +439,7 @@ describe('fetchHistory — 取得成功（実物ZIPフィクスチャ）', () =>
       fiscalYear: 2026,
       epsSen: 18_359,
       revenueSen: 607_191_500_000_000,
+      roePercent: 13.93,
       sourceDocId: 'S100YKG2',
     });
     expect(result.value.epsHistoryRestated).toBe(false); // 比較できなければ false
@@ -470,6 +471,20 @@ describe('fetchHistory — 取得成功（実物ZIPフィクスチャ）', () =>
     expect(String(url)).toContain('Subscription-Key=dummy-key');
     expect(String(url)).toContain('/documents/S100YKG2');
     expect(String(url)).toContain('type=5');
+  });
+
+  it('⑤用: parseSummaryCsv の roePercentByOffset が mergeEdinetFilings 経由で years[].roePercent に届く（配線確認）', async () => {
+    const fetchImpl = vi.fn<FetchImpl>(() => Promise.resolve(zipResponse()));
+    const { client: target } = client(fetchImpl);
+
+    const result = await target.fetchHistory('9433', indexWithLatestOnly());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // 設計書 §2.8・§7.6 の実測値（年度降順）
+    expect(result.value.years.map((year) => year.roePercent)).toEqual([
+      13.93, 13.02, 11.57, 12.86, 13.5,
+    ]);
   });
 });
 

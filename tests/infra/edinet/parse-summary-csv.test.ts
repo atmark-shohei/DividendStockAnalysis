@@ -325,6 +325,424 @@ describe('parseSummaryCsv — 負の値（赤字EPS。§6・未実測のため�
   });
 });
 
+describe('parseSummaryCsv — ⑤ ROE自算（実物フィクスチャ。§2.8・§7.6受入基準）', () => {
+  it('9433（IFRS）FY2026の5期（年度昇順）が 13.50/12.86/11.57/13.02/13.93 と完全一致する', () => {
+    const parsed = parseSummaryCsv(fixtureText('9433-fy2026-S100YKG2.csv'));
+    // 添字0=当期(FY2026)〜4=四期前(FY2022)
+    expect(parsed.roePercentByOffset).toEqual([13.93, 13.02, 11.57, 12.86, 13.5]);
+  });
+
+  it('1301（日本基準）FY2023〜FY2026が 12.16/10.06/10.14/8.85 とIRバンク値と0.01pp以内で一致する', () => {
+    const parsed = parseSummaryCsv(fixtureText('1301-fy2026-S100YE8K.csv'));
+    // 添字0=当期(FY2026)〜3=三期前(FY2023)
+    expect(parsed.roePercentByOffset[0]).toBeCloseTo(8.85, 2);
+    expect(parsed.roePercentByOffset[1]).toBeCloseTo(10.14, 2);
+    expect(parsed.roePercentByOffset[2]).toBeCloseTo(10.06, 2);
+    expect(parsed.roePercentByOffset[3]).toBeCloseTo(12.16, 2);
+  });
+
+  it('1301の四期前（FY2022・offset4）が固定期待値 10.86% になる（IRバンクに公表値が無い年度。§2.8・2026-08-10決定）', () => {
+    const parsed = parseSummaryCsv(fixtureText('1301-fy2026-S100YE8K.csv'));
+    expect(parsed.roePercentByOffset[4]).toBe(10.86);
+  });
+
+  it('roePercentは%で入る（0.1393ではなく13.93。§4.2「倍のまま保存すると⑤が全銘柄0点になる」）', () => {
+    const parsed = parseSummaryCsv(fixtureText('9433-fy2026-S100YKG2.csv'));
+    expect(parsed.roePercentByOffset[0]).toBeGreaterThan(1);
+  });
+});
+
+describe('parseSummaryCsv — ⑤ ROE境界値・単位検証（構成CSV。§4.1.1・§7.6）', () => {
+  /** IFRS経路（自己資本を円で直接取る）の最小構成。当期(offset0)のみ */
+  function ifrsRoeCsv(netIncomeValue: string, equityValue: string): string {
+    return buildCsv([
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        netIncomeValue,
+      ),
+      row(
+        'jpcrp_cor:EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '円',
+        equityValue,
+      ),
+    ]);
+  }
+
+  it('自己資本 = 0 → roePercent は null（ゼロ除算）', () => {
+    const csv = ifrsRoeCsv('1000000000', '0');
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+  });
+
+  it('自己資本 < 0（債務超過） → roePercent は null。純利益が正でも高得点化させない', () => {
+    const csv = ifrsRoeCsv('1000000000', '-1000000000');
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+  });
+
+  /**
+   * 日本基準経路（総資産×自己資本比率）の最小構成。当期(offset0)のみ。
+   * `readEquitySenSeries` の `jp-computed` 分岐・`readRatioCell` を実際に通す
+   * （IFRS直接経路 `ifrsRoeCsv` とは別の分岐）。
+   */
+  function jpRoeCsv(netIncomeValue: string, totalAssetsValue: string, ratioValue: string): string {
+    return buildCsv([
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        netIncomeValue,
+      ),
+      row(
+        'jpcrp_cor:TotalAssetsSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '円',
+        totalAssetsValue,
+      ),
+      row(
+        'jpcrp_cor:EquityToAssetRatioSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'pure',
+        '',
+        ratioValue,
+      ),
+    ]);
+  }
+
+  it('日本基準経路: 自己資本比率 = 0 → 自己資本(計算値)も0 → roePercent は null（ゼロ除算。IFRS経路とは別分岐）', () => {
+    const csv = jpRoeCsv('1000000000', '10000000000', '0');
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+  });
+
+  it('日本基準経路: 自己資本比率が負（債務超過相当） → 自己資本(計算値)が負 → roePercent は null（IFRS経路とは別分岐）', () => {
+    const csv = jpRoeCsv('1000000000', '10000000000', '-0.1');
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+  });
+
+  it('日本基準経路: 自己資本比率が"－"（未使用タグ） → roePercent は null（readRatioCellのMISSING_VALUE分岐。診断は残さない）', () => {
+    const csv = jpRoeCsv('1000000000', '10000000000', String.fromCharCode(0xff0d));
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toEqual([]);
+  });
+
+  it('日本基準経路: 自己資本比率が"△0.1"（会計表記・未サポート） → unparsable-value診断、roePercent は null（readRatioCell自身の分岐）', () => {
+    const csv = jpRoeCsv('1000000000', '10000000000', '△0.1');
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({ field: 'equity', reason: 'unparsable-value', raw: '△0.1' }),
+    );
+  });
+
+  it('純利益が負・自己資本が正 → 負のroePercentをそのまま返す（nullにしない）', () => {
+    const csv = ifrsRoeCsv('-500000000000', '5000000000000');
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBe(-10);
+  });
+
+  it('純利益が"－"（未使用タグ） → roePercent は null（0と混同しない）', () => {
+    const csv = ifrsRoeCsv(String.fromCharCode(0xff0d), '5000000000000');
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+  });
+
+  it('自己資本の該当年度の行が無い → その年度だけ roePercent は null（他は解決経路が保たれる）', () => {
+    const csv = buildCsv([
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        '1000000000',
+      ),
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'Prior4YearDuration',
+        'JPY',
+        '円',
+        '900000000',
+      ),
+      row(
+        'jpcrp_cor:EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '円',
+        '10000000000',
+      ),
+      // Prior4YearInstant（四期前時点）の自己資本行が無い
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBe(10);
+    expect(parsed.roePercentByOffset[4]).toBeNull();
+  });
+
+  it('純利益の単位が「円」以外 → field: netIncome / unit-mismatch、roePercent は null', () => {
+    const csv = buildCsv([
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '百万円',
+        '1000',
+      ),
+      row(
+        'jpcrp_cor:EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '円',
+        '10000000000',
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({ field: 'netIncome', reason: 'unit-mismatch' }),
+    );
+  });
+
+  it('IFRS自己資本の単位が「円」以外 → field: equity / unit-mismatch、roePercent は null', () => {
+    const csv = buildCsv([
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        '1000000000',
+      ),
+      row(
+        'jpcrp_cor:EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '百万円',
+        '10000',
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({ field: 'equity', reason: 'unit-mismatch' }),
+    );
+  });
+
+  it('日本基準・総資産の単位が「円」以外 → field: equity / unit-mismatch、roePercent は null', () => {
+    const csv = buildCsv([
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        '1000000000',
+      ),
+      row(
+        'jpcrp_cor:TotalAssetsSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '百万円',
+        '10000',
+      ),
+      row(
+        'jpcrp_cor:EquityToAssetRatioSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'pure',
+        '',
+        '0.5',
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({ field: 'equity', reason: 'unit-mismatch' }),
+    );
+  });
+
+  it('自己資本比率のユニットIDが pure 以外（実測の罠を再現。§2.8.1） → unit-mismatch、275309%のような値を通さない', () => {
+    // 9433・7203の実測どおり EquityToAssetRatioIFRS... 相当のBPS値（JPYPerShares・1333.50）を
+    // 日本基準経路（EquityToAssetRatioSummaryOfBusinessResults）に混入させて検証する
+    const csv = buildCsv([
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        '1000000000',
+      ),
+      row(
+        'jpcrp_cor:TotalAssetsSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '円',
+        '10000000000',
+      ),
+      row(
+        'jpcrp_cor:EquityToAssetRatioSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPYPerShares',
+        '',
+        '1333.50',
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({ field: 'equity', reason: 'unit-mismatch' }),
+    );
+  });
+
+  it('連結・個別の取り違え防止: 個別（_NonConsolidatedMember）行を連結として読まない（1301実測相当）', () => {
+    const csv = buildCsv([
+      // 連結: 純利益600,000,000円・自己資本10,000,000,000円 → 6%
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        '600000000',
+      ),
+      row(
+        'jpcrp_cor:EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '円',
+        '10000000000',
+      ),
+      // 個別: 別の値（連結と混同すると別の点数になる）
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults',
+        'CurrentYearDuration_NonConsolidatedMember',
+        'JPY',
+        '円',
+        '900000000',
+      ),
+      row(
+        'jpcrp_cor:EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearInstant_NonConsolidatedMember',
+        'JPY',
+        '円',
+        '3000000000',
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBe(6);
+  });
+
+  it('個別のみ存在（連結タグなし） → 個別へフォールバックせず roePercent は null（§6決定）', () => {
+    const csv = buildCsv([
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults',
+        'CurrentYearDuration_NonConsolidatedMember',
+        'JPY',
+        '円',
+        '900000000',
+      ),
+      row(
+        'jpcrp_cor:EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearInstant_NonConsolidatedMember',
+        'JPY',
+        '円',
+        '3000000000',
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset).toEqual([null, null, null, null, null]);
+  });
+
+  it('IFRS自己資本と日本基準（総資産×比率）の両方が存在する場合、IFRS経路が優先される（決定7と同じ思想）', () => {
+    const csv = buildCsv([
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        '1000000000',
+      ),
+      // IFRS経路: 自己資本10,000,000,000円 → 10%
+      row(
+        'jpcrp_cor:EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '円',
+        '10000000000',
+      ),
+      // 日本基準経路が使われた場合は 2% になってしまう値をわざと混在させる
+      row(
+        'jpcrp_cor:TotalAssetsSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '円',
+        '100000000000',
+      ),
+      row(
+        'jpcrp_cor:EquityToAssetRatioSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'pure',
+        '',
+        '0.5',
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBe(10);
+  });
+
+  it('自己資本比率×総資産の掛け算がNumber.MAX_SAFE_INTEGERを超える → unsafe-integer診断、roePercentはnull（総資産自体は安全整数内。掛け算専用の分岐を踏む）', () => {
+    const csv = buildCsv([
+      row(
+        'jpcrp_cor:ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        '1000000000',
+      ),
+      // 90,071,992,547,409円 → 銭換算で 9,007,199,254,740,900（MAX_SAFE_INTEGER=9,007,199,254,740,991
+      // 未満。総資産単体は readCell の unsafe-integer 分岐を踏まない）
+      row(
+        'jpcrp_cor:TotalAssetsSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'JPY',
+        '円',
+        '90071992547409',
+      ),
+      // 比率1.5（データ異常の再現。自己資本比率は本来1以下だが、ここでは掛け算後にのみ
+      // オーバーフローさせるためあえて1超にする）→ 9,007,199,254,740,900 × 1.5 が
+      // MAX_SAFE_INTEGER を超え、readEquitySenSeries の掛け算専用オーバーフロー分岐に到達する
+      row(
+        'jpcrp_cor:EquityToAssetRatioSummaryOfBusinessResults',
+        'CurrentYearInstant',
+        'pure',
+        '',
+        '1.5',
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({
+        field: 'equity',
+        reason: 'unsafe-integer',
+        raw: '90071992547409×1.5',
+      }),
+    );
+  });
+
+  it('IFRS自己資本自体が安全整数を超える → unsafe-integer診断、roePercentはnull', () => {
+    const csv = ifrsRoeCsv('1000000000', '90071992547410');
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.roePercentByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({ field: 'equity', reason: 'unsafe-integer' }),
+    );
+  });
+});
+
 describe('parseSummaryCsv — IFRS移行企業（構成CSV。§4.1決定7・§6未実測のため構成で検証）', () => {
   // ⚠️ 実銘柄のフィクスチャが無い（設計書§6明記）。この describe は実データではなく
   // 9433の構造を踏襲した構成CSVで、決定7（1回だけ解決する）の規則そのものを検証する。

@@ -25,6 +25,13 @@ const FY2025_EPS_SEN: Offsets5 = [16933, 15063, 15550, 15001, 14208];
 const FY2025_REVENUE_SEN: Offsets5 = [
   591795300000000, 575404700000000, 567176200000000, 544670800000000, 531259900000000,
 ];
+/** ⑤用。9433実測（設計書 §2.8）。年度降順（添字0=FY2026当期〜4=FY2022四期前） */
+const FY2026_ROE_PERCENT: Offsets5 = [13.93, 13.02, 11.57, 12.86, 13.5];
+/**
+ * ⑤用。1年前有報（S100VXGZ）の自算ROEは設計書に実測記載が無いため、
+ * `mergeEdinetFilings` の配線（値がそのまま伝わること）だけを確認する合成値にする。
+ */
+const FY2025_ROE_PERCENT: Offsets5 = [11.1, 12.2, 13.3, 14.4, 15.5];
 
 function fy2026(overrides: Partial<EdinetFilingYears> = {}): EdinetFilingYears {
   return {
@@ -32,6 +39,7 @@ function fy2026(overrides: Partial<EdinetFilingYears> = {}): EdinetFilingYears {
     docId: 'S100YKG2',
     epsSenByOffset: FY2026_EPS_SEN,
     revenueSenByOffset: FY2026_REVENUE_SEN,
+    roePercentByOffset: FY2026_ROE_PERCENT,
     ...overrides,
   };
 }
@@ -42,6 +50,7 @@ function fy2025(overrides: Partial<EdinetFilingYears> = {}): EdinetFilingYears {
     docId: 'S100VXGZ',
     epsSenByOffset: FY2025_EPS_SEN,
     revenueSenByOffset: FY2025_REVENUE_SEN,
+    roePercentByOffset: FY2025_ROE_PERCENT,
     ...overrides,
   };
 }
@@ -55,6 +64,7 @@ describe('mergeEdinetFilings — 6期の組み立て（§4.5）', () => {
       fiscalYear: 2026,
       epsSen: 18359,
       revenueSen: 607191500000000,
+      roePercent: 13.93,
       sourceDocId: 'S100YKG2',
     });
   });
@@ -69,6 +79,7 @@ describe('mergeEdinetFilings — 6期の組み立て（§4.5）', () => {
       fiscalYear: 2021,
       epsSen: 14208,
       revenueSen: 531259900000000,
+      roePercent: 15.5,
       sourceDocId: 'S100VXGZ',
     });
   });
@@ -79,6 +90,42 @@ describe('mergeEdinetFilings — 6期の組み立て（§4.5）', () => {
       prior: fy2025({ epsSenByOffset: [16933, 15063, 15550, 15001, null] }),
     });
     expect(merged.years[5]?.epsSen).toBeNull();
+  });
+});
+
+describe('mergeEdinetFilings — ⑤ roePercentByOffset の年度組み立て（T-026〜T-028）', () => {
+  it('latest.roePercentByOffset の値が0〜4期目の roePercent にそのまま入る', () => {
+    const merged = mergeEdinetFilings({ latest: fy2026(), prior: null });
+    expect(merged.years.map((year) => year.roePercent)).toEqual([13.93, 13.02, 11.57, 12.86, 13.5]);
+  });
+
+  it('prior があるとき、6期目（五期前）が prior.roePercentByOffset[4] から入る', () => {
+    const merged = mergeEdinetFilings({ latest: fy2026(), prior: fy2025() });
+    expect(merged.years[5]?.roePercent).toBe(15.5);
+  });
+
+  it('prior が null のとき、5期分のみで6期目は存在しない（roePercentも同様）', () => {
+    const merged = mergeEdinetFilings({ latest: fy2026(), prior: null });
+    expect(merged.years).toHaveLength(5);
+  });
+
+  it('roePercentByOffset の欠損（null）はそのまま年度へ伝わる', () => {
+    const merged = mergeEdinetFilings({
+      latest: fy2026({ roePercentByOffset: [13.93, null, 11.57, 12.86, 13.5] }),
+      prior: null,
+    });
+    expect(merged.years[1]?.roePercent).toBeNull();
+  });
+
+  it('EPS/売上高で restated-history が検出されても roePercent の値・件数に影響しない', () => {
+    // fy2026/fy2025 は実測どおり EPS・売上高が不一致（restated: true）だが、
+    // roePercent はEDINET公表ROE列を経由しない自算値であり、突き合わせの対象外（§7.2）
+    const merged = mergeEdinetFilings({ latest: fy2026(), prior: fy2025() });
+    expect(merged.epsHistoryRestated).toBe(true);
+    expect(merged.revenueHistoryRestated).toBe(true);
+    expect(merged.years.map((year) => year.roePercent)).toEqual([
+      13.93, 13.02, 11.57, 12.86, 13.5, 15.5,
+    ]);
   });
 });
 
@@ -122,6 +169,7 @@ describe('mergeEdinetFilings — 遡及修正の検出（§4.3・§7.2）', () =
         FY2026_REVENUE_SEN[4],
         1,
       ],
+      roePercentByOffset: [1, 2, 3, 4, 5],
     };
     const merged = mergeEdinetFilings({ latest: fy2026(), prior: matchingPrior });
     expect(merged.epsHistoryRestated).toBe(false);

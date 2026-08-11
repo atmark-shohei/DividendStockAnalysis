@@ -108,8 +108,9 @@ type MarketDataSplitView = MarketDataImportResponse['splits'][number];
 type MarketDataDiagnostic = MarketDataImportResponse['diagnostics'][number];
 
 /**
- * EDINET由来の年度別データ（④EPS・⑦売上高の古い年度）。ROE・営業利益率は持たない
- * （`docs/02_design/logic/edinet-history-import.md` §4.6）。domain から直接 import せず
+ * EDINET由来の年度別データ（④EPS・⑦売上高の古い年度、⑤ROE）。営業利益率は持たない
+ * （`docs/02_design/logic/edinet-history-import.md` §4.6）。ROE は EDINET の公表列ではなく、
+ * 純利益÷期末自己資本で自算した値（同 §4.1.1）。domain から直接 import せず
  * BE確定DTO（`src/handler/dto/edinet-import.ts`）から導出する（`ImportedRecord` と同じ方針）。
  *
  * `sourceDocId` は貸借対照表側のみ画面表示する決定（Manager決定。fe-review 推測仕様#2）
@@ -351,7 +352,7 @@ export interface MergeRowsWithEdinetResult {
 }
 
 /**
- * EDINET取り込み結果（④EPS・⑦売上高の古い年度）を既存行にマージする。
+ * EDINET取り込み結果（④EPS・⑦売上高の古い年度、⑤ROE）を既存行にマージする。
  *
  * **`mergeRowsWithImport`（IRバンク）とは異なる方針にしてある。** IRバンクの規則1
  * （取り込みが値を持てば無条件で上書きする。同 §5.5）をそのまま流用すると、設計書
@@ -362,8 +363,10 @@ export interface MergeRowsWithEdinetResult {
  * （`resolveImportedAmount`/`resolveImportedPriceYen` と同じ思想）。Manager決定
  * （2026-08-08。fe-plan.md §5.3 の暫定案をそのまま採用）。
  *
- * EDINETは ROE・営業利益率を返さない（設計書 §4.6）ので、その2列には触れない
- * （既存の IRバンク由来・手入力値をそのまま残す）。行の同一性は年度だけで決める
+ * EDINETは営業利益率を返さない（設計書 §4.6）ので、その列には触れない
+ * （既存の IRバンク由来・手入力値をそのまま残す）。⑤ROEは自算して返すため、
+ * EPS・売上高と同じ「空欄のときだけ埋める」規則をそのまま適用する（同 §4.1.1・§4.6）。
+ * 行の同一性は年度だけで決める
  * （`mergeRowsWithImport` と同じ）。React の state を知らない純粋関数。
  */
 export function mergeRowsWithEdinetImport(
@@ -386,6 +389,10 @@ export function mergeRowsWithEdinetImport(
       merged = { ...merged, revenueYen: senToEditableText(imported.revenueSen) };
       filledCount += 1;
     }
+    if (merged.roePercent === '' && imported.roePercent !== null) {
+      merged = { ...merged, roePercent: ratioToEditableText(imported.roePercent) };
+      filledCount += 1;
+    }
     return merged;
   });
 
@@ -402,6 +409,10 @@ export function mergeRowsWithEdinetImport(
       }
       if (year.revenueSen !== null) {
         added = { ...added, revenueYen: senToEditableText(year.revenueSen) };
+        filledCount += 1;
+      }
+      if (year.roePercent !== null) {
+        added = { ...added, roePercent: ratioToEditableText(year.roePercent) };
         filledCount += 1;
       }
       return added;
@@ -647,12 +658,21 @@ export function edinetAmountNoteText(
   }
 }
 
-/** 診断が指す項目の画面名。④⑦は指標名、⑥は入力欄名（`BalanceSheetFields` のラベルと揃える） */
+/**
+ * 診断が指す項目の画面名。④⑦は指標名、⑥は入力欄名（`BalanceSheetFields` のラベルと揃える）。
+ *
+ * `netIncome` / `equity` の文言は Manager決定（2026-08-10、BE実装時に確認済み）。
+ * ROE 自算の入力2項目（純利益・自己資本）は「⑤ROEが読めなかった」では原因に辿り着けないため、
+ * 項目単位のラベルにする（`edinet-history-import.md` §4.1.1 の型コメントと同じ理由）。
+ * 登録フォームへの反映（`roePercent` の表示）は T-028 で実装済み。
+ */
 const EDINET_DIAGNOSTIC_FIELD_LABEL: Record<EdinetImportDiagnostic['field'], string> = {
   eps: '④EPS',
   revenue: '⑦売上高',
   currentAssets: '⑥流動資産',
   investmentSecurities: '⑥投資有価証券',
+  netIncome: '⑤純利益',
+  equity: '⑤自己資本',
 };
 
 /**
@@ -1092,7 +1112,7 @@ export function CompanyForm({
 
   /**
    * IRバンク・Yahooとは別系統の state（`.claude/rules/frontend.md`。片方の失敗が
-   * 他方を巻き込まない）。EDINETは④EPS・⑦売上高の古い年度と⑥流動資産・投資有価証券を
+   * 他方を巻き込まない）。EDINETは④EPS・⑦売上高の古い年度、⑤ROE、⑥流動資産・投資有価証券を
    * 取り込む（`docs/02_design/logic/edinet-history-import.md`）。
    */
   const [edinetImporting, setEdinetImporting] = useState(false);
@@ -1297,7 +1317,7 @@ export function CompanyForm({
   };
 
   /**
-   * EDINET（金融庁の有価証券報告書）から④EPS・⑦売上高の古い年度、⑥流動資産・
+   * EDINET（金融庁の有価証券報告書）から④EPS・⑦売上高の古い年度、⑤ROE、⑥流動資産・
    * 投資有価証券を取り込む。**保存はしない**
    * （`docs/02_design/logic/edinet-history-import.md`）。
    *
@@ -1611,7 +1631,7 @@ export function CompanyForm({
           </ul>
         )}
         <p className="meta">
-          金融庁EDINETの有価証券報告書から、④EPS・⑦売上高の6期以上前の年度、
+          金融庁EDINETの有価証券報告書から、④EPS・⑦売上高の6期以上前の年度、⑤ROE、
           ⑥流動資産・投資有価証券を取り込みます（予想値は取れません。空欄のセルだけを
           埋め、手入力・IRバンク取り込み済みの値は上書きしません）。
         </p>

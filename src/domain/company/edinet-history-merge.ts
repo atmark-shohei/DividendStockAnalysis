@@ -27,6 +27,14 @@ export interface EdinetFilingYears {
   readonly epsSenByOffset: readonly (number | null)[];
   /** 同上 */
   readonly revenueSenByOffset: readonly (number | null)[];
+  /**
+   * ⑤用。添字0=当期 〜 4=四期前。**%**（自算値。§4.1.1）。取れなければ `null`。
+   *
+   * **遡及修正検出（`detectRestatement`）の対象にしない。** ROE は ④⑦ 専用の
+   * `restated-history` とは別軸で、EDINET公表ROE列自体を読まない自算値のため
+   * 突き合わせの意味を持たない（§7.2 対象外）。
+   */
+  readonly roePercentByOffset: readonly (number | null)[];
 }
 
 export interface MergeEdinetFilingsInput {
@@ -73,6 +81,7 @@ export function mergeEdinetFilings(input: MergeEdinetFilingsInput): MergedEdinet
       fiscalYear: latest.fiscalYear - offset,
       epsSen: latest.epsSenByOffset[offset] ?? null,
       revenueSen: latest.revenueSenByOffset[offset] ?? null,
+      roePercent: latest.roePercentByOffset[offset] ?? null,
       sourceDocId: latest.docId,
     });
   }
@@ -83,6 +92,7 @@ export function mergeEdinetFilings(input: MergeEdinetFilingsInput): MergedEdinet
       fiscalYear: prior.fiscalYear - 4,
       epsSen: prior.epsSenByOffset[4] ?? null,
       revenueSen: prior.revenueSenByOffset[4] ?? null,
+      roePercent: prior.roePercentByOffset[4] ?? null,
       sourceDocId: prior.docId,
     });
   }

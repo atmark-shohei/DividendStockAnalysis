@@ -187,6 +187,7 @@ export class EdinetClient implements EdinetHistorySource, EdinetDocumentsListSou
             docId: priorUsable.entry.docId,
             epsSenByOffset: priorUsable.parsed.epsSenByOffset,
             revenueSenByOffset: priorUsable.parsed.revenueSenByOffset,
+            roePercentByOffset: priorUsable.parsed.roePercentByOffset,
           };
 
     // 取り込めなかった値は捨てずに応答まで運ぶ（`.claude/rules/backend.md`・設計書 §4.2）。
@@ -211,6 +212,7 @@ export class EdinetClient implements EdinetHistorySource, EdinetDocumentsListSou
         docId: latest.docId,
         epsSenByOffset: latestSummary.value.epsSenByOffset,
         revenueSenByOffset: latestSummary.value.revenueSenByOffset,
+        roePercentByOffset: latestSummary.value.roePercentByOffset,
       },
       prior,
     });

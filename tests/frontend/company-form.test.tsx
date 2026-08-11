@@ -257,7 +257,8 @@ describe('mergeRowsWithImport', () => {
  *
  * `mergeRowsWithImport`（IRバンク）とは方針が異なる。**空欄のときだけ埋める。
  * 手入力済みセルは上書きしない**（Manager決定、2026-08-08。`resolveImportedAmount`
- * と同じ思想）。ROE・営業利益率は EDINET が返さないので触れない。
+ * と同じ思想）。⑤ROEも同じ規則で埋める（自算値。§4.1.1）。営業利益率は EDINET が
+ * 返さないので触れない。
  */
 type ImportedEdinetYear = Parameters<typeof mergeRowsWithEdinetImport>[1][number];
 
@@ -269,6 +270,7 @@ function edinetYear(
     fiscalYear,
     epsSen: null,
     revenueSen: null,
+    roePercent: null,
     sourceDocId: 'S100YKG2',
     ...values,
   };
@@ -314,13 +316,12 @@ describe('mergeRowsWithEdinetImport', () => {
     expect(result.filledCount).toBe(1);
   });
 
-  it('ROE・営業利益率には触れない（EDINETは返さない。既存値がそのまま残る）', () => {
+  it('EDINETは営業利益率を返さないので既存値をそのまま残す', () => {
     const result = mergeRowsWithEdinetImport(
-      [row(2019, { roePercent: '13.93', operatingMarginPercent: '18.1' })],
+      [row(2019, { operatingMarginPercent: '18.1' })],
       [edinetYear(2019, { epsSen: 15001 })],
     );
 
-    expect(result.rows[0]?.roePercent).toBe('13.93');
     expect(result.rows[0]?.operatingMarginPercent).toBe('18.1');
   });
 
@@ -359,6 +360,94 @@ describe('mergeRowsWithEdinetImport', () => {
 
     const years = result.rows.map((merged) => merged.fiscalYear);
     expect(new Set(years).size).toBe(years.length);
+  });
+});
+
+/**
+ * `mergeRowsWithEdinetImport` の ⑤ROE マージ（境界値・4系統。`ai/rules/fe/test-patterns.md` §3）。
+ * `null`（判定不能）は埋めない・0%（判定可）は埋める・負値も捨てない、を table-driven で固定する。
+ */
+describe('mergeRowsWithEdinetImport: roePercentの境界値', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly existingRows: readonly YearRow[];
+    readonly years: readonly ImportedEdinetYear[];
+    readonly expectRoePercent: string;
+    readonly expectFilledCount: number;
+  }[] = [
+    {
+      name: '空欄セルに正のROEが来ると埋まる',
+      existingRows: [row(2019)],
+      years: [edinetYear(2019, { roePercent: 13.93 })],
+      expectRoePercent: '13.93',
+      expectFilledCount: 1,
+    },
+    {
+      name: '手入力済みセルは上書きしない',
+      existingRows: [row(2019, { roePercent: '10.00' })],
+      years: [edinetYear(2019, { roePercent: 13.93 })],
+      expectRoePercent: '10.00',
+      expectFilledCount: 0,
+    },
+    {
+      name: 'ROE=0%（判定可）はnullと区別して埋める',
+      existingRows: [row(2019)],
+      years: [edinetYear(2019, { roePercent: 0 })],
+      expectRoePercent: '0',
+      expectFilledCount: 1,
+    },
+    {
+      name: '負のROE（債務超過・赤字年度）も埋める',
+      existingRows: [row(2019)],
+      years: [edinetYear(2019, { roePercent: -5.5 })],
+      expectRoePercent: '-5.5',
+      expectFilledCount: 1,
+    },
+    {
+      name: 'ROEがnull（判定不能）なら埋めない',
+      existingRows: [row(2019)],
+      years: [edinetYear(2019, { roePercent: null })],
+      expectRoePercent: '',
+      expectFilledCount: 0,
+    },
+    {
+      name: 'ROE小数第3位以降はratioToEditableTextの丸めに従う',
+      existingRows: [row(2019)],
+      years: [edinetYear(2019, { roePercent: 13.935 })],
+      expectRoePercent: '13.94',
+      expectFilledCount: 1,
+    },
+  ];
+
+  for (const { name, existingRows, years, expectRoePercent, expectFilledCount } of cases) {
+    it(name, () => {
+      const result = mergeRowsWithEdinetImport(existingRows, years);
+
+      expect(result.rows[0]?.roePercent).toBe(expectRoePercent);
+      expect(result.filledCount).toBe(expectFilledCount);
+    });
+  }
+
+  it('新規追加行（既存に無い年度）にもROEが反映される', () => {
+    const result = mergeRowsWithEdinetImport(
+      [row(2024)],
+      [edinetYear(2019, { roePercent: 13.93 })],
+    );
+
+    const added = result.rows.find((merged) => merged.fiscalYear === '2019');
+    expect(added?.roePercent).toBe('13.93');
+  });
+
+  it('EPS・売上高・ROEは独立に判定する（ROEだけ埋まり、既存の売上高は残る）', () => {
+    const result = mergeRowsWithEdinetImport(
+      [row(2019, { revenueYen: '999' })],
+      [edinetYear(2019, { epsSen: 15001, revenueSen: 500_000, roePercent: 13.93 })],
+    );
+
+    expect(result.rows[0]?.epsYen).toBe('150.01');
+    expect(result.rows[0]?.revenueYen).toBe('999');
+    expect(result.rows[0]?.roePercent).toBe('13.93');
+    expect(result.filledCount).toBe(2);
   });
 });
 
@@ -1607,6 +1696,30 @@ describe('edinetDiagnosticText', () => {
       }),
       contains: ['⑥投資有価証券', '－'],
       notContains: ['年度'],
+    },
+    {
+      name: '⑤純利益（ROE自算の入力）: 年度と項目名と理由を日本語で出す',
+      diagnostic: edinetDiagnostic({
+        field: 'netIncome',
+        fiscalYear: 2021,
+        elementId: 'jppfs_cor:ProfitLoss',
+        reason: 'unparsable-value',
+        raw: '△1,234',
+      }),
+      contains: ['2021年度', '⑤純利益', '数値として読めない値でした'],
+      notContains: ['unparsable-value'],
+    },
+    {
+      name: '⑤自己資本（ROE自算の入力）: 年度と項目名と理由を日本語で出す',
+      diagnostic: edinetDiagnostic({
+        field: 'equity',
+        fiscalYear: 2021,
+        elementId: 'jppfs_cor:NetAssets',
+        reason: 'unsafe-integer',
+        raw: '99999999999999999',
+      }),
+      contains: ['2021年度', '⑤自己資本', '桁が大きすぎて取り込めない金額でした'],
+      notContains: ['unsafe-integer'],
     },
   ];
 

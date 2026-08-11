@@ -21,6 +21,16 @@ export interface EdinetHistoryYear {
   readonly epsSen: number | null;
   /** 銭。取れなければ `null` */
   readonly revenueSen: number | null;
+  /**
+   * ⑤用。**%**（倍ではない）。純利益 ÷ 期末自己資本 × 100 で自算した値（§4.1.1）。
+   *
+   * **有報の公表 ROE 列ではない。** あちらは期首期末平均基準で、IRバンク（期末基準）と
+   * 最大 1.35pp ずれる（§2.8）。金額ではなく比率なので銭にはしない
+   * （`financial_records.roe_percent` は `real`。`.claude/rules/backend.md`）。
+   *
+   * 純利益・自己資本のどちらかが欠ける、または自己資本 ≤ 0 なら `null`
+   */
+  readonly roePercent: number | null;
   /** どの有報（docID）由来か。§2.6 の食い違いを後から追跡できるようにする */
   readonly sourceDocId: string;
 }
@@ -32,9 +42,17 @@ export interface EdinetBalanceSheetSnapshot {
   readonly sourceDocId: string;
 }
 
-/** 診断の対象になった項目。EDINET の有報から読む4項目に対応する（§4.1・§2.7） */
+/** 診断の対象になった項目。EDINET の有報から読む項目に対応する（§4.1・§2.7・§4.1.1） */
 export type EdinetImportDiagnosticField =
-  'eps' | 'revenue' | 'currentAssets' | 'investmentSecurities';
+  | 'eps'
+  | 'revenue'
+  | 'currentAssets'
+  | 'investmentSecurities'
+  // ⑤用（2026-08-10 追加）。**`roe` ではなく入力2項目の単位で記録する。**
+  // ROE は自算値なので「ROE が読めなかった」では原因に辿り着けない。
+  // 純利益と自己資本のどちらで落ちたかが分かる粒度にする（§4.1.1）
+  | 'netIncome'
+  | 'equity';
 
 /**
  * 値を採用できなかった理由。

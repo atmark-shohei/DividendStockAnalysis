@@ -81,8 +81,20 @@ function app(edinetHistorySource: EdinetHistorySource) {
 
 const SAMPLE_RESULT: EdinetHistoryResult = {
   years: [
-    { fiscalYear: 2026, epsSen: 18_359, revenueSen: 607_191_500_000_000, sourceDocId: 'S100YKG2' },
-    { fiscalYear: 2025, epsSen: 16_186, revenueSen: 583_552_500_000_000, sourceDocId: 'S100YKG2' },
+    {
+      fiscalYear: 2026,
+      epsSen: 18_359,
+      revenueSen: 607_191_500_000_000,
+      roePercent: 13.93,
+      sourceDocId: 'S100YKG2',
+    },
+    {
+      fiscalYear: 2025,
+      epsSen: 16_186,
+      revenueSen: 583_552_500_000_000,
+      roePercent: null,
+      sourceDocId: 'S100YKG2',
+    },
   ],
   epsHistoryRestated: false,
   revenueHistoryRestated: false,
@@ -146,12 +158,14 @@ describe('取得に成功する', () => {
           fiscalYear: 2026,
           epsSen: 18_359,
           revenueSen: 607_191_500_000_000,
+          roePercent: 13.93,
           sourceDocId: 'S100YKG2',
         },
         {
           fiscalYear: 2025,
           epsSen: 16_186,
           revenueSen: 583_552_500_000_000,
+          roePercent: null,
           sourceDocId: 'S100YKG2',
         },
       ],

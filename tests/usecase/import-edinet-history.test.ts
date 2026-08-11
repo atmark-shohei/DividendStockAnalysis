@@ -34,7 +34,13 @@ function stubSource(
 
 const SAMPLE_RESULT: EdinetHistoryResult = {
   years: [
-    { fiscalYear: 2026, epsSen: 18_359, revenueSen: 607_191_500_000_000, sourceDocId: 'S100YKG2' },
+    {
+      fiscalYear: 2026,
+      epsSen: 18_359,
+      revenueSen: 607_191_500_000_000,
+      roePercent: 13.93,
+      sourceDocId: 'S100YKG2',
+    },
   ],
   epsHistoryRestated: false,
   revenueHistoryRestated: false,

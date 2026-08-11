@@ -20,6 +20,8 @@ export interface EdinetHistoryYearView {
   readonly fiscalYear: number;
   readonly epsSen: number | null;
   readonly revenueSen: number | null;
+  /** ⑤用。%（自算値）。取れなければ `null` */
+  readonly roePercent: number | null;
   readonly sourceDocId: string;
 }
 
@@ -52,6 +54,7 @@ export function toEdinetImportResponse(result: EdinetHistoryResult): EdinetImpor
       fiscalYear: year.fiscalYear,
       epsSen: year.epsSen,
       revenueSen: year.revenueSen,
+      roePercent: year.roePercent,
       sourceDocId: year.sourceDocId,
     })),
     epsHistoryRestated: result.epsHistoryRestated,
