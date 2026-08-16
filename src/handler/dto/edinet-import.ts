@@ -23,6 +23,14 @@ export interface EdinetHistoryYearView {
   /** ⑤用。%（自算値）。取れなければ `null` */
   readonly roePercent: number | null;
   readonly sourceDocId: string;
+  /**
+   * ⑧用。%。営業利益 ÷ 売上高 × 100（自算値）。取れなければ `null`。
+   * 営業赤字（負）は `null` にせず負の値をそのまま返す（⑧側が0点を判定する）。
+   * `sourceDocId`（EPS・売上高の出所）とは出所が食い違いうる
+   * （`Y-3`/`Y-4`年度は`Y-3`有報由来だが`sourceDocId`は`latest.docId`のまま）。
+   * 詳細はドメイン側 `EdinetHistoryYear.operatingMarginPercent` のJSDoc・設計書 §4.7.2。
+   */
+  readonly operatingMarginPercent: number | null;
 }
 
 export interface EdinetBalanceSheetView {
@@ -56,6 +64,7 @@ export function toEdinetImportResponse(result: EdinetHistoryResult): EdinetImpor
       revenueSen: year.revenueSen,
       roePercent: year.roePercent,
       sourceDocId: year.sourceDocId,
+      operatingMarginPercent: year.operatingMarginPercent,
     })),
     epsHistoryRestated: result.epsHistoryRestated,
     revenueHistoryRestated: result.revenueHistoryRestated,

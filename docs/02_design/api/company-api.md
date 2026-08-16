@@ -272,6 +272,7 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
       "epsSen": 18359,
       "revenueSen": 607191500000000,
       "roePercent": 13.93,
+      "operatingMarginPercent": 18.1,
       "sourceDocId": "S100YKG2"
     },
     {
@@ -279,6 +280,7 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
       "epsSen": 17012,
       "revenueSen": 580123400000000,
       "roePercent": null,
+      "operatingMarginPercent": null,
       "sourceDocId": "S100YKG2"
     }
   ],
@@ -297,6 +299,7 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `years`                  | 年度降順。最大6件。`epsSen` / `revenueSen` は銭。取れなければ `null`（**無配・0円と `null` は別物**）                                                    |
 | `years[].roePercent`     | ⑤用。**%**（自算値）。純利益÷期末自己資本で自算した ROE。**EDINETの公表列ではない**（あちらは期首期末平均基準で最大 1.35pp ずれる）。取れなければ `null` |
+| `years[].operatingMarginPercent` | ⑧用。**%**（自算値）。その有報のハイライト表内で導出した営業利益率。書類をまたいで分子・分母を組み合わせない。取れなければ `null`             |
 | `years[].sourceDocId`    | その年度の値をどの有報（docID）から採ったか                                                                                                              |
 | `epsHistoryRestated`     | ④用。重複4期の突き合わせで遡及修正が検出されたか。比較できなければ `false`                                                                               |
 | `revenueHistoryRestated` | ⑦用。同上                                                                                                                                                |

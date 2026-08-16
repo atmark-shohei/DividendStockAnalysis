@@ -16,7 +16,10 @@ import {
   type EdinetDocumentsListError,
   type EdinetDocumentsListSource,
 } from '../../domain/company/edinet-document-index';
-import { mergeEdinetFilings } from '../../domain/company/edinet-history-merge';
+import {
+  type EdinetFilingYears,
+  mergeEdinetFilings,
+} from '../../domain/company/edinet-history-merge';
 import {
   type EdinetHistoryError,
   type EdinetHistoryResult,
@@ -24,6 +27,11 @@ import {
   type EdinetImportDiagnostic,
 } from '../../domain/company/edinet-history-source';
 import { type Result, err, ok } from '../../domain/shared/result';
+import {
+  type EdinetDocumentSummaryCache,
+  fromCacheEntry,
+  toCacheEntry,
+} from './document-summary-cache';
 import { parseDocumentsListResponse, toDocumentIndexEntries } from './parse-documents-list';
 import {
   type ParsedSummaryCsv,
@@ -90,6 +98,26 @@ export function attributeDiagnostics(
   }));
 }
 
+/**
+ * `EdinetDocumentIndexEntry`（インデックス由来のメタ情報）と `ParsedSummaryCsv`（パース済みの
+ * サマリー）を `EdinetFilingYears` に詰め替える（純粋関数）。`latest`/`prior`/`third` の
+ * 3箇所で同じ6フィールドを組み立てていた重複を1箇所に集約する（CR-3）。フィールドを追加した
+ * 際に3箇所中1箇所だけ更新を忘れる、というミスを構造的に防ぐ。
+ */
+function toFilingYears(usable: {
+  readonly entry: EdinetDocumentIndexEntry;
+  readonly parsed: ParsedSummaryCsv;
+}): EdinetFilingYears {
+  return {
+    fiscalYear: usable.entry.fiscalYear,
+    docId: usable.entry.docId,
+    epsSenByOffset: usable.parsed.epsSenByOffset,
+    revenueSenByOffset: usable.parsed.revenueSenByOffset,
+    roePercentByOffset: usable.parsed.roePercentByOffset,
+    operatingIncomeSenByOffset: usable.parsed.operatingIncomeSenByOffset,
+  };
+}
+
 export interface EdinetClientDependencies {
   /** EDINET API の Subscription-Key。**値をログ・エラーメッセージに出さない** */
   readonly apiKey: string;
@@ -98,6 +126,12 @@ export interface EdinetClientDependencies {
   /** リトライ前の待機。テストでは即座に解決させる */
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly baseUrl?: string;
+  /**
+   * パース結果キャッシュ（`docs/02_design/logic/edinet-history-import.md` §4.8）。
+   * **省略可。** 渡さなければ従来どおり毎回 fetch する（`scheduled` ハンドラ用の
+   * docIDインデックス取得では注入不要。§4.8.1）。
+   */
+  readonly summaryCache?: EdinetDocumentSummaryCache;
 }
 
 /** `fetchWithRetry` の結果。リトライを尽くした後の最終形なので `retryable` は現れない */
@@ -115,12 +149,14 @@ export class EdinetClient implements EdinetHistorySource, EdinetDocumentsListSou
   private readonly fetchImpl: typeof globalThis.fetch;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly baseUrl: string;
+  private readonly summaryCache: EdinetDocumentSummaryCache | undefined;
 
   constructor(dependencies: EdinetClientDependencies) {
     this.apiKey = dependencies.apiKey;
     this.fetchImpl = dependencies.fetch ?? globalThis.fetch.bind(globalThis);
     this.sleep = dependencies.sleep ?? defaultSleep;
     this.baseUrl = dependencies.baseUrl ?? DEFAULT_BASE_URL;
+    this.summaryCache = dependencies.summaryCache;
   }
 
   async fetchByDate(
@@ -179,20 +215,23 @@ export class EdinetClient implements EdinetHistorySource, EdinetDocumentsListSou
         ? { entry: priorEntry, parsed: priorSummary.value }
         : null;
 
-    const prior =
-      priorUsable === null
-        ? null
-        : {
-            fiscalYear: priorUsable.entry.fiscalYear,
-            docId: priorUsable.entry.docId,
-            epsSenByOffset: priorUsable.parsed.epsSenByOffset,
-            revenueSenByOffset: priorUsable.parsed.revenueSenByOffset,
-            roePercentByOffset: priorUsable.parsed.roePercentByOffset,
-          };
+    const prior = priorUsable === null ? null : toFilingYears(priorUsable);
+
+    const thirdEntry = await index.findDocId(normalized, latest.fiscalYear - 3);
+    const thirdSummary =
+      thirdEntry === null ? null : await this.fetchDocumentSummary(thirdEntry.docId);
+    // Y-3有報の取得に失敗しても、Y・Y-1から得られる④⑦⑤⑥を無駄にしない。
+    // ⑧のY-3・Y-4だけがnullになる（§4.7.1）
+    const thirdUsable =
+      thirdEntry !== null && thirdSummary !== null && thirdSummary.ok
+        ? { entry: thirdEntry, parsed: thirdSummary.value }
+        : null;
+
+    const third = thirdUsable === null ? null : toFilingYears(thirdUsable);
 
     // 取り込めなかった値は捨てずに応答まで運ぶ（`.claude/rules/backend.md`・設計書 §4.2）。
-    // 2本ぶんをフラットに連結し、`sourceDocId` でどちらの有報由来かを区別する。
-    // 1年前有報を取得できなかった場合は、その有報の診断はそもそも存在しない（CR-5）
+    // 最大3本ぶんをフラットに連結し、`sourceDocId` でどの有報由来かを区別する。
+    // 取得できなかった有報の診断はそもそも存在しない（CR-5・T-055で`Y-3`にも同様に適用）
     const diagnostics: readonly EdinetImportDiagnostic[] = [
       ...attributeDiagnostics(latestSummary.value.diagnostics, {
         docId: latest.docId,
@@ -204,17 +243,18 @@ export class EdinetClient implements EdinetHistorySource, EdinetDocumentsListSou
             docId: priorUsable.entry.docId,
             currentFiscalYear: priorUsable.entry.fiscalYear,
           })),
+      ...(thirdUsable === null
+        ? []
+        : attributeDiagnostics(thirdUsable.parsed.diagnostics, {
+            docId: thirdUsable.entry.docId,
+            currentFiscalYear: thirdUsable.entry.fiscalYear,
+          })),
     ];
 
     const merged = mergeEdinetFilings({
-      latest: {
-        fiscalYear: latest.fiscalYear,
-        docId: latest.docId,
-        epsSenByOffset: latestSummary.value.epsSenByOffset,
-        revenueSenByOffset: latestSummary.value.revenueSenByOffset,
-        roePercentByOffset: latestSummary.value.roePercentByOffset,
-      },
+      latest: toFilingYears({ entry: latest, parsed: latestSummary.value }),
       prior,
+      third,
     });
 
     return ok({
@@ -231,6 +271,47 @@ export class EdinetClient implements EdinetHistorySource, EdinetDocumentsListSou
   }
 
   private async fetchDocumentSummary(
+    docId: string,
+  ): Promise<Result<ParsedSummaryCsv, EdinetHistoryError>> {
+    const cached = await this.readFromCache(docId);
+    if (cached !== null) return ok(cached);
+
+    const fetched = await this.fetchDocumentSummaryFromNetwork(docId);
+    if (fetched.ok) await this.writeToCache(docId, fetched.value);
+    return fetched;
+  }
+
+  /**
+   * キャッシュ読み取り。**例外を投げない**（§4.8.5・§7.8）。`find()` が reject しても
+   * ミス扱い（`null`）に倒し、通常の取得フローへフォールバックする。ポート実装
+   * （`D1EdinetDocumentSummaryCacheRepository`）側でも例外を投げない設計だが、
+   * クライアント側でも二重に守る（実装計画 §「find/saveの呼び出しはそれぞれtry/catch」）。
+   */
+  private async readFromCache(docId: string): Promise<ParsedSummaryCsv | null> {
+    if (this.summaryCache === undefined) return null;
+    try {
+      const cached = await this.summaryCache.find(docId);
+      return cached === null ? null : fromCacheEntry(cached);
+    } catch (cause) {
+      console.error('edinet summary cache find failed', docId, describeCause(cause));
+      return null;
+    }
+  }
+
+  /**
+   * キャッシュ書き込み。**失敗しても取り込みを失敗にしない**（§4.8.5・§7.8）。
+   * `console.error` にだけ残す（内部情報を含めない。`.claude/rules/backend.md`）。
+   */
+  private async writeToCache(docId: string, parsed: ParsedSummaryCsv): Promise<void> {
+    if (this.summaryCache === undefined) return;
+    try {
+      await this.summaryCache.save(docId, toCacheEntry(parsed));
+    } catch (cause) {
+      console.error('edinet summary cache save failed', docId, describeCause(cause));
+    }
+  }
+
+  private async fetchDocumentSummaryFromNetwork(
     docId: string,
   ): Promise<Result<ParsedSummaryCsv, EdinetHistoryError>> {
     const url = `${this.baseUrl}/documents/${encodeURIComponent(docId)}?type=5&Subscription-Key=${encodeURIComponent(this.apiKey)}`;

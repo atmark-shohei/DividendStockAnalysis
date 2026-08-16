@@ -431,9 +431,11 @@ ROE にもそのまま適用する。
 **どちらも `CurrentYearDuration` と `Prior1YearDuration` の2期のみ。**
 `Prior2YearDuration` 以降は存在しない（損益計算書が当期・前期の対比表のため）。
 
-9433 には `jppfs_cor:OperatingIncome` の行自体は現れるが**値が無い**（IFRS採用のため）。
+9433 には `jppfs_cor:OperatingIncome` の**連結コンテキスト（`CurrentYearDuration`）の行自体が存在しない**
+（✅ 2026-08-16 訂正。存在するのは `_NonConsolidatedMember`（個別）の行のみで、IFRS採用のため連結は
+`jpigp_cor:OperatingProfitLossIFRS` 側にしか値が無い）。
 §4.1 の「候補を順に試し、`CurrentYearDuration` に行がある最初の要素IDへ1回だけ解決する」
-規則がそのまま使える。
+規則がそのまま使える（個別行は候補外のため無視され、IFRS側が採用される）。
 
 > ⚠️ **セグメント別内訳のコンテキストを拾わないこと。** 9433 の
 > `jpigp_cor:OperatingProfitLossIFRS` は `Prior1YearDuration` だけで
@@ -1215,6 +1217,19 @@ EdinetClient.fetchDocumentSummary(docId)
   全削除のほうが単純なため
 - `schema_version` を上げ忘れた場合の保険であり、通常運用では使わない想定
 
+##### 4.8.3.1. レスポンス形状（✅ 2026-08-16 追記。実装時の決定、ユーザー承認済み）
+
+**レスポンスは `{ cleared: number }`。** `cleared` は削除した行数
+（`EdinetDocumentSummaryCacheRepository.clearAll()` の戻り値をそのまま返す）。
+本節を起票した時点では未記載だったが、実装（`src/handler/app.ts` の
+`POST /api/admin/edinet/document-summary-cache/clear`）で採用した形状をここに追記する。
+
+- 削除件数を返すのは、`schema_version` の上げ忘れに対する保険として叩いたときに
+  「実際に何行消えたか」を呼び出し側が確認できるようにするため（0件なら
+  そもそも何も溜まっていなかった、といった判断に使える）
+- 認証・エラー応答は §4.4.1 の `edinetIndexAdmin`（`X-Admin-Token`）と同じ形に揃える
+  （トークン未設定は 503、トークン不一致は 401。いずれも `{ error: string }`）
+
 **`find()` での最小限の形チェック。** zod は使わない（handler 境界のみ。
 `.claude/CLAUDE.md`）が、`JSON.parse` した結果をノーチェックで型アサーションするのは
 危険なので、手書きの数行で次を確認する。
@@ -1831,8 +1846,8 @@ export interface Company {
       当期 `1,099,125百万円` / 前期 `1,087,468百万円` を銭で読む
 - [ ] 1301（日本基準）FY2026 の有報から `jppfs_cor:OperatingIncome` を解決し、
       当期 `10,731百万円` / 前期 `11,079百万円` を銭で読む
-- [ ] 9433 は `jppfs_cor:OperatingIncome` の行が**存在しても値が無い**。
-      §4.1 の「`CurrentYearDuration` に行がある最初の候補へ1回だけ解決する」規則で
+- [ ] 9433 は `jppfs_cor:OperatingIncome` の**連結コンテキストの行自体が存在しない**
+      （✅ 2026-08-16 訂正。§2.9.2参照）。§4.1 の「`CurrentYearDuration` に行がある最初の候補へ1回だけ解決する」規則で
       IFRS 側が選ばれる（**日本基準の候補を先に試して `null` で確定させない**）
 - [ ] 営業利益率が §2.9.4 の売上高と組み合わさり、9433 FY2026 = `18.10%` /
       FY2025 = `18.64%`、1301 FY2026 = `3.21%` / FY2025 = `3.66%` になる（小数第2位まで）
@@ -1918,6 +1933,12 @@ export interface Company {
       drizzle / `cloudflare:*` / hono / zod を import していない
 - [ ] `src/infra/edinet/edinet-client.ts` が **D1 を直接触らない**
       （同じ `src/infra/edinet/` 内のポート経由でのみキャッシュを使う）
+
+管理用クリアエンドポイント（§4.8.3.1。2026-08-16 追加）。
+
+- [ ] `POST /api/admin/edinet/document-summary-cache/clear` が
+      `{ cleared: number }` を返す（`cleared` は削除した行数）
+- [ ] `EDINET_ADMIN_TOKEN` 未設定時は 503、`X-Admin-Token` 不一致時は 401 を返す
 
 ## 8. 未決事項
 

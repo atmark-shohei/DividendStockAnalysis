@@ -40,6 +40,7 @@ const SAMPLE_RESULT: EdinetHistoryResult = {
       revenueSen: 607_191_500_000_000,
       roePercent: 13.93,
       sourceDocId: 'S100YKG2',
+      operatingMarginPercent: null,
     },
   ],
   epsHistoryRestated: false,

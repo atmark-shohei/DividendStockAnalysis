@@ -88,9 +88,10 @@ export function importMarketData(
 }
 
 /**
- * EDINET（金融庁の有価証券報告書）から④EPS CAGR・⑦売上高CAGRの古い年度の値、
- * ⑥配当維持可能年数が要求する流動資産・投資有価証券を取り込む。**保存はしない**
- * （`docs/02_design/logic/edinet-history-import.md`。`importFromIrBank` と同じ方針）。
+ * EDINET（金融庁の有価証券報告書）から④EPS CAGR・⑦売上高CAGR・⑤ROE・⑧営業利益率の
+ * 古い年度の値、⑥配当維持可能年数が要求する流動資産・投資有価証券を取り込む。
+ * **保存はしない**（`docs/02_design/logic/edinet-history-import.md`。
+ * `importFromIrBank` と同じ方針）。
  */
 export function importFromEdinet(code: string): Promise<EdinetImportResponse> {
   return request<EdinetImportResponse>(`/api/edinet/${encodeURIComponent(code)}`);

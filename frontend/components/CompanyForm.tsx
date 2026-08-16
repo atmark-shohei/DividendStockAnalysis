@@ -108,10 +108,12 @@ type MarketDataSplitView = MarketDataImportResponse['splits'][number];
 type MarketDataDiagnostic = MarketDataImportResponse['diagnostics'][number];
 
 /**
- * EDINET由来の年度別データ（④EPS・⑦売上高の古い年度、⑤ROE）。営業利益率は持たない
- * （`docs/02_design/logic/edinet-history-import.md` §4.6）。ROE は EDINET の公表列ではなく、
- * 純利益÷期末自己資本で自算した値（同 §4.1.1）。domain から直接 import せず
- * BE確定DTO（`src/handler/dto/edinet-import.ts`）から導出する（`ImportedRecord` と同じ方針）。
+ * EDINET由来の年度別データ（④EPS・⑦売上高の古い年度、⑤ROE、⑧営業利益率）。
+ * ROE は EDINET の公表列ではなく、純利益÷期末自己資本で自算した値（同 §4.1.1）。
+ * ⑧営業利益率も同様に、有報自身のハイライト表・損益計算書本表だけで自算した値
+ * （`docs/02_design/logic/edinet-history-import.md` §4.7.2。書類をまたいで分子・分母を
+ * 組み合わせない）。domain から直接 import せず BE確定DTO
+ * （`src/handler/dto/edinet-import.ts`）から導出する（`ImportedRecord` と同じ方針）。
  *
  * `sourceDocId` は貸借対照表側のみ画面表示する決定（Manager決定。fe-review 推測仕様#2）
  * のため、年度別データ側では未使用のまま保持する（型は持つが表示には使わない）。
@@ -352,7 +354,7 @@ export interface MergeRowsWithEdinetResult {
 }
 
 /**
- * EDINET取り込み結果（④EPS・⑦売上高の古い年度、⑤ROE）を既存行にマージする。
+ * EDINET取り込み結果（④EPS・⑦売上高の古い年度、⑤ROE、⑧営業利益率）を既存行にマージする。
  *
  * **`mergeRowsWithImport`（IRバンク）とは異なる方針にしてある。** IRバンクの規則1
  * （取り込みが値を持てば無条件で上書きする。同 §5.5）をそのまま流用すると、設計書
@@ -363,9 +365,11 @@ export interface MergeRowsWithEdinetResult {
  * （`resolveImportedAmount`/`resolveImportedPriceYen` と同じ思想）。Manager決定
  * （2026-08-08。fe-plan.md §5.3 の暫定案をそのまま採用）。
  *
- * EDINETは営業利益率を返さない（設計書 §4.6）ので、その列には触れない
- * （既存の IRバンク由来・手入力値をそのまま残す）。⑤ROEは自算して返すため、
- * EPS・売上高と同じ「空欄のときだけ埋める」規則をそのまま適用する（同 §4.1.1・§4.6）。
+ * ⑧営業利益率もEPS・売上高・⑤ROEと同じ「空欄のときだけ埋める」規則で埋める
+ * （設計書 §4.7.2。3本の有報それぞれが自分自身のハイライト表の売上高を分母にして
+ * その有報内だけで導出した値。書類をまたいだ分子・分母の組み合わせはしない）。
+ * ⑤ROEは自算して返すため、EPS・売上高と同じ「空欄のときだけ埋める」規則をそのまま
+ * 適用する（同 §4.1.1・§4.6）。
  * 行の同一性は年度だけで決める
  * （`mergeRowsWithImport` と同じ）。React の state を知らない純粋関数。
  */
@@ -393,6 +397,13 @@ export function mergeRowsWithEdinetImport(
       merged = { ...merged, roePercent: ratioToEditableText(imported.roePercent) };
       filledCount += 1;
     }
+    if (merged.operatingMarginPercent === '' && imported.operatingMarginPercent !== null) {
+      merged = {
+        ...merged,
+        operatingMarginPercent: ratioToEditableText(imported.operatingMarginPercent),
+      };
+      filledCount += 1;
+    }
     return merged;
   });
 
@@ -413,6 +424,13 @@ export function mergeRowsWithEdinetImport(
       }
       if (year.roePercent !== null) {
         added = { ...added, roePercent: ratioToEditableText(year.roePercent) };
+        filledCount += 1;
+      }
+      if (year.operatingMarginPercent !== null) {
+        added = {
+          ...added,
+          operatingMarginPercent: ratioToEditableText(year.operatingMarginPercent),
+        };
         filledCount += 1;
       }
       return added;
@@ -673,6 +691,12 @@ const EDINET_DIAGNOSTIC_FIELD_LABEL: Record<EdinetImportDiagnostic['field'], str
   investmentSecurities: '⑥投資有価証券',
   netIncome: '⑤純利益',
   equity: '⑤自己資本',
+  // T-054: BEで診断フィールドを追加。この診断（読み取り失敗の警告文言）は
+  // BE→DTO→FEまで無フィルタで到達し、本タスクの時点で既に画面表示される
+  // 有効な表示経路にある（fe-review CR-2、承認済みの前倒し公開）。
+  // T-056で営業利益率の導出・登録フォームへの反映（`operatingMarginPercent` 欄への
+  // 値の充填）が実装済み。この診断ラベル追加とは別物だった。
+  operatingIncome: '⑧営業利益',
 };
 
 /**

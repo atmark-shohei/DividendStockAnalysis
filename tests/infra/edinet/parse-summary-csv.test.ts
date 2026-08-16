@@ -772,3 +772,202 @@ describe('parseSummaryCsv — IFRS移行企業（構成CSV。§4.1決定7・§6�
     expect(parsed.epsSenByOffset[4]).toBeNull();
   });
 });
+
+describe('parseSummaryCsv — ⑧営業利益（実物フィクスチャ。§2.9・§7.7受入基準）', () => {
+  it('9433 fy2026: 当期(offset0)=109,912,500,000,000銭、前期(offset1)=108,746,800,000,000銭', () => {
+    const parsed = parseSummaryCsv(fixtureText('9433-fy2026-S100YKG2.csv'));
+    expect(parsed.operatingIncomeSenByOffset[0]).toBe(109_912_500_000_000);
+    expect(parsed.operatingIncomeSenByOffset[1]).toBe(108_746_800_000_000);
+  });
+
+  it('9433は長さ2固定（3期目以降は存在せず取得しない）', () => {
+    const parsed = parseSummaryCsv(fixtureText('9433-fy2026-S100YKG2.csv'));
+    expect(parsed.operatingIncomeSenByOffset).toHaveLength(2);
+  });
+
+  it('9433は日本基準タグ（jppfs_cor:OperatingIncome）ではなくIFRSタグ（jpigp_cor:OperatingProfitLossIFRS）の値が採用される', () => {
+    const parsed = parseSummaryCsv(fixtureText('9433-fy2026-S100YKG2.csv'));
+    // 個別（_NonConsolidatedMember）タグの値 655,817,000,000円（=65,581,700,000,000銭）
+    // ではないことを明示的に確認し、個別と取り違えていないことを二重に確認する
+    expect(parsed.operatingIncomeSenByOffset[0]).not.toBe(65_581_700_000_000);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBe(109_912_500_000_000);
+  });
+
+  it('1301 fy2026: 当期(offset0)=1,073,100,000,000銭、前期(offset1)=1,107,900,000,000銭', () => {
+    const parsed = parseSummaryCsv(fixtureText('1301-fy2026-S100YE8K.csv'));
+    expect(parsed.operatingIncomeSenByOffset[0]).toBe(1_073_100_000_000);
+    expect(parsed.operatingIncomeSenByOffset[1]).toBe(1_107_900_000_000);
+  });
+});
+
+describe('parseSummaryCsv — ⑧営業利益 セグメント別コンテキストの罠（構成CSV。§2.9.2・§7.7）', () => {
+  it('9433実測の派生コンテキストを模したCSVで、素の CurrentYearDuration だけが採用され、セグメント値が混入しない', () => {
+    const csv = buildCsv([
+      // セグメント別内訳（採用してはいけない）
+      row(
+        'jpigp_cor:OperatingProfitLossIFRS',
+        'CurrentYearDuration_jpcrp030000-asr_E04425-000PersonalReportableSegmentMember',
+        'JPY',
+        '円',
+        '828337000000',
+      ),
+      row(
+        'jpigp_cor:OperatingProfitLossIFRS',
+        'CurrentYearDuration_TotalOfReportableSegmentsAndOthersMember',
+        'JPY',
+        '円',
+        '1101680000000',
+      ),
+      // 素のキー（採用すべき値）
+      row('jpigp_cor:OperatingProfitLossIFRS', 'CurrentYearDuration', 'JPY', '円', '1099125000000'),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBe(109_912_500_000_000);
+  });
+});
+
+describe('parseSummaryCsv — ⑧営業利益 個別のみ存在（連結タグなし）→ フォールバックしない（構成CSV。CR-5・§4.1.1決定に倣う）', () => {
+  it('個別（_NonConsolidatedMember）タグのみ存在（連結タグなし） → 個別へフォールバックせず operatingIncomeSenByOffset は [null, null]', () => {
+    const csv = buildCsv([
+      row(
+        'jppfs_cor:OperatingIncome',
+        'CurrentYearDuration_NonConsolidatedMember',
+        'JPY',
+        '円',
+        '655817000000',
+      ),
+      row(
+        'jppfs_cor:OperatingIncome',
+        'Prior1YearDuration_NonConsolidatedMember',
+        'JPY',
+        '円',
+        '600000000000',
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset).toEqual([null, null]);
+  });
+});
+
+describe('parseSummaryCsv — ⑧営業利益 単位検証・境界値ちょうど（構成CSV。§4.2）', () => {
+  it('単位が「円」以外（例: 百万円）→ null + diagnostics: field=operatingIncome, reason=unit-mismatch', () => {
+    const csv = buildCsv([
+      row('jppfs_cor:OperatingIncome', 'CurrentYearDuration', 'JPY', '百万円', '1000'),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({ field: 'operatingIncome', reason: 'unit-mismatch' }),
+    );
+  });
+
+  it('単位が「円」ちょうど → 採用する（境界値ちょうど）', () => {
+    const csv = buildCsv([
+      row('jppfs_cor:OperatingIncome', 'CurrentYearDuration', 'JPY', '円', '1000'),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBe(100_000);
+  });
+});
+
+describe('parseSummaryCsv — ⑧営業利益 欠損・0円・負値の区別（§4.1・§7.7）', () => {
+  it('"－"（未使用のタグ）は null（0と混同しない）', () => {
+    const csv = buildCsv([
+      row(
+        'jppfs_cor:OperatingIncome',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        String.fromCharCode(0xff0d),
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBeNull();
+  });
+
+  it('営業利益 0.00 → 0（null と区別。§7.7「0円ちょうどの年度」要件）', () => {
+    const csv = buildCsv([row('jppfs_cor:OperatingIncome', 'CurrentYearDuration', 'JPY', '円', '0.00')]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBe(0);
+  });
+
+  it('営業赤字は負のまま返す（nullにしない）', () => {
+    const csv = buildCsv([
+      row('jppfs_cor:OperatingIncome', 'CurrentYearDuration', 'JPY', '円', '-500000000000'),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBe(-50_000_000_000_000);
+  });
+
+  it('要素IDの行自体が存在しない年度（前期の行が無い）→ null（固定した要素IDのみ読み、フォールバックしない）', () => {
+    const csv = buildCsv([
+      row('jppfs_cor:OperatingIncome', 'CurrentYearDuration', 'JPY', '円', '1000000000'),
+      // Prior1YearDuration の行が無い
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBe(100_000_000_000);
+    expect(parsed.operatingIncomeSenByOffset[1]).toBeNull();
+  });
+});
+
+describe('parseSummaryCsv — ⑧営業利益 安全整数超過・パース不能（構成CSV）', () => {
+  it('安全整数を超える値 → unsafe-integer 診断 + null', () => {
+    const csv = buildCsv([
+      row('jppfs_cor:OperatingIncome', 'CurrentYearDuration', 'JPY', '円', '90071992547410'),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({ field: 'operatingIncome', reason: 'unsafe-integer' }),
+    );
+  });
+
+  it('△123（会計表記）は unparsable-value 診断を残し null にする', () => {
+    const csv = buildCsv([
+      row('jppfs_cor:OperatingIncome', 'CurrentYearDuration', 'JPY', '円', '△123'),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({ field: 'operatingIncome', reason: 'unparsable-value' }),
+    );
+  });
+
+  it('全角マイナス付き値は unparsable-value 診断を残し null にする', () => {
+    const csv = buildCsv([
+      row(
+        'jppfs_cor:OperatingIncome',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        `${String.fromCharCode(0xff0d)}123`,
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset[0]).toBeNull();
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({ field: 'operatingIncome', reason: 'unparsable-value' }),
+    );
+  });
+});
+
+describe('parseSummaryCsv — ⑧営業利益 未実測: 金融株相当（構成CSV。実データ確認は将来課題）', () => {
+  // ⚠️ 実フィクスチャが無い（設計書§6・todo-list.md §8-12相当の残課題）。
+  // 「jppfs_cor:OperatingIncome も jpigp_cor:OperatingProfitLossIFRS も一切含まないCSV」で
+  // resolveElementId が null を返し、operatingIncomeSenByOffset が [null, null] になる
+  // ロジックのみを確認する。金融株（銀行・保険）で実際にこの分岐を通るかは未確認。
+  it('候補要素IDがどちらも解決できない → operatingIncomeSenByOffset は [null, null]（ロジックのみ検証）', () => {
+    const csv = buildCsv([
+      // 営業利益系のタグを一切含まない（他項目のタグのみ）
+      row(
+        'jpcrp_cor:NetSalesSummaryOfBusinessResults',
+        'CurrentYearDuration',
+        'JPY',
+        '円',
+        '1000000000',
+      ),
+    ]);
+    const parsed = parseSummaryCsv(csv);
+    expect(parsed.operatingIncomeSenByOffset).toEqual([null, null]);
+  });
+});

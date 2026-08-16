@@ -33,6 +33,24 @@ export interface EdinetHistoryYear {
   readonly roePercent: number | null;
   /** どの有報（docID）由来か。§2.6 の食い違いを後から追跡できるようにする */
   readonly sourceDocId: string;
+  /**
+   * ⑧用（T-055追加）。**%**。営業利益 ÷ 売上高 × 100（§4.7.2）。
+   *
+   * 営業利益の実額は持たせない。導出は`deriveOperatingMarginPercent()`で行い、
+   * IRバンク経路と同じ関数を通す。
+   *
+   * 分子・分母を書類をまたいで組み合わせない。`Y`・`Y-1`・`Y-3`それぞれの有報が持つ
+   * 「その有報自身」の営業利益と売上高だけを組み合わせて導出する（§4.7.2）。
+   *
+   * 営業利益・売上高のどちらかが欠ける、または売上高 ≤ 0 なら `null`。
+   * 営業赤字（負）は`null`にせず負の値をそのまま返す（⑧側が0点を判定する）。
+   *
+   * `sourceDocId`（EPS・売上高の出所）とは出所が食い違いうる。`Y-3`・`Y-4`年度の
+   * `sourceDocId`は`latest.docId`のまま変更しないが、その年度の`operatingMarginPercent`は
+   * `Y-3`有報由来になる（§4.2.1「`balanceSheet.sourceDocId`と診断内の`sourceDocId`が
+   * 食い違いうる」と同種の許容。専用の`sourceDocId`フィールドは追加しない）。
+   */
+  readonly operatingMarginPercent: number | null;
 }
 
 /** ⑥用。前期末時点の貸借対照表項目 */
@@ -52,7 +70,9 @@ export type EdinetImportDiagnosticField =
   // ROE は自算値なので「ROE が読めなかった」では原因に辿り着けない。
   // 純利益と自己資本のどちらで落ちたかが分かる粒度にする（§4.1.1）
   | 'netIncome'
-  | 'equity';
+  | 'equity'
+  // ⑧用（T-054追加）。分母の売上高は既存の 'revenue' を流用するため、ここは営業利益のみ（§4.7.2）
+  | 'operatingIncome';
 
 /**
  * 値を採用できなかった理由。
@@ -102,8 +122,8 @@ export interface EdinetHistoryResult {
   /** ⑥用。取得できなければ `null`（IFRS企業は投資有価証券タグが無く項目単位でも `null` になりうる。§2.7） */
   readonly balanceSheet: EdinetBalanceSheetSnapshot | null;
   /**
-   * 取り込めなかった値の記録（§4.2）。最新有報・1年前有報の両方ぶんがフラットに入り、
-   * `sourceDocId` でどちらの有報由来かを区別する。**0件でも空配列**（`undefined` にしない）。
+   * 取り込めなかった値の記録（§4.2）。最新有報・1年前有報・`Y-3`有報の最大3本ぶんが
+   * フラットに入り、`sourceDocId` でどの有報由来かを区別する。**0件でも空配列**（`undefined` にしない）。
    */
   readonly diagnostics: readonly EdinetImportDiagnostic[];
 }

@@ -87,6 +87,8 @@ const SAMPLE_RESULT: EdinetHistoryResult = {
       revenueSen: 607_191_500_000_000,
       roePercent: 13.93,
       sourceDocId: 'S100YKG2',
+      // ⑧用。設計書 §7.7 の実測値（9433 FY2026）をそのまま使う
+      operatingMarginPercent: 18.1,
     },
     {
       fiscalYear: 2025,
@@ -94,6 +96,9 @@ const SAMPLE_RESULT: EdinetHistoryResult = {
       revenueSen: 583_552_500_000_000,
       roePercent: null,
       sourceDocId: 'S100YKG2',
+      // roePercent は null（判定不能）だが operatingMarginPercent は非null、
+      // という「指標ごとに独立してnull/非nullが混在する」組み合わせも配線確認する
+      operatingMarginPercent: 18.64,
     },
   ],
   epsHistoryRestated: false,
@@ -160,6 +165,7 @@ describe('取得に成功する', () => {
           revenueSen: 607_191_500_000_000,
           roePercent: 13.93,
           sourceDocId: 'S100YKG2',
+          operatingMarginPercent: 18.1,
         },
         {
           fiscalYear: 2025,
@@ -167,6 +173,7 @@ describe('取得に成功する', () => {
           revenueSen: 583_552_500_000_000,
           roePercent: null,
           sourceDocId: 'S100YKG2',
+          operatingMarginPercent: 18.64,
         },
       ],
       epsHistoryRestated: false,
@@ -206,6 +213,23 @@ describe('取得に成功する', () => {
         },
       ],
     });
+  });
+
+  it('operatingMarginPercent が null でもそのまま返す（0やundefinedに化けない）', async () => {
+    const source = stubSource(
+      ok({
+        ...SAMPLE_RESULT,
+        years: [
+          { ...SAMPLE_RESULT.years[0]!, operatingMarginPercent: null },
+          SAMPLE_RESULT.years[1]!,
+        ],
+      }),
+    );
+
+    const response = await app(source).request('/api/edinet/9433');
+    const body = (await response.json()) as { years: readonly { operatingMarginPercent: unknown }[] };
+
+    expect(body.years[0]?.operatingMarginPercent).toBeNull();
   });
 
   it('balanceSheet が null でもそのまま返す（判定不能を丸めない）', async () => {

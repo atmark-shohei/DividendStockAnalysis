@@ -168,3 +168,23 @@ export const edinetRefreshLog = sqliteTable('edinet_refresh_log', {
   /** その回で取り込んだ件数。障害調査用 */
   entryCount: integer('entry_count').notNull(),
 });
+
+/**
+ * EDINET有価証券報告書のパース結果キャッシュ（`docs/02_design/logic/edinet-history-import.md` §4.8）。
+ *
+ * 主キーは `doc_id`。**有報は提出済みの不変文書で `doc_id` は不変の識別子。**
+ * 同じ `doc_id` のパース結果は永久に変わらないため、TTL・更新検知を持たない（§4.8.4）。
+ *
+ * `payload` を JSON 列にするのは規約の例外（`.claude/rules/backend.md`「金額カラムは整数」から
+ * の逸脱）。理由は項目増加のたびのマイグレーションを避けるため、および `diagnostics` が
+ * 可変長のため（§4.8.3）。代わりに `schema_version` で形の不一致を検出する。
+ */
+export const edinetDocumentSummary = sqliteTable('edinet_document_summary', {
+  docId: text('doc_id').primaryKey(),
+  /** `EdinetDocumentSummary` の形の版。不一致はキャッシュミス扱い（§4.8.3） */
+  schemaVersion: integer('schema_version').notNull(),
+  /** `EdinetDocumentSummary` を JSON 化したもの */
+  payload: text('payload').notNull(),
+  /** 保存時刻。UTC の ISO 8601。**有効期限には使わない**（§4.8.4） */
+  cachedAt: text('cached_at').notNull(),
+});

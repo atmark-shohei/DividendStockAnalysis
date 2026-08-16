@@ -8,6 +8,7 @@
 import { createApp } from './handler/app';
 import { D1CompanyRepository } from './infra/d1/company-repository';
 import { D1EdinetDocumentIndexRepository } from './infra/d1/edinet-document-index-repository';
+import { D1EdinetDocumentSummaryCacheRepository } from './infra/d1/edinet-document-summary-cache-repository';
 import { EdinetClient } from './infra/edinet/edinet-client';
 import { IrBankFinancialSource } from './infra/irbank/fy-data-client';
 import { YahooChartMarketDataSource } from './infra/yahoo/chart-client';
@@ -41,16 +42,24 @@ export default {
     }
 
     const edinetDocumentIndexRepository = new D1EdinetDocumentIndexRepository(env.DB);
+    const edinetSummaryCacheRepository = new D1EdinetDocumentSummaryCacheRepository(env.DB);
     const app = createApp({
       repository: new D1CompanyRepository(env.DB),
       financialSource: new IrBankFinancialSource(),
       marketDataSource: new YahooChartMarketDataSource(),
-      edinetHistorySource: new EdinetClient({ apiKey: env.EDINET_API_KEY }),
+      edinetHistorySource: new EdinetClient({
+        apiKey: env.EDINET_API_KEY,
+        summaryCache: edinetSummaryCacheRepository,
+      }),
       edinetDocumentIndexLookup: edinetDocumentIndexRepository,
       now: () => new Date(),
       edinetIndexAdmin: {
         documentsListSource: new EdinetClient({ apiKey: env.EDINET_API_KEY }),
         indexRepository: edinetDocumentIndexRepository,
+        token: adminTokenOf(env),
+      },
+      edinetSummaryCacheAdmin: {
+        repository: edinetSummaryCacheRepository,
         token: adminTokenOf(env),
       },
     });

@@ -70,6 +70,11 @@
 | 履歴取り込み               | `importEdinetHistory`            | ユースケース   | `EdinetHistorySource`への薄い委譲。**保存はしない**（取得のみ）                                           |
 | docIDインデックス再構築    | `refreshEdinetDocumentIndex`     | ユースケース   | 日次バッチ本体。`documents.json`を走査し`EdinetDocumentIndexRepository.upsertMany()`を呼ぶ               |
 | EDINETフィルング突き合わせ | `mergeEdinetFilings`             | ドメインサービス | 最新有報＋1年前有報の重複4期を突き合わせ、6期分の年度別データと遡及修正フラグを組み立てる純粋関数        |
+| パース結果キャッシュの1件           | `EdinetDocumentSummary`          | 値オブジェクト | 有報1本（`docId`単位）のパース結果。`ParsedSummaryCsv`と同じ形（④⑤⑥⑦用のEPS・売上高・ROE・貸借対照表・診断）。定義は`src/infra/edinet/document-summary-cache.ts`。**T-054で`operatingIncomeSenByOffset`（⑧用、長さ2固定）を追加済み** |
+| パース結果キャッシュ                | `EdinetDocumentSummaryCache`     | ポート         | `docId`をキーに`EdinetDocumentSummary`を読み書きする。**`docId`は不変文書の識別子なのでTTL・無効化を持たない**。定義・実装ともinfra（domainを経由しない。§4.8.2）。`find`/`save`とも読み書き失敗を`throw`せず`null`/無視で吸収する契約 |
+| パース結果キャッシュ実装（D1）      | `D1EdinetDocumentSummaryCacheRepository` | 実装（infra/d1） | `EdinetDocumentSummaryCache`のD1実装。テーブルは`edinet_document_summary`（`doc_id`主キー）。壊れた/旧版の行は`schema_version`不一致または形チェック失敗として`null`（ミス扱い）を返す |
+| キャッシュ形の版                    | `schema_version`                 | 値オブジェクト | `edinet_document_summary`のカラム。次のいずれかを変更したら必ず上げる: `EdinetDocumentSummary`の形／候補要素IDリストの変更／単位検証ロジックの変更／数値パースロジックの変更（詳細は`docs/02_design/logic/edinet-history-import.md` §4.8.3）。不一致の行はキャッシュミス扱い（`CURRENT_SCHEMA_VERSION`） |
+| パース結果キャッシュ全削除（管理用）| `POST /api/admin/edinet/document-summary-cache/clear` | APIエンドポイント | `edinet_document_summary`を全行削除する管理用エンドポイント。`schema_version`の上げ忘れに対する保険。認証は`edinetIndexAdmin`と同じ`X-Admin-Token`パターン。応答`{ cleared: number }`（設計書に記載の無い実装判断。要ドキュメント反映） |
 
 ## スコアリング
 

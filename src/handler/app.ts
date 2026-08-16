@@ -79,6 +79,22 @@ export interface AppDependencies {
     /** 共有シークレット。`X-Admin-Token` ヘッダと突き合わせる */
     readonly token: string | undefined;
   };
+  /**
+   * EDINETパース結果キャッシュ（`edinet_document_summary`）の全行削除に必要な一式
+   * （`docs/02_design/logic/edinet-history-import.md` §4.8.3。管理用）。
+   *
+   * **省略可**。渡さない、または `token` が未設定なら管理用エンドポイントは
+   * 503 を返して無効化される（`edinetIndexAdmin` と同じパターン）。
+   *
+   * `repository` は infra の型（`EdinetDocumentSummaryCache`）を直接 import せず、
+   * ここで最小限の構造型を定義する（T-057 のキャッシュ全体が「domain を経由しない
+   * infra 内完結」という設計方針のため。実装計画 §0.2）。
+   */
+  readonly edinetSummaryCacheAdmin?: {
+    readonly repository: { clearAll(): Promise<number> };
+    /** 共有シークレット。`edinetIndexAdmin` と同じ `EDINET_ADMIN_TOKEN` を再利用する */
+    readonly token: string | undefined;
+  };
 }
 
 /**
@@ -269,6 +285,32 @@ export function createApp(dependencies: AppDependencies): Hono {
     }
 
     return context.json(toEdinetIndexRefreshResponse(parsed.data, result.value));
+  });
+
+  /**
+   * EDINETパース結果キャッシュ（`edinet_document_summary`）を全行削除する（管理用）。
+   *
+   * `schema_version` の上げ忘れに対する保険（設計書 §4.8.3）。通常運用では使わない想定。
+   * ボディ・クエリパラメータは無し。認証は `edinetIndexAdmin` と同じ `X-Admin-Token`
+   * パターンをそのまま踏襲する（実装計画 §0.2・§0.4）。
+   */
+  app.post('/api/admin/edinet/document-summary-cache/clear', async (context) => {
+    const admin = dependencies.edinetSummaryCacheAdmin;
+    if (admin?.token === undefined) {
+      return context.json(
+        {
+          error:
+            '管理用エンドポイントが無効です。EDINET_ADMIN_TOKEN を設定して再デプロイしてください',
+        },
+        503,
+      );
+    }
+    if (context.req.header('X-Admin-Token') !== admin.token) {
+      return context.json({ error: '管理用トークンが一致しません' }, 401);
+    }
+
+    const cleared = await admin.repository.clearAll();
+    return context.json({ cleared });
   });
 
   /**

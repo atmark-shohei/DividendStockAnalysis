@@ -252,13 +252,12 @@ describe('mergeRowsWithImport', () => {
 });
 
 /**
- * EDINET取り込み結果（④EPS・⑦売上高の古い年度）のマージ
+ * EDINET取り込み結果（④EPS・⑦売上高の古い年度、⑤ROE、⑧営業利益率）のマージ
  * （`docs/02_design/logic/edinet-history-import.md` §4.6）。
  *
  * `mergeRowsWithImport`（IRバンク）とは方針が異なる。**空欄のときだけ埋める。
  * 手入力済みセルは上書きしない**（Manager決定、2026-08-08。`resolveImportedAmount`
- * と同じ思想）。⑤ROEも同じ規則で埋める（自算値。§4.1.1）。営業利益率は EDINET が
- * 返さないので触れない。
+ * と同じ思想）。⑤ROE・⑧営業利益率も同じ規則で埋める（どちらも自算値。§4.1.1・§4.7.2）。
  */
 type ImportedEdinetYear = Parameters<typeof mergeRowsWithEdinetImport>[1][number];
 
@@ -271,6 +270,7 @@ function edinetYear(
     epsSen: null,
     revenueSen: null,
     roePercent: null,
+    operatingMarginPercent: null,
     sourceDocId: 'S100YKG2',
     ...values,
   };
@@ -316,10 +316,10 @@ describe('mergeRowsWithEdinetImport', () => {
     expect(result.filledCount).toBe(1);
   });
 
-  it('EDINETは営業利益率を返さないので既存値をそのまま残す', () => {
+  it('営業利益率がnull（判定不能）のときは既存値をそのまま残す', () => {
     const result = mergeRowsWithEdinetImport(
       [row(2019, { operatingMarginPercent: '18.1' })],
-      [edinetYear(2019, { epsSen: 15001 })],
+      [edinetYear(2019, { epsSen: 15001 })], // operatingMarginPercent は edinetYear のデフォルト値 null のまま
     );
 
     expect(result.rows[0]?.operatingMarginPercent).toBe('18.1');
@@ -448,6 +448,109 @@ describe('mergeRowsWithEdinetImport: roePercentの境界値', () => {
     expect(result.rows[0]?.revenueYen).toBe('999');
     expect(result.rows[0]?.roePercent).toBe('13.93');
     expect(result.filledCount).toBe(2);
+  });
+});
+
+/**
+ * `mergeRowsWithEdinetImport` の ⑧営業利益率マージ（境界値・4系統。
+ * `ai/rules/fe/test-patterns.md` §3）。`null`（判定不能）は埋めない・0%（判定可）は
+ * 埋める・負値（営業赤字）も捨てない、を table-driven で固定する（roePercentと同型）。
+ */
+describe('mergeRowsWithEdinetImport: operatingMarginPercentの境界値', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly existingRows: readonly YearRow[];
+    readonly years: readonly ImportedEdinetYear[];
+    readonly expectOperatingMarginPercent: string;
+    readonly expectFilledCount: number;
+  }[] = [
+    {
+      name: '空欄セルに正の営業利益率が来ると埋まる',
+      existingRows: [row(2019)],
+      years: [edinetYear(2019, { operatingMarginPercent: 18.1 })],
+      expectOperatingMarginPercent: '18.1',
+      expectFilledCount: 1,
+    },
+    {
+      name: '手入力済みセルは上書きしない',
+      existingRows: [row(2019, { operatingMarginPercent: '10.00' })],
+      years: [edinetYear(2019, { operatingMarginPercent: 18.1 })],
+      expectOperatingMarginPercent: '10.00',
+      expectFilledCount: 0,
+    },
+    {
+      name: '営業利益率=0%（判定可）はnullと区別して埋める',
+      existingRows: [row(2019)],
+      years: [edinetYear(2019, { operatingMarginPercent: 0 })],
+      expectOperatingMarginPercent: '0',
+      expectFilledCount: 1,
+    },
+    {
+      name: '負の営業利益率（営業赤字）も埋める',
+      existingRows: [row(2019)],
+      years: [edinetYear(2019, { operatingMarginPercent: -5.5 })],
+      expectOperatingMarginPercent: '-5.5',
+      expectFilledCount: 1,
+    },
+    {
+      name: '営業利益率がnull（判定不能）なら埋めない',
+      existingRows: [row(2019)],
+      years: [edinetYear(2019, { operatingMarginPercent: null })],
+      expectOperatingMarginPercent: '',
+      expectFilledCount: 0,
+    },
+    {
+      name: '営業利益率小数第3位以降はratioToEditableTextの丸めに従う',
+      existingRows: [row(2019)],
+      years: [edinetYear(2019, { operatingMarginPercent: 18.105 })],
+      expectOperatingMarginPercent: '18.11', // Math.round(1810.5)/100 = 18.11（四捨五入）
+      expectFilledCount: 1,
+    },
+  ];
+
+  for (const {
+    name,
+    existingRows,
+    years,
+    expectOperatingMarginPercent,
+    expectFilledCount,
+  } of cases) {
+    it(name, () => {
+      const result = mergeRowsWithEdinetImport(existingRows, years);
+
+      expect(result.rows[0]?.operatingMarginPercent).toBe(expectOperatingMarginPercent);
+      expect(result.filledCount).toBe(expectFilledCount);
+    });
+  }
+
+  it('新規追加行（既存に無い年度）にも営業利益率が反映される', () => {
+    const result = mergeRowsWithEdinetImport(
+      [row(2024)],
+      [edinetYear(2019, { operatingMarginPercent: 18.1 })],
+    );
+
+    const added = result.rows.find((merged) => merged.fiscalYear === '2019');
+    expect(added?.operatingMarginPercent).toBe('18.1');
+  });
+
+  it('EPS・売上高・ROE・営業利益率は独立に判定する（営業利益率だけ埋まり、既存の売上高は残る）', () => {
+    const result = mergeRowsWithEdinetImport(
+      [row(2019, { revenueYen: '999' })],
+      [
+        edinetYear(2019, {
+          epsSen: 15001,
+          revenueSen: 500_000,
+          roePercent: 13.93,
+          operatingMarginPercent: 18.1,
+        }),
+      ],
+    );
+
+    expect(result.rows[0]?.epsYen).toBe('150.01');
+    expect(result.rows[0]?.revenueYen).toBe('999');
+    expect(result.rows[0]?.roePercent).toBe('13.93');
+    expect(result.rows[0]?.operatingMarginPercent).toBe('18.1');
+    expect(result.filledCount).toBe(3);
   });
 });
 
@@ -1720,6 +1823,18 @@ describe('edinetDiagnosticText', () => {
       }),
       contains: ['2021年度', '⑤自己資本', '桁が大きすぎて取り込めない金額でした'],
       notContains: ['unsafe-integer'],
+    },
+    {
+      name: '⑧営業利益: 年度と項目名と理由を日本語で出す',
+      diagnostic: edinetDiagnostic({
+        field: 'operatingIncome',
+        fiscalYear: 2021,
+        elementId: 'jppfs_cor:OperatingIncome',
+        reason: 'unparsable-value',
+        raw: '△1,234',
+      }),
+      contains: ['2021年度', '⑧営業利益', '数値として読めない値でした'],
+      notContains: ['unparsable-value'],
     },
   ];
 

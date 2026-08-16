@@ -24,6 +24,12 @@ const DURATION_CONTEXTS: readonly string[] = [
   'Prior4YearDuration',
 ];
 
+/**
+ * ⑧営業利益は損益計算書本表のみに載り、ハイライト表（5期分）を持たない（§2.9.2）。
+ * 添字0=当期・1=前期の2期のみ。
+ */
+const OPERATING_INCOME_CONTEXTS: readonly string[] = ['CurrentYearDuration', 'Prior1YearDuration'];
+
 /** 個別（非連結）のコンテキストサフィックス（§2.5） */
 const NON_CONSOLIDATED_SUFFIX = '_NonConsolidatedMember';
 
@@ -82,6 +88,30 @@ const NET_INCOME_CANDIDATES_CONSOLIDATED: readonly string[] = [
   'jpcrp_cor:NetIncomeLossSummaryOfBusinessResults',
 ];
 
+/**
+ * ⑧営業利益の候補要素ID（連結のみ）。フォールバック順（§2.9.2・§7.7）。
+ *
+ * 日本基準を先に試す: 9433（IFRS採用）は `jppfs_cor:OperatingIncome` の
+ * `CurrentYearDuration` 行自体が存在しないため、先に試しても `null` で確定せず
+ * 自然に次の候補（IFRS）へフォールバックする（§7.7 受入基準・`resolveElementId` の
+ * 「行が無ければ次の候補へ」という既存動作がそのまま活きる）。
+ *
+ * TODO(be-developer, 2026-08-16): この並び順（日本基準→IFRS）は§7.7の
+ * 「日本基準の候補を先に試して`null`で確定させないこと」という文言からの解釈であり、
+ * 配列そのもの（要素ID一覧・順序）の記載は設計書（§2.9.2・§7.7）に無い。既存の
+ * `REVENUE_CANDIDATES_CONSOLIDATED` 等と同じ並び方に倣った推測。
+ *
+ * TODO(be-developer, 2026-08-16): 個別（非連結）フォールバックは実装しない
+ * （`resolveElementId` へ `false` を渡す）。設計書（§2.9・§4.7）に明記が無いため、
+ * ⑤純利益（`NET_INCOME_CANDIDATES_CONSOLIDATED`。§4.1.1 決定で `false`）に倣った
+ * 推測。営業利益率(⑧)は「連結ベースの経営指標」という性質が EPS/売上高より
+ * ROE/純利益に近いと判断した。
+ */
+const OPERATING_INCOME_CANDIDATES_CONSOLIDATED: readonly string[] = [
+  'jppfs_cor:OperatingIncome',
+  'jpigp_cor:OperatingProfitLossIFRS',
+];
+
 /** ⑤自己資本（IFRS直接。円で取れる）の要素ID（§4.1.1） */
 const EQUITY_IFRS_ELEMENT_ID = 'jpcrp_cor:EquityAttributableToOwnersOfParentIFRSSummaryOfBusinessResults';
 
@@ -123,6 +153,8 @@ export interface ParsedSummaryCsv {
    * 取れなければ `null`。
    */
   readonly roePercentByOffset: readonly (number | null)[];
+  /** ⑧用。添字0=当期・1=前期のみ（長さ2固定。§4.8.3.1）。銭。取れなければ `null` */
+  readonly operatingIncomeSenByOffset: readonly (number | null)[];
   readonly balanceSheet: {
     readonly currentAssetsSen: number | null;
     readonly investmentSecuritiesSen: number | null;
@@ -291,19 +323,26 @@ function readCell(
   return sen;
 }
 
-/** 1回だけ解決した要素ID（連結/個別も固定済み）で5期分読む。他の要素IDへはフォールバックしない（§4.1 決定7） */
+/**
+ * 1回だけ解決した要素ID（連結/個別も固定済み）で `contexts` の期数分読む。
+ * 他の要素IDへはフォールバックしない（§4.1 決定7）。
+ *
+ * 期数は `contexts` の長さに従う（既定は `DURATION_CONTEXTS` の5期。⑧営業利益は
+ * `OPERATING_INCOME_CONTEXTS` の2期を渡す。§2.2 案A）。
+ */
 function readDurationSeries(
   rows: ReadonlyMap<string, CsvRow>,
   resolved: { readonly elementId: string; readonly individual: boolean } | null,
   field: EdinetImportDiagnosticField,
   expectedUnit: ExpectedUnit,
+  contexts: readonly string[] = DURATION_CONTEXTS,
 ): CellReadResult {
   if (resolved === null) {
-    return { senByOffset: [null, null, null, null, null], diagnostics: [] };
+    return { senByOffset: contexts.map(() => null), diagnostics: [] };
   }
 
   const diagnostics: SummaryCsvDiagnostic[] = [];
-  const senByOffset = DURATION_CONTEXTS.map((baseContext, offset) => {
+  const senByOffset = contexts.map((baseContext, offset) => {
     const context = resolved.individual ? `${baseContext}${NON_CONSOLIDATED_SUFFIX}` : baseContext;
     const row = rows.get(`${resolved.elementId} ${context}`);
     if (row === undefined) return null; // その年度の行が無い。固定した要素IDへの忠実さを守り null にする
@@ -523,10 +562,25 @@ export function parseSummaryCsv(text: string): ParsedSummaryCsv {
     equitySenByOffset,
   );
 
+  const operatingIncomeResolved = resolveElementId(
+    rows,
+    OPERATING_INCOME_CANDIDATES_CONSOLIDATED,
+    false,
+  );
+  const operatingIncomeResult = readDurationSeries(
+    rows,
+    operatingIncomeResolved,
+    'operatingIncome',
+    { unit: YEN_UNIT },
+    OPERATING_INCOME_CONTEXTS,
+  );
+  diagnostics.push(...operatingIncomeResult.diagnostics);
+
   return {
     epsSenByOffset: epsResult.senByOffset,
     revenueSenByOffset: revenueResult.senByOffset,
     roePercentByOffset,
+    operatingIncomeSenByOffset: operatingIncomeResult.senByOffset,
     balanceSheet: { currentAssetsSen, investmentSecuritiesSen },
     diagnostics,
   };
