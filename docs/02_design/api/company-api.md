@@ -1,14 +1,20 @@
 # 銘柄・スコアリング API 仕様
 
-> ステータス: 🟢 実装済み（2026-07-28。IRバンク・Yahoo取り込みの契約記載は2026-08-04追加。
-> ③ 実績配当性向・`useActualForScoring` の契約記載は2026-08-06追加。
-> EDINET 取り込み（`GET /api/edinet/:code`）の契約記載は2026-08-09追加）
+> ステータス: 🟢 既存部分は実装済み（2026-07-28）／🟡 検索・ページング・配当履歴は設計のみ（2026-08-17追加）
 > 実装: `src/handler/app.ts` / DTO: `src/handler/dto/company-input.ts`, `src/handler/dto/price-input.ts`,
 > `src/handler/dto/irbank-import.ts`, `src/handler/dto/market-data-import.ts`,
 > `src/handler/dto/edinet-import.ts`
 >
 > 管理用の `POST /api/admin/edinet/index/refresh`（docIDインデックスのバックフィル）は
 > **この文書では未記載**。別タスクで起こす。
+
+## 変更履歴
+
+- **2026-08-17**（T-077）: `GET /api/companies` に検索・ソート・サーバサイドページングを追加。
+  `ScoringResponse` に `priceSen`/`per`/`pbr`（数値）を追加。
+  `GET /api/companies/:code/dividends`（配当年次履歴）を新規追加。
+  [search-page.md](../ui/pages/search-page.md)・[analysis-dialog.md](../ui/pages/analysis-dialog.md)
+  が要求していた項目（§データ取得（API要件））に対応
 
 ## 共通仕様
 
@@ -91,6 +97,42 @@
 
 保存済み銘柄の一覧（要約）。1000社規模を想定し、明細は含めない read model。
 
+> 🟡 **検索・ソート・ページングは 2026-08-17 追加**（T-077）。
+> [search-page.md](../ui/pages/search-page.md) §2・§8 の要求に対応する。
+
+クエリパラメータ:
+
+| 項目      | 制約                                                                                                                                                                                                   | 既定               |
+| :-------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------- |
+| `q`       | 任意。銘柄コード・銘柄名の部分一致（大文字小文字を区別しない）                                                                                                                                         | 空（絞り込まない） |
+| `sort`    | 任意。`created_desc` / `score_desc` / `score_asc` / `code_asc`。**未知の値は既定に倒す**（400 にしない。`useActualForScoring` 以外の既存クエリと違う扱いだが、検索は誤入力頻度が高いフィールドのため） | `created_desc`     |
+| `page`    | 任意。1以上の整数。0以下・非数値は 1 に倒す                                                                                                                                                            | `1`                |
+| `perPage` | 任意。1〜100 の整数。範囲外は既定に丸める（`records`/`dividends` の「最大60件」と同様、上限を設ける）                                                                                                  | `15`               |
+
+- `sort=score_desc`/`score_asc` は `score_cards.total_score` でソートする。
+  **`companies`・`score_cards` の JOIN 1クエリで行い、クライアント側で並べ替えない**
+  （`.claude/rules/backend.md`「一覧取得は1クエリか JOIN で済ませる」）
+- `sort=created_desc` は `companies.fetched_at` の降順、`sort=code_asc` は `companies.code` の昇順
+
+> ⚠️ **一覧の総合点は `score_cards`（保存済みスナップショット）、詳細（`GET /api/companies/:code`）
+> の総合点は生データからの毎回再採点。この2つは意図的に異なる情報源であり、
+> スコアリングロジックを変更した直後は一時的に食い違う**（T-088レビューで指摘。
+> 2026-08-17追記）。
+>
+> - **一覧が毎回全銘柄を再採点しない理由:** `sort=score_desc` はソート後にページングするため、
+>   全銘柄の総合点が確定していないとページ N を正しく返せない。1000社規模を毎リクエスト
+>   再計算するのは Workers の CPU予算（T-063の実測で判明した制約）に照らして現実的でない
+> - **解消される契機:** 対象銘柄が `POST /api/companies` で再解析されると `score_cards` が
+>   更新され、一覧側も最新値になる。スコアリングロジックを変更しただけで銘柄を
+>   再解析していない間は、一覧＝旧ロジックの値、詳細＝新ロジックの値、という
+>   食い違いが残る（`calc_version` で検知は可能だが、検知後の自動再計算は未実装。
+>   [schema.md §未実装・検討事項](../database/schema.md) に記録）
+> - **これは実装前に解消すべき矛盾ではなく、性能とのトレードオフとして許容する。**
+>   ただし [schema.md](../database/schema.md) にも同じ説明を置き、
+>   「なぜ2系統あるのか」がどちらの文書からも追える状態にする
+
+レスポンス（200）:
+
 ```json
 {
   "companies": [
@@ -101,11 +143,29 @@
       "maxTotalScore": 100,
       "effectiveMetricCount": 10,
       "totalMetricCount": 10,
-      "fetchedAt": "2026-07-28T00:00:00.000Z"
+      "fetchedAt": "2026-07-28T00:00:00.000Z",
+      "priceSen": 425000,
+      "dividendYieldValue": 318,
+      "payoutRatioValue": 32.4
     }
-  ]
+  ],
+  "page": 1,
+  "perPage": 15,
+  "total": 42
 }
 ```
+
+| 追加フィールド       | 単位                                                                         | `null` の意味 |
+| :------------------- | :--------------------------------------------------------------------------- | :------------ |
+| `priceSen`           | 銭                                                                           | 株価が未入力  |
+| `dividendYieldValue` | **1/100%**（`ScoringResponse.metrics[].value` の ⑩ と同じ表現。500 = 5.00%） | ⑩ が判定不能  |
+| `payoutRatioValue`   | %（`ScoringResponse.metrics[].value` の ③ と同じ表現。そのまま% として読む） | ③ が判定不能  |
+
+- `priceSen` は `companies.price_sen`、`dividendYieldValue`/`payoutRatioValue` は
+  `transformed_metrics`（`metric_key IN ('dividendYield', 'payoutRatio')`）から取る。
+  **`companies` × `score_cards` × `transformed_metrics` を1クエリの JOIN で取得する**
+  （N+1 を作らない。`.claude/rules/backend.md`）
+- `total` はフィルタ後（`q` 適用後）の総件数。ページング UI の「N / total ページ」計算に使う
 
 ## GET /api/irbank/:code
 
@@ -295,16 +355,16 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 }
 ```
 
-| フィールド               | 意味                                                                                                                                                     |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `years`                  | 年度降順。最大6件。`epsSen` / `revenueSen` は銭。取れなければ `null`（**無配・0円と `null` は別物**）                                                    |
-| `years[].roePercent`     | ⑤用。**%**（自算値）。純利益÷期末自己資本で自算した ROE。**EDINETの公表列ではない**（あちらは期首期末平均基準で最大 1.35pp ずれる）。取れなければ `null` |
-| `years[].operatingMarginPercent` | ⑧用。**%**（自算値）。その有報のハイライト表内で導出した営業利益率。書類をまたいで分子・分母を組み合わせない。取れなければ `null`             |
-| `years[].sourceDocId`    | その年度の値をどの有報（docID）から採ったか                                                                                                              |
-| `epsHistoryRestated`     | ④用。重複4期の突き合わせで遡及修正が検出されたか。比較できなければ `false`                                                                               |
-| `revenueHistoryRestated` | ⑦用。同上                                                                                                                                                |
-| `balanceSheet`           | ⑥用。前期末時点。取得できなければ `null`。IFRS企業は `investmentSecuritiesSen` が項目単位で `null` になりうる                                            |
-| `diagnostics`            | 取り込めなかった値の記録。**捨てない・丸めない・0件でも空配列でキーを残す**（`GET /api/market-data/:code` と同じ）                                       |
+| フィールド                       | 意味                                                                                                                                                     |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `years`                          | 年度降順。最大6件。`epsSen` / `revenueSen` は銭。取れなければ `null`（**無配・0円と `null` は別物**）                                                    |
+| `years[].roePercent`             | ⑤用。**%**（自算値）。純利益÷期末自己資本で自算した ROE。**EDINETの公表列ではない**（あちらは期首期末平均基準で最大 1.35pp ずれる）。取れなければ `null` |
+| `years[].operatingMarginPercent` | ⑧用。**%**（自算値）。その有報のハイライト表内で導出した営業利益率。書類をまたいで分子・分母を組み合わせない。取れなければ `null`                        |
+| `years[].sourceDocId`            | その年度の値をどの有報（docID）から採ったか                                                                                                              |
+| `epsHistoryRestated`             | ④用。重複4期の突き合わせで遡及修正が検出されたか。比較できなければ `false`                                                                               |
+| `revenueHistoryRestated`         | ⑦用。同上                                                                                                                                                |
+| `balanceSheet`                   | ⑥用。前期末時点。取得できなければ `null`。IFRS企業は `investmentSecuritiesSen` が項目単位で `null` になりうる                                            |
+| `diagnostics`                    | 取り込めなかった値の記録。**捨てない・丸めない・0件でも空配列でキーを残す**（`GET /api/market-data/:code` と同じ）                                       |
 
 `diagnostics[]` の各要素（`EdinetImportDiagnostic`。domain 型をそのまま公開する）:
 
@@ -397,6 +457,11 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
   "payoutRatioSource": "forecast",
   "payoutRatioForecast": { "score": 8, "value": 32.1, "unavailableReason": null },
   "payoutRatioActual": { "score": 6, "value": 41.5, "unavailableReason": null },
+  "perSource": "forecast-eps",
+  "pbrSource": "actual-bps",
+  "priceSen": 425000,
+  "per": 14.2,
+  "pbr": 2.1,
   "fetchedAt": "2026-07-28T00:00:00.000Z",
   "metrics": [
     {
@@ -411,6 +476,13 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
   ]
 }
 ```
+
+> 🟡 **`priceSen`/`per`/`pbr` は 2026-08-17 追加**（T-077）。
+> [analysis-dialog.md §7](../ui/pages/analysis-dialog.md) の要求に対応する。
+> 従来 `perSource`/`pbrSource`（出所ラベル）しか返しておらず、**近似値の実数そのものが
+> フロントから見えなかった**（`companies.per`/`companies.pbr` には既にある値）。
+> `priceSen`/`per`/`pbr` は `null` を返しうる（未入力・未算出）。
+> 単位は `per`/`pbr` とも倍（`companies` テーブルと同じ `real`）。
 
 > **判定不能な指標は `score`/`value` が `null` になり、`unavailableReason` に理由コードが入る。**
 > `0` を返すことはない（`.claude/rules/frontend.md`「データが無い場合に0を表示しない」）。
@@ -444,6 +516,48 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
   （文言:「useActualForScoring は true か false で指定する」。`src/handler/app.ts`）
 - 404: 該当コードなし
 
+## GET /api/companies/:code/dividends
+
+> 🟡 **2026-08-17 新規追加**（T-077）。[analysis-dialog.md §5.1・§5.2](../ui/pages/analysis-dialog.md)
+> の指標詳細（①配当推移の折れ線グラフ、②連続非減配年数のリスト）が使う。
+
+保存済みの配当履歴を**年度昇順**（古い年→新しい年）で返す。グラフ・リストの描画順に合わせるため、
+他の一覧エンドポイント（降順が既定）とは向きが逆であることに注意。
+
+**概要（`GET /api/companies/:code`）とは別エンドポイントにした。** 指標詳細を開かない限り
+配当履歴は不要で、一覧のペイロードを重くしないため
+（[analysis-dialog.md §7](../ui/pages/analysis-dialog.md) が検討した2案のうち
+「指標詳細を開いたときだけ追加取得する」を採用）。
+
+レスポンス（200）:
+
+```json
+{
+  "dividends": [
+    { "fiscalYear": 2019, "amountSen": 5000, "isForecast": false },
+    { "fiscalYear": 2026, "amountSen": 10000, "isForecast": true }
+  ]
+}
+```
+
+| フィールド   | 意味                                                      |
+| :----------- | :-------------------------------------------------------- |
+| `fiscalYear` | 決算年度                                                  |
+| `amountSen`  | 年間配当合計（銭）。`null`＝データなし。`0`＝無配（別物） |
+| `isForecast` | `true` なら予想（年ラベルに「（予想）」を付ける）         |
+
+**同一年度に複数区分（`forecast`/`revised`/`actual`）の行がある場合、
+`actual` > `revised` > `forecast` の優先順位で1件だけ選ぶ**
+（1年度につき1点でグラフ・リストを描くため。⑩配当利回りの採用ルール
+（`dividend-yield-scoring.md`「最新年度に予想があれば採用」）とは**別の規則**であることに注意。
+あちらは「今年何を採点に使うか」、こちらは「過去の年度をどう1点に集約するか」という
+異なる目的の優先順位）。
+
+- 404: 該当コードなし
+- 400: 銘柄コードの形式不正
+
+---
+
 ## DELETE /api/companies/:code
 
 - 204: 削除成功
@@ -456,12 +570,20 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 ## この API に無いもの（意図的）
 
 - **ウォッチリスト** — 要件に対応する機能が無い。`user-api.md`（旧draft）にあった案は不採用
-- **スクリーニング・フィルタ・ページング** — `GET /api/companies` は現状ページングなし。
-  1000社規模での応答時間は未検証（§ 移行計画 残課題）
-- **認証** — 未決（T-003/T-004）。全エンドポイントが誰からでも呼べる前提
+- ~~スクリーニング・フィルタ・ページング~~ — ✅ **2026-08-17 解消。** `GET /api/companies` に
+  `q`/`sort`/`page`/`perPage` を追加した（T-077）
+- **認証は意図的に付けない。** [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md) の
+  決定どおり、検索（`GET /api/companies` 系）は guest（未ログイン）でも使える公開画面
+  （[screen-list.md](../ui/screen-list.md) §2）が呼ぶため。**銘柄の登録・更新・削除
+  （`POST`/`DELETE`）は T-092（ルートガード実装）で admin 限定にする。それまでは
+  この文書の記載どおり誰からでも呼べる**（[ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)
+  制約1の指摘どおり、現状は無防備）
 
 ## 関連ドキュメント
 
 - [scoring-requirements.md](../../01_requirements/scoring-requirements.md) — 10指標の定義
 - [schema.md](../database/schema.md) — 永続化先のテーブル定義
 - [domain-model.md](../../domain-model.md) — ドメインモデル全体
+- [search-page.md](../ui/pages/search-page.md) — 検索・ソート・ページングを使う画面（T-072）
+- [analysis-dialog.md](../ui/pages/analysis-dialog.md) — `priceSen`/`per`/`pbr`・配当履歴を使う画面（T-073）
+- [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md) — 認証・admin限定の方針

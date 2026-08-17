@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#0e1014;font-family:'Zen Kaku Gothic New',system-ui,-apple-system,'Hiragino Sans',sans-serif;color:#e9ebef;-webkit-font-smoothing:antialiased}
+  a{color:#4a80f0;text-decoration:none}
+  a:hover{color:#6f9bf5}
+  table{border-collapse:collapse}
+  button{font-family:inherit}
+  input{font-family:inherit}
+  *{box-sizing:border-box}
+</style>
+</helmet>
+<div style="max-width:1160px;margin:0 auto;min-height:1024px;display:flex;flex-direction:column">
+
+  <!-- HEADER -->
+  <header style="padding:20px 32px 0">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div style="display:flex;align-items:center;gap:11px">
+        <div style="width:9px;height:26px;border-radius:2px;background:#37b09a"></div>
+        <h1 style="margin:0;font-size:19px;font-weight:700;letter-spacing:.01em">高配当銘柄スコアリング</h1>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="display:flex;align-items:center;gap:7px">
+          <span style="font-size:10.5px;color:#626c7a;font-family:'Roboto Mono',monospace">デモ表示</span>
+          <div style="display:flex;background:#0e1014;border:1px solid #262c37;border-radius:8px;overflow:hidden">
+            <sc-for list="{{ roleOptions }}" as="r" hint-placeholder-count="3">
+              <button onClick="{{ r.onClick }}" style="{{ r.style }}">{{ r.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+        <sc-if value="{{ isGuest }}" hint-placeholder-val="{{ true }}">
+          <button onClick="{{ goAuth }}" style="background:#4a80f0;color:#0a1220;border:none;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:700;cursor:pointer">ログイン</button>
+        </sc-if>
+        <sc-if value="{{ isLoggedIn }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="display:flex;align-items:center;gap:7px;font-size:12px;color:#cdd4de">
+              <span style="width:26px;height:26px;border-radius:50%;background:#232a35;display:flex;align-items:center;justify-content:center;font-size:11px">{{ userInitial }}</span>
+              {{ userEmail }}
+            </span>
+            <sc-if value="{{ isAdmin }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:10px;color:#d6a13c;background:rgba(214,161,60,0.12);border:1px solid rgba(214,161,60,0.32);border-radius:5px;padding:3px 7px">管理者</span>
+            </sc-if>
+            <button onClick="{{ onLogout }}" style="background:transparent;border:1px solid #333b48;color:#98a1b0;border-radius:8px;padding:8px 13px;font-size:12px;cursor:pointer">ログアウト</button>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+    <nav aria-label="主要ナビゲーション" style="display:flex;gap:2px;margin-top:16px;border-bottom:1px solid #262c37;flex-wrap:wrap">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+        <button aria-current="{{ t.current }}" onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.label }}</button>
+      </sc-for>
+    </nav>
+  </header>
+
+  <main style="flex:1;padding:26px 32px 40px">
+
+    <!-- ===== SEARCH ===== -->
+    <sc-if value="{{ isSearch }}" hint-placeholder-val="{{ true }}">
+    <div>
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:18px;flex-wrap:wrap">
+        <div style="flex:1;min-width:280px;max-width:460px">
+          <label style="display:block;font-size:11px;color:#98a1b0;margin-bottom:7px">保存済み銘柄を検索</label>
+          <span style="display:flex;align-items:center;gap:10px;background:#161a20;border:1px solid #333b48;border-radius:10px;padding:0 14px">
+            <span style="color:#626c7a;font-size:15px">🔍</span>
+            <input value="{{ query }}" onInput="{{ onSearch }}" placeholder="コード・銘柄名で絞り込み" style="flex:1;background:transparent;border:none;outline:none;color:#e9ebef;font-size:14px;padding:12px 0" />
+          </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:12px;color:#98a1b0;font-family:'Roboto Mono',monospace;white-space:nowrap;flex:none">{{ resultLabel }}</span>
+          <select value="{{ sort }}" onChange="{{ onSort }}" style="background:#161a20;border:1px solid #333b48;border-radius:9px;color:#e9ebef;font-size:12.5px;padding:11px 12px;cursor:pointer;flex:none">
+            <sc-for list="{{ sortOptions }}" as="o" hint-placeholder-count="4">
+              <option value="{{ o.key }}">{{ o.label }}</option>
+            </sc-for>
+          </select>
+        </div>
+      </div>
+
+      <sc-if value="{{ hasResults }}" hint-placeholder-val="{{ true }}">
+      <div style="border:1px solid #262c37;border-radius:12px;overflow:hidden;background:#161a20">
+        <table style="width:100%;font-size:13px">
+          <thead>
+            <tr style="color:#626c7a;font-size:10.5px;letter-spacing:.04em">
+              <th style="text-align:left;padding:12px 20px;font-weight:500">銘柄</th>
+              <th style="text-align:left;padding:12px 12px;font-weight:500;width:132px">総合点</th>
+              <th style="text-align:right;padding:12px 14px;font-weight:500">配当利回り</th>
+              <th style="text-align:right;padding:12px 14px;font-weight:500">配当性向</th>
+              <th style="text-align:right;padding:12px 20px;font-weight:500">株価</th>
+              <th style="width:34px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{ savedRows }}" as="r" hint-placeholder-count="10">
+              <tr onClick="{{ r.onShow }}" tabIndex="0" onKeyDown="{{ r.onKey }}" role="button" aria-label="{{ r.aria }}" style="border-top:1px solid #1e242e;cursor:pointer;outline:none" style-hover="background:#1a1f28" style-focus="background:#1a1f28;box-shadow:inset 3px 0 0 #4a80f0">
+                <td style="padding:14px 20px">
+                  <div style="font-size:14.5px;font-weight:500;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.name }}">{{ r.name }}</div>
+                  <div style="font-size:11px;color:#626c7a;font-family:'Roboto Mono',monospace;margin-top:2px">{{ r.code }}</div>
+                </td>
+                <td style="padding:14px 12px">
+                  <div style="display:flex;align-items:baseline;gap:3px">
+                    <span style="font-size:23px;font-weight:700;font-family:'Roboto Mono',monospace;color:#e9ebef;line-height:1">{{ r.score }}</span>
+                    <span style="font-size:10.5px;color:#626c7a">点</span>
+                  </div>
+                  <div style="height:4px;border-radius:2px;background:#262c37;overflow:hidden;margin-top:6px;width:92px">
+                    <div style="height:100%;width:{{ r.scoreW }};background:#c4ccd6;border-radius:2px"></div>
+                  </div>
+                </td>
+                <td style="padding:14px 14px;text-align:right;font-family:'Roboto Mono',monospace;font-size:13.5px;color:#e9ebef">{{ r.yld }}</td>
+                <td style="padding:14px 14px;text-align:right;font-family:'Roboto Mono',monospace;font-size:13px;color:#98a1b0">{{ r.payout }}</td>
+                <td style="padding:14px 20px;text-align:right;font-family:'Roboto Mono',monospace;font-size:13px;color:#98a1b0">{{ r.price }}</td>
+                <td style="padding:14px 14px 14px 0;text-align:right;color:#4a5563;font-size:16px">›</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;flex-wrap:wrap;gap:12px">
+        <span style="font-size:12px;color:#626c7a;font-family:'Roboto Mono',monospace">{{ pageLabel }}</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button onClick="{{ onPrev }}" style="{{ prevStyle }}">← 前へ</button>
+          <span style="font-size:12.5px;color:#98a1b0;font-family:'Roboto Mono',monospace;padding:0 6px">{{ pageNum }} / {{ pageCount }}</span>
+          <button onClick="{{ onNext }}" style="{{ nextStyle }}">次へ →</button>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ noResults }}" hint-placeholder-val="{{ false }}">
+      <div style="border:1px dashed #333b48;border-radius:12px;padding:56px 24px;text-align:center;background:#12151b">
+        <div style="font-size:15px;font-weight:500;color:#cdd4de;margin-bottom:6px">「{{ query }}」に一致する銘柄はありません</div>
+        <div style="font-size:12.5px;color:#626c7a">コードは4桁の数字、銘柄名は一部でも検索できます。</div>
+      </div>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- ===== PORTFOLIO ===== -->
+    <sc-if value="{{ isPortfolio }}" hint-placeholder-val="{{ false }}">
+    <div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;flex-wrap:wrap">
+        <sc-for list="{{ pfTabs }}" as="p" hint-placeholder-count="3">
+          <button onClick="{{ p.onClick }}" style="{{ p.style }}">{{ p.name }}</button>
+        </sc-for>
+        <button style="background:transparent;border:1px dashed #333b48;color:#98a1b0;border-radius:9px;padding:8px 14px;font-size:12.5px;cursor:pointer">＋ 追加</button>
+        <span style="font-size:11px;color:#626c7a;font-family:'Roboto Mono',monospace;margin-left:2px">{{ pfCount }} / 10</span>
+      </div>
+
+      <!-- hero: valuation + P/L -->
+      <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:16px;margin-bottom:14px">
+        <div style="background:#161a20;border:1px solid #262c37;border-radius:14px;padding:22px 24px">
+          <div style="font-size:12px;color:#98a1b0;margin-bottom:10px">評価額合計</div>
+          <div style="font-size:38px;font-weight:700;font-family:'Roboto Mono',monospace;line-height:1">{{ pf.totalValue }}</div>
+          <div style="font-size:12px;color:#626c7a;margin-top:10px">取得原価 {{ pf.totalCost }}</div>
+        </div>
+        <div style="background:#161a20;border:1px solid #262c37;border-radius:14px;padding:22px 24px">
+          <div style="font-size:12px;color:#98a1b0;margin-bottom:10px">評価損益</div>
+          <div style="font-size:30px;font-weight:700;font-family:'Roboto Mono',monospace;line-height:1;color:{{ pf.plColor }}">{{ pf.totalPL }}</div>
+          <div style="font-size:12.5px;margin-top:10px;color:{{ pf.plColor }}">{{ pf.totalPLpct }}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:22px">
+        <sc-for list="{{ pfSummary }}" as="c" hint-placeholder-count="3">
+          <div style="background:#12151b;border:1px solid #262c37;border-radius:12px;padding:15px 18px">
+            <div style="font-size:11px;color:#98a1b0;margin-bottom:7px">{{ c.label }}</div>
+            <div style="font-size:19px;font-weight:700;font-family:'Roboto Mono',monospace">{{ c.value }}</div>
+            <div style="font-size:10.5px;color:#626c7a;margin-top:5px">{{ c.sub }}</div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="font-size:11px;color:#626c7a;margin-bottom:8px">保有銘柄 · {{ dataTime }}時点</div>
+      <div style="border:1px solid #262c37;border-radius:12px;overflow:hidden;background:#161a20">
+        <table style="width:100%;font-size:13px">
+          <thead>
+            <tr style="color:#626c7a;font-size:10.5px">
+              <th style="text-align:left;padding:11px 18px;font-weight:500">銘柄</th>
+              <th style="text-align:right;padding:11px 14px;font-weight:500">保有数量</th>
+              <th style="text-align:right;padding:11px 14px;font-weight:500">取得単価</th>
+              <th style="text-align:right;padding:11px 14px;font-weight:500">現在株価</th>
+              <th style="text-align:right;padding:11px 14px;font-weight:500">評価額</th>
+              <th style="text-align:right;padding:11px 14px;font-weight:500">評価損益</th>
+              <th style="text-align:right;padding:11px 14px;font-weight:500">利回り</th>
+              <th style="text-align:right;padding:11px 18px;font-weight:500">スコア</th>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{ pfHoldings }}" as="h" hint-placeholder-count="4">
+              <tr onClick="{{ h.onShow }}" tabIndex="0" role="button" style="border-top:1px solid #1e242e;cursor:pointer" style-hover="background:#1a1f28">
+                <td style="padding:13px 18px">
+                  <div style="font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ h.name }}">{{ h.name }}</div>
+                  <div style="font-size:10.5px;color:#626c7a;font-family:'Roboto Mono',monospace">{{ h.code }}</div>
+                </td>
+                <td style="padding:13px 14px;text-align:right;font-family:'Roboto Mono',monospace">{{ h.qty }}</td>
+                <td style="padding:13px 14px;text-align:right;font-family:'Roboto Mono',monospace;color:#98a1b0">{{ h.avgCost }}</td>
+                <td style="padding:13px 14px;text-align:right;font-family:'Roboto Mono',monospace">{{ h.price }}</td>
+                <td style="padding:13px 14px;text-align:right;font-family:'Roboto Mono',monospace">{{ h.value }}</td>
+                <td style="padding:13px 14px;text-align:right;font-family:'Roboto Mono',monospace;color:{{ h.plColor }}">{{ h.pl }}</td>
+                <td style="padding:13px 14px;text-align:right;font-family:'Roboto Mono',monospace;color:#98a1b0">{{ h.yld }}</td>
+                <td style="padding:13px 18px;text-align:right;font-family:'Roboto Mono',monospace;font-weight:700">{{ h.score }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-top:1px solid #1e242e">
+          <button style="background:transparent;border:1px dashed #333b48;color:#98a1b0;border-radius:7px;padding:8px 14px;font-size:12px;cursor:pointer">＋ 銘柄を追加</button>
+          <span style="font-size:11px;color:#626c7a;font-family:'Roboto Mono',monospace">{{ pfHoldingsCount }} / 100 銘柄</span>
+        </div>
+      </div>
+      <p style="font-size:11px;color:#626c7a;margin-top:12px;line-height:1.7">平均利回り（評価額）＝各銘柄の利回りを評価額で加重平均、取得単価利回り＝年間配当÷取得原価、スコア平均＝保有数量に依らない単純平均。評価損益は現在株価と取得単価の差で、▲が含み益・▼が含み損です。</p>
+    </div>
+    </sc-if>
+
+    <!-- ===== CUSTOMIZE ===== -->
+    <sc-if value="{{ isCustom }}" hint-placeholder-val="{{ false }}">
+    <div style="max-width:880px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+        <h2 style="margin:0;font-size:16px;font-weight:700">指標カスタマイズ</h2>
+        <span style="font-size:12px;color:{{ selCountColor }};font-family:'Roboto Mono',monospace">選択中 {{ selCount }} / 10（最小 5）</span>
+      </div>
+      <p style="margin:0 0 8px;font-size:12.5px;color:#98a1b0;line-height:1.6">採点に使う指標を5〜10個選び、各指標が満点（10点）となる基準値を設定します。設定は個人ごとに保存されます。</p>
+      <sc-if value="{{ selWarn }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:8px;background:rgba(214,161,60,0.1);border:1px solid rgba(214,161,60,0.3);border-radius:8px;padding:10px 14px;font-size:12px;color:#e0b866;margin-bottom:14px">⚠ 指標は最低5個選択してください。</div>
+      </sc-if>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+        <sc-for list="{{ customRows }}" as="c" hint-placeholder-count="10">
+          <div style="display:flex;align-items:center;gap:16px;background:{{ c.bg }};border:1px solid {{ c.borderColor }};border-radius:10px;padding:13px 18px">
+            <button onClick="{{ c.onToggle }}" role="switch" aria-checked="{{ c.selected }}" style="{{ c.checkStyle }}">{{ c.checkMark }}</button>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13.5px;font-weight:500;color:{{ c.nameColor }}">{{ c.name }}</div>
+              <div style="font-size:11px;color:#626c7a;font-family:'Roboto Mono',monospace;margin-top:3px">{{ c.constraint }}</div>
+            </div>
+            <sc-if value="{{ c.configurable }}" hint-placeholder-val="{{ true }}">
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:10.5px;color:#98a1b0;width:200px">
+                満点（10点）となる基準値
+                <span style="display:flex;align-items:center;gap:8px;background:#0e1014;border:1px solid {{ c.inputBorder }};border-radius:7px;padding:0 10px">
+                  <input type="number" defaultValue="{{ c.full }}" step="{{ c.step }}" min="{{ c.min }}" max="{{ c.max }}" disabled="{{ c.disabled }}" style="{{ c.inputStyle }}" />
+                  <span style="font-size:11px;color:#626c7a">{{ c.unit }}</span>
+                </span>
+              </label>
+            </sc-if>
+            <sc-if value="{{ c.autoCalc }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:11px;color:#98a1b0;background:#12151b;border:1px solid #262c37;border-radius:6px;padding:8px 12px;width:200px;text-align:center">配当利回り・増配率から自動算出</span>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:22px">
+        <button style="{{ saveStyle }}">設定を保存</button>
+        <button style="background:transparent;color:#98a1b0;border:1px solid #333b48;border-radius:8px;padding:11px 22px;font-size:13px;cursor:pointer">初期設定に戻す</button>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ===== CRITERIA ===== -->
+    <sc-if value="{{ isCriteria }}" hint-placeholder-val="{{ false }}">
+    <div>
+      <h2 style="margin:0 0 4px;font-size:16px;font-weight:700">評価基準</h2>
+      <p style="margin:0 0 22px;font-size:12.5px;color:#98a1b0">各指標の計算式と、条件ごとの配点です。境界値は「下限以上・上限未満」で判定します。現在は10指標すべてが自動計算されます。</p>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
+        <sc-for list="{{ criteria }}" as="c" hint-placeholder-count="10">
+          <div style="background:#161a20;border:1px solid #262c37;border-radius:12px;padding:18px 20px">
+            <div style="font-size:14px;font-weight:700;margin-bottom:7px">{{ c.name }}</div>
+            <div style="font-size:11.5px;color:#98a1b0;line-height:1.6;margin-bottom:12px">{{ c.desc }}</div>
+            <div style="background:#0e1014;border:1px solid #262c37;border-radius:8px;padding:9px 12px;font-family:'Roboto Mono',monospace;font-size:11.5px;color:#cdd4de;margin-bottom:12px">{{ c.formula }}</div>
+            <table style="width:100%;font-size:11.5px">
+              <tbody>
+                <sc-for list="{{ c.bands }}" as="b" hint-placeholder-count="4">
+                  <tr style="border-top:1px solid #1e242e">
+                    <td style="padding:7px 6px;color:#98a1b0;font-family:'Roboto Mono',monospace">{{ b.cond }}</td>
+                    <td style="padding:7px 6px;text-align:right;font-family:'Roboto Mono',monospace;font-weight:700;color:#c4ccd6;width:44px">{{ b.pts }}</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ===== ADMIN: 銘柄登録 ===== -->
+    <sc-if value="{{ isInput }}" hint-placeholder-val="{{ false }}">
+    <div style="max-width:760px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <h2 style="margin:0;font-size:16px;font-weight:700">銘柄登録</h2>
+        <span style="font-size:10px;color:#d6a13c;background:rgba(214,161,60,0.12);border:1px solid rgba(214,161,60,0.3);border-radius:5px;padding:3px 8px">管理者のみ</span>
+      </div>
+      <p style="margin:0 0 22px;font-size:12.5px;color:#98a1b0">会社の生値を入力すると10指標を自動採点します。データが無い項目は空欄のままにしてください（0 は入力しないでください）。</p>
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <fieldset style="border:1px solid #262c37;border-radius:10px;padding:18px 20px;margin:0;background:#161a20">
+          <legend style="font-size:12px;font-weight:500;color:#cdd4de;padding:0 6px">基本情報</legend>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px;margin-top:4px">
+            <sc-for list="{{ basicFields }}" as="f" hint-placeholder-count="4">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#98a1b0">
+                {{ f.label }}
+                <span style="display:flex;align-items:center;gap:8px;background:#0e1014;border:1px solid #333b48;border-radius:7px;padding:9px 12px">
+                  <span style="flex:1;font-size:13px;color:#e9ebef;font-family:'Roboto Mono',monospace">{{ f.value }}</span>
+                  <span style="font-size:11px;color:#626c7a">{{ f.unit }}</span>
+                </span>
+              </label>
+            </sc-for>
+          </div>
+        </fieldset>
+        <fieldset style="border:1px solid #262c37;border-radius:10px;padding:18px 20px;margin:0;background:#161a20">
+          <legend style="font-size:12px;font-weight:500;color:#cdd4de;padding:0 6px">年度別データ</legend>
+          <table style="width:100%;font-size:12.5px;margin-top:6px">
+            <thead>
+              <tr style="color:#626c7a;font-size:11px">
+                <th style="text-align:left;padding:8px 10px;font-weight:500">年度</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:500">1株配当（円）</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:500">EPS（円）</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:500">営業利益（百万円）</th>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ yearRows }}" as="y" hint-placeholder-count="4">
+                <tr style="border-top:1px solid #1e242e">
+                  <td style="padding:9px 10px;font-family:'Roboto Mono',monospace">{{ y.yr }}</td>
+                  <td style="padding:5px 10px"><span style="display:block;background:#0e1014;border:1px solid #333b48;border-radius:6px;padding:7px 10px;text-align:right;font-family:'Roboto Mono',monospace">{{ y.div }}</span></td>
+                  <td style="padding:5px 10px"><span style="display:block;background:#0e1014;border:1px solid #333b48;border-radius:6px;padding:7px 10px;text-align:right;font-family:'Roboto Mono',monospace">{{ y.eps }}</span></td>
+                  <td style="padding:5px 10px"><span style="display:block;background:#0e1014;border:1px solid #333b48;border-radius:6px;padding:7px 10px;text-align:right;font-family:'Roboto Mono',monospace">{{ y.op }}</span></td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </fieldset>
+        <div style="display:flex;gap:12px">
+          <button style="background:#4a80f0;color:#0a1220;border:none;border-radius:8px;padding:11px 22px;font-size:13px;font-weight:700;cursor:pointer">解析して保存</button>
+          <button style="background:transparent;color:#98a1b0;border:1px solid #333b48;border-radius:8px;padding:11px 22px;font-size:13px;cursor:pointer">クリア</button>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ===== AUTH ===== -->
+    <sc-if value="{{ isAuth }}" hint-placeholder-val="{{ false }}">
+    <div style="max-width:400px;margin:20px auto 0">
+      <div style="display:flex;background:#0e1014;border:1px solid #262c37;border-radius:9px;overflow:hidden;margin-bottom:22px">
+        <button onClick="{{ setLogin }}" style="{{ loginTabStyle }}">ログイン</button>
+        <button onClick="{{ setSignup }}" style="{{ signupTabStyle }}">アカウント作成</button>
+      </div>
+      <div style="background:#161a20;border:1px solid #262c37;border-radius:14px;padding:26px 26px 24px">
+        <h2 style="margin:0 0 4px;font-size:17px;font-weight:700">{{ authTitle }}</h2>
+        <p style="margin:0 0 20px;font-size:12px;color:#98a1b0">{{ authSub }}</p>
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#98a1b0">
+            メールアドレス
+            <input type="email" placeholder="you@example.com" style="background:#0e1014;border:1px solid #333b48;border-radius:8px;color:#e9ebef;font-size:13px;padding:11px 13px;outline:none" />
+          </label>
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#98a1b0">
+            パスワード
+            <input type="password" placeholder="8文字以上" style="background:#0e1014;border:1px solid #333b48;border-radius:8px;color:#e9ebef;font-size:13px;padding:11px 13px;outline:none" />
+          </label>
+          <sc-if value="{{ isSignup }}" hint-placeholder-val="{{ false }}">
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:#98a1b0">
+              パスワード（確認）
+              <input type="password" placeholder="もう一度入力" style="background:#0e1014;border:1px solid #333b48;border-radius:8px;color:#e9ebef;font-size:13px;padding:11px 13px;outline:none" />
+            </label>
+          </sc-if>
+        </div>
+        <button onClick="{{ doAuth }}" style="width:100%;background:#4a80f0;color:#0a1220;border:none;border-radius:8px;padding:12px;font-size:13.5px;font-weight:700;cursor:pointer;margin-top:20px">{{ authButton }}</button>
+        <p style="margin:14px 0 0;font-size:10.5px;color:#626c7a;line-height:1.7">パスワードはハッシュ化して保存され、平文では保持されません。ログインしなくても銘柄の検索は利用できます。</p>
+      </div>
+    </div>
+    </sc-if>
+  </main>
+
+  <!-- ===== ANALYSIS DIALOG ===== -->
+  <sc-if value="{{ modalOpen }}" hint-placeholder-val="{{ false }}">
+  <div role="presentation" onClick="{{ onCloseModal }}" style="position:fixed;inset:0;z-index:50;background:rgba(6,8,12,0.74);backdrop-filter:blur(3px);display:flex;align-items:flex-start;justify-content:center;padding:40px 24px;overflow:auto">
+    <div role="dialog" aria-modal="true" aria-label="解析結果" onClick="{{ stop }}" style="width:100%;max-width:940px;background:#12161d;border:1px solid #262c37;border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,0.6);overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 24px;border-bottom:1px solid #262c37">
+        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+          <h2 style="margin:0;font-size:17px;font-weight:700">{{ sel.name }}</h2>
+          <span style="font-size:13px;color:#98a1b0;font-family:'Roboto Mono',monospace">{{ sel.code }} · TSE · {{ sel.market }}</span>
+        </div>
+        <button onClick="{{ onCloseModal }}" aria-label="閉じる" style="background:transparent;border:1px solid #333b48;color:#cdd4de;border-radius:7px;width:32px;height:32px;font-size:16px;cursor:pointer;line-height:1">✕</button>
+      </div>
+
+      <div style="padding:22px 24px">
+        <!-- OVERVIEW -->
+        <sc-if value="{{ overviewMode }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:18px">
+          <!-- HERO: score + radar -->
+          <div style="display:grid;grid-template-columns:270px 1fr;gap:18px;align-items:stretch">
+            <div style="background:#161a20;border:1px solid #262c37;border-radius:12px;padding:22px">
+              <div style="font-size:12px;color:#98a1b0;margin-bottom:10px">総合スコア</div>
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <span style="font-size:52px;font-weight:700;font-family:'Roboto Mono',monospace;line-height:1">{{ sel.score }}</span>
+                <span style="font-size:17px;color:#626c7a;font-family:'Roboto Mono',monospace">/ 100</span>
+              </div>
+              <div style="height:8px;border-radius:5px;background:#262c37;overflow:hidden;margin-top:16px">
+                <div style="height:100%;width:{{ sel.scoreW }};background:#c4ccd6;border-radius:5px"></div>
+              </div>
+              <div style="font-size:11.5px;color:#626c7a;margin-top:10px">有効指標 {{ sel.valid }} 指標で算出</div>
+              <div style="height:1px;background:#262c37;margin:18px 0"></div>
+              <div style="display:flex;flex-direction:column;gap:9px">
+                <sc-for list="{{ basicStats }}" as="b" hint-placeholder-count="4">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px">
+                    <span style="color:#98a1b0">{{ b.label }}</span>
+                    <span style="font-family:'Roboto Mono',monospace;font-weight:500;color:{{ b.color }}">{{ b.value }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="height:1px;background:#262c37;margin:16px 0 12px"></div>
+              <label style="display:inline-flex;align-items:center;gap:9px;font-size:11.5px;color:#98a1b0;cursor:pointer">
+                <span style="width:32px;height:18px;border-radius:9px;background:#4a80f0;position:relative;display:inline-block;flex:none">
+                  <span style="position:absolute;top:2px;left:16px;width:14px;height:14px;border-radius:50%;background:#0a1220"></span>
+                </span>
+                実績配当性向を採点に使う
+              </label>
+            </div>
+            <div style="background:#161a20;border:1px solid #262c37;border-radius:12px;padding:16px 16px 8px;display:flex;flex-direction:column">
+              <div style="font-size:12px;color:#98a1b0;margin-bottom:2px">指標プロファイル（各 0〜10）</div>
+              {{ radar.el }}
+            </div>
+          </div>
+          <!-- COMPARE: metric table -->
+          <div style="background:#161a20;border:1px solid #262c37;border-radius:12px;overflow:hidden">
+            <table style="width:100%;font-size:13px">
+              <thead>
+                <tr style="color:#626c7a;font-size:10.5px">
+                  <th style="text-align:left;padding:12px 18px;font-weight:500">指標</th>
+                  <th style="text-align:right;padding:12px 14px;font-weight:500">値</th>
+                  <th style="text-align:left;padding:12px 14px;font-weight:500;width:170px">スコア</th>
+                  <th style="text-align:left;padding:12px 18px;font-weight:500">評価</th>
+                  <th style="width:24px"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ metricRows }}" as="m" hint-placeholder-count="10">
+                  <tr onClick="{{ m.onOpen }}" tabIndex="0" role="button" aria-label="{{ m.aria }}" style="border-top:1px solid #1e242e;cursor:pointer" style-hover="background:#1a1f28">
+                    <td style="padding:13px 18px;font-weight:500">{{ m.label }}</td>
+                    <td style="padding:13px 14px;text-align:right;font-family:'Roboto Mono',monospace;color:{{ m.valColor }}">{{ m.value }}</td>
+                    <td style="padding:13px 14px">
+                      <span style="display:flex;align-items:center;gap:10px">
+                        <span style="flex:1;height:6px;border-radius:3px;background:#262c37;overflow:hidden;min-width:64px">
+                          <span style="display:block;height:100%;width:{{ m.barW }};background:#c4ccd6;border-radius:3px"></span>
+                        </span>
+                        <span style="font-family:'Roboto Mono',monospace;font-size:12.5px;width:38px;text-align:right"><span style="font-weight:700">{{ m.pts }}</span><span style="color:#626c7a">/10</span></span>
+                      </span>
+                    </td>
+                    <td style="padding:13px 18px;color:#98a1b0">{{ m.judge }}</td>
+                    <td style="padding:13px 12px 13px 0;text-align:right;color:#4a5563;font-size:15px">›</td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <p style="margin:0;font-size:11px;color:#626c7a">各指標の行を押すと、年次推移などの詳細を表示します。</p>
+        </div>
+        </sc-if>
+
+        <!-- METRIC DETAIL -->
+        <sc-if value="{{ detailMode }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <button onClick="{{ onCloseDetail }}" style="background:transparent;border:1px solid #333b48;color:#cdd4de;border-radius:7px;padding:7px 13px;font-size:12px;cursor:pointer;margin-bottom:16px">← 指標一覧へ戻る</button>
+          <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px">
+            <h3 style="margin:0;font-size:16px;font-weight:700">{{ detail.title }}</h3>
+            <span style="font-size:13px;color:#cdd4de;font-family:'Roboto Mono',monospace;font-weight:700">{{ detail.current }} · {{ detail.pts }}/10</span>
+          </div>
+          <p style="margin:0 0 20px;font-size:12px;color:#98a1b0;line-height:1.6">{{ detail.desc }}</p>
+
+          <sc-if value="{{ detail.isLine }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="background:#161a20;border:1px solid #262c37;border-radius:12px;padding:18px 18px 10px;margin-bottom:16px">
+              <div style="font-size:12px;color:#98a1b0;margin-bottom:8px">1株当たり配当金の推移（円）</div>
+              {{ detail.chart }}
+            </div>
+            <div style="background:#161a20;border:1px solid #262c37;border-radius:12px;overflow:hidden">
+              <table style="width:100%;font-size:13px">
+                <thead>
+                  <tr style="color:#626c7a;font-size:10.5px">
+                    <th style="text-align:left;padding:11px 18px;font-weight:500">年度</th>
+                    <th style="text-align:right;padding:11px 18px;font-weight:500">1株配当</th>
+                    <th style="text-align:right;padding:11px 18px;font-weight:500">前年比</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ detail.years }}" as="y" hint-placeholder-count="8">
+                    <tr style="border-top:1px solid #1e242e">
+                      <td style="padding:11px 18px;font-family:'Roboto Mono',monospace">{{ y.yr }}</td>
+                      <td style="padding:11px 18px;text-align:right;font-family:'Roboto Mono',monospace">{{ y.amt }}</td>
+                      <td style="padding:11px 18px;text-align:right;font-family:'Roboto Mono',monospace;color:{{ y.chColor }}">{{ y.change }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ detail.isStreak }}" hint-placeholder-val="{{ false }}">
+          <div style="background:#161a20;border:1px solid #262c37;border-radius:12px;padding:8px 20px">
+            <sc-for list="{{ detail.streak }}" as="s" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:16px;padding:13px 0;border-bottom:1px solid #1e242e">
+                <div style="width:64px;font-family:'Roboto Mono',monospace;font-size:13px;color:#cdd4de;flex:none">{{ s.yr }}</div>
+                <div style="width:22px;text-align:center;font-size:13px;color:{{ s.color }};flex:none">{{ s.mark }}</div>
+                <div style="flex:1;font-size:12.5px;color:{{ s.color }}">{{ s.status }}</div>
+                <div style="font-family:'Roboto Mono',monospace;font-size:13px;color:#e9ebef">{{ s.amt }}</div>
+                <div style="width:80px;text-align:right;font-family:'Roboto Mono',monospace;font-size:11.5px;color:#98a1b0">{{ s.delta }}</div>
+              </div>
+            </sc-for>
+            <div style="padding:14px 0 10px;font-size:12px;color:#98a1b0">減配のない状態が <span style="color:#cdd4de;font-weight:700;font-family:'Roboto Mono',monospace">{{ detail.streakYears }}</span> 継続中です。</div>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ detail.isGeneric }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="background:#0e1014;border:1px solid #262c37;border-radius:8px;padding:12px 14px;font-family:'Roboto Mono',monospace;font-size:12px;color:#cdd4de;margin-bottom:16px">{{ detail.formula }}</div>
+            <div style="background:#161a20;border:1px solid #262c37;border-radius:12px;overflow:hidden">
+              <table style="width:100%;font-size:12.5px">
+                <thead>
+                  <tr style="color:#626c7a;font-size:10.5px">
+                    <th style="text-align:left;padding:11px 18px;font-weight:500">条件</th>
+                    <th style="text-align:right;padding:11px 18px;font-weight:500">点数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ detail.bands }}" as="b" hint-placeholder-count="4">
+                    <tr style="border-top:1px solid #1e242e">
+                      <td style="padding:11px 18px;font-family:'Roboto Mono',monospace;color:#98a1b0">{{ b.cond }}</td>
+                      <td style="padding:11px 18px;text-align:right;font-family:'Roboto Mono',monospace;font-weight:700;color:#c4ccd6">{{ b.pts }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </sc-if>
+        </div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <footer style="border-top:1px solid #1e242e;padding:16px 32px;background:#0b0d11">
+    <p style="margin:0;font-size:11.5px;color:#626c7a;line-height:1.7">本ツールは公開情報をもとにした分析・可視化を目的としたものであり、特定の銘柄の売買を推奨・助言するものではありません。表示される点数・数値は将来の配当額や株価を保証するものではありません。投資判断はご自身の責任で行ってください。</p>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    role: 'guest', screen: 'list', selected: '7203',
+    query: '', sort: 'recent', page: 1,
+    modalOpen: false, metricDetail: null,
+    authMode: 'login', portfolioIdx: 0,
+    customSel: ['増配率（5年CAGR）','連続非減配年数','予想配当性向','EPSの5年CAGR','ROEの5年平均','配当維持可能年数','売上高の5年CAGR','営業利益率の5年平均','MIX係数','配当利回り'],
+  };
+  perPage = 15;
+  // color roles
+  C = { action:'#4a80f0', onAction:'#0a1220', data:'#c4ccd6', pos:'#52a06f', neg:'#cf6b5c', amber:'#d6a13c',
+        t1:'#e9ebef', t2:'#98a1b0', t3:'#626c7a', line:'#262c37', line2:'#333b48', surface:'#161a20', bg:'#0e1014' };
+
+  componentDidMount() {
+    this._onKey = (e) => { if (e.key === 'Escape' && this.state.modalOpen) this.setState({ modalOpen: false, metricDetail: null }); };
+    window.addEventListener('keydown', this._onKey);
+  }
+  componentWillUnmount() { window.removeEventListener('keydown', this._onKey); }
+
+  polar(cx, cy, r, i, n) {
+    const t = (-90 + i * (360 / n)) * Math.PI / 180;
+    return { x: +(cx + r * Math.cos(t)).toFixed(1), y: +(cy + r * Math.sin(t)).toFixed(1) };
+  }
+  yen(n) { return Math.round(n).toLocaleString() + ' 円'; }
+
+  allSaved() {
+    if (this._all) return this._all;
+    const g1 = ['三菱','三井','住友','伊藤','丸紅','双日','日本','東京','大阪','東海','関西','中部','九州','北海道','東北','西日本','日立','東芝','富士','日新','大同','昭和','旭','朝日','太陽','大和','野村','川崎','神戸','名古屋'];
+    const g2 = ['商事','電機','製作所','ホールディングス','銀行','化学','製薬','食品','海運','鉄道','不動産','建設','金属','石油','ガス','電力','通信','自動車','工業','産業','精機','硝子','製鋼','倉庫','証券','保険','リース','物産','運輸','エナジー'];
+    const seed = [['7203','トヨタ自動車'],['8058','三菱商事'],['9432','NTT'],['2914','JT'],['9433','KDDI'],['8001','伊藤忠商事'],['8591','オリックス'],['4502','武田薬品工業']];
+    const arr = [];
+    for (let i = 0; i < 1243; i++) {
+      let code, name;
+      if (i < seed.length) { code = seed[i][0]; name = seed[i][1]; }
+      else { code = String(1300 + ((i * 7) % 8600)).padStart(4, '0'); name = g1[i % g1.length] + g2[(i * 7) % g2.length]; }
+      const score = 42 + ((i * 37) % 54);
+      const price = 500 + ((i * 137) % 7500);
+      const yld = (1.5 + ((i * 23) % 46) / 10);
+      const payout = (20 + ((i * 29) % 55) + (i % 10) / 10);
+      const dd = String(16 - (i % 15)).padStart(2, '0');
+      const hh = String(9 + (i % 12)).padStart(2, '0');
+      const mm = String((i * 13) % 60).padStart(2, '0');
+      arr.push({ code, name, score, price, yld, payout, date: `2026-08-${dd} ${hh}:${mm}`, idx: i });
+    }
+    this._all = arr;
+    return arr;
+  }
+
+  renderVals() {
+    const st = this.state, h = React.createElement, C = this.C;
+    const role = st.role, dataTime = '2026-08-16 09:41 JST';
+    const loggedIn = role !== 'guest';
+
+    const indicators = [
+      { name: '増配率（5年CAGR）', step: 0.1, min: 0, max: 50, unit: '%', full: 10.0, configurable: true },
+      { name: '連続非減配年数', step: 1, min: 0, max: 50, unit: '年', full: 10, configurable: true },
+      { name: '予想配当性向', step: 1, min: -100, max: 500, unit: '%', full: 40, configurable: true },
+      { name: 'EPSの5年CAGR', step: 0.1, min: 0, max: 50, unit: '%', full: 10.0, configurable: true },
+      { name: 'ROEの5年平均', step: 0.1, min: 0, max: 100, unit: '%', full: 12.0, configurable: true },
+      { name: '配当維持可能年数', step: 1, min: -100, max: 100, unit: '年', full: 15, configurable: true },
+      { name: '売上高の5年CAGR', step: 1, min: 0, max: 100, unit: '%', full: 8, configurable: true },
+      { name: '営業利益率の5年平均', step: 0.1, min: 0, max: 50, unit: '%', full: 15.0, configurable: true },
+      { name: 'MIX係数', configurable: false },
+      { name: '配当利回り', step: 0.1, min: 0, max: 50, unit: '%', full: 4.0, configurable: true },
+    ];
+
+    const tabDefs = [
+      { key: 'list', label: '検索', roles: ['guest','user','admin'] },
+      { key: 'portfolio', label: 'ポートフォリオ', roles: ['user','admin'] },
+      { key: 'custom', label: '指標カスタマイズ', roles: ['user','admin'] },
+      { key: 'criteria', label: '評価基準', roles: ['guest','user','admin'] },
+      { key: 'input', label: '銘柄登録', roles: ['admin'] },
+    ];
+    const allowed = tabDefs.filter(t => t.roles.includes(role)).map(t => t.key);
+    let screen = st.screen;
+    if (screen !== 'auth' && !allowed.includes(screen)) screen = 'list';
+    const tabs = tabDefs.filter(t => t.roles.includes(role)).map(t => {
+      const on = t.key === screen;
+      return { label: t.label, current: on ? 'page' : undefined,
+        onClick: () => this.setState({ screen: t.key }),
+        style: `background:transparent;border:none;border-bottom:2px solid ${on?C.action:'transparent'};color:${on?C.t1:C.t2};padding:11px 16px;font-size:13px;font-weight:${on?'700':'400'};cursor:pointer;margin-bottom:-1px` };
+    });
+
+    const roleOptions = [{ key:'guest', label:'ゲスト' },{ key:'user', label:'一般' },{ key:'admin', label:'管理者' }].map(r => ({
+      label: r.label, onClick: () => this.setState({ role: r.key, screen: 'list', modalOpen: false, metricDetail: null }),
+      style: `background:${role===r.key?C.action:'transparent'};color:${role===r.key?C.onAction:C.t2};border:none;padding:7px 12px;font-size:11.5px;font-weight:${role===r.key?'700':'400'};cursor:pointer` }));
+
+    // ---- metrics ----
+    const metrics = [
+      { label: '増配率（5年CAGR）',    value: '▲ +14.2%', pts: 7, judge: '安定して増配',          kind: 'line' },
+      { label: '連続非減配年数',        value: '10 年',    pts: 5, judge: '中位',                  kind: 'streak' },
+      { label: '予想配当性向',          value: '32.4%',    pts: 8, judge: '無理のない水準',        kind: 'generic' },
+      { label: 'EPSの5年CAGR',        value: '▲ +8.6%',  pts: 7, judge: '緩やかに成長',          kind: 'generic' },
+      { label: 'ROEの5年平均',         value: '11.3%',    pts: 8, judge: '良好',                  kind: 'generic' },
+      { label: '配当維持可能年数',      value: '12 年',    pts: 8, judge: 'キャッシュに余裕',      kind: 'generic' },
+      { label: '売上高の5年CAGR',      value: '▲ +5.4%',  pts: 6, judge: '緩やかに成長',          kind: 'generic' },
+      { label: '営業利益率の5年平均',   value: '8.9%',     pts: 7, judge: '安定',                  kind: 'generic' },
+      { label: 'MIX係数',             value: '1.42',     pts: 6, judge: 'バランス良好',          kind: 'generic' },
+      { label: '配当利回り',           value: '3.18%',    pts: 6, judge: '業種平均をやや上回る', kind: 'generic' },
+    ];
+    const metricRows = metrics.map((m, i) => ({
+      label: m.label, value: m.value, pts: m.pts, judge: m.judge, valColor: C.t1,
+      barW: `${m.pts * 10}%`, aria: `${m.label} の詳細`, onOpen: () => this.setState({ metricDetail: i }),
+    }));
+
+    // ---- radar (neutral data color, no judgment) ----
+    const cx = 330, cy = 215, R = 150, n = 10;
+    const ringsEl = [2,4,6,8,10].map((lv,i) => h('polygon',{key:'r'+i,fill:'none',stroke:'#232a35',strokeWidth:1,
+      points: Array.from({length:n},(_,k)=>{const p=this.polar(cx,cy,R*lv/10,k,n);return `${p.x},${p.y}`;}).join(' ')}));
+    const spokesEl = Array.from({length:n},(_,i)=>{const p=this.polar(cx,cy,R,i,n);return h('line',{key:'s'+i,x1:cx,y1:cy,x2:p.x,y2:p.y,stroke:'#232a35',strokeWidth:1});});
+    const dots = metrics.map((m,i)=>this.polar(cx,cy,R*m.pts/10,i,n));
+    const poly = h('polygon',{key:'p',points:dots.map(d=>`${d.x},${d.y}`).join(' '),fill:'rgba(196,204,214,0.12)',stroke:C.data,strokeWidth:2,strokeLinejoin:'round'});
+    const dotsEl = dots.map((d,i)=>h('circle',{key:'d'+i,cx:d.x,cy:d.y,r:3,fill:C.data}));
+    const labelsEl = metrics.map((m,i)=>{
+      const p=this.polar(cx,cy,R+30,i,n); const dx=p.x-cx;
+      const anchor=Math.abs(dx)<16?'middle':(dx>0?'start':'end');
+      const nameLine=h('tspan',{key:'n',x:p.x,dy:0,fill:C.t3,fontSize:11,fontWeight:500},m.label);
+      const scoreLine=h('tspan',{key:'s',x:p.x,dy:17,fill:C.t1,fontSize:18,fontWeight:700,fontFamily:"'Roboto Mono', monospace"},String(m.pts));
+      return h('text',{key:'l'+i,x:p.x,y:p.y-7,textAnchor:anchor,fontFamily:"'Zen Kaku Gothic New', sans-serif"},[nameLine,scoreLine]);
+    });
+    const radarEl = h('svg',{viewBox:'0 0 660 470',role:'img','aria-label':'10指標スコアのプロファイル',style:{width:'100%',height:'auto',flex:1,overflow:'visible'}},[...ringsEl,...spokesEl,poly,...dotsEl,...labelsEl]);
+
+    // ---- dividend history / detail ----
+    const divHist = [{yr:'2019',amt:50},{yr:'2020',amt:60},{yr:'2021',amt:60},{yr:'2022',amt:75},{yr:'2023',amt:80},{yr:'2024',amt:90},{yr:'2025',amt:90},{yr:'2026(予)',amt:100}];
+    const lcW=600,lcH=240,mL=44,mR=16,mT=16,mB=34,maxAmt=120,iw=lcW-mL-mR,ih=lcH-mT-mB;
+    const px=(i)=>mL+iw*i/(divHist.length-1), py=(v)=>mT+ih*(1-v/maxAmt);
+    const grid=[0,30,60,90,120].map((g,i)=>h('g',{key:'g'+i},[
+      h('line',{x1:mL,y1:py(g),x2:lcW-mR,y2:py(g),stroke:'#1e242e',strokeWidth:1}),
+      h('text',{x:mL-8,y:py(g)+4,textAnchor:'end',fill:C.t3,fontSize:10,fontFamily:"'Roboto Mono', monospace"},String(g)),
+    ]));
+    const lineEl=h('polyline',{points:divHist.map((d,i)=>`${px(i)},${py(d.amt)}`).join(' '),fill:'none',stroke:C.data,strokeWidth:2.5,strokeLinejoin:'round'});
+    const lineDots=divHist.map((d,i)=>h('g',{key:'ld'+i},[
+      h('circle',{cx:px(i),cy:py(d.amt),r:4,fill:C.bg,stroke:C.data,strokeWidth:2}),
+      h('text',{x:px(i),y:py(d.amt)-11,textAnchor:'middle',fill:C.t1,fontSize:11,fontWeight:700,fontFamily:"'Roboto Mono', monospace"},String(d.amt)),
+      h('text',{x:px(i),y:lcH-12,textAnchor:'middle',fill:C.t3,fontSize:10,fontFamily:"'Roboto Mono', monospace"},d.yr),
+    ]));
+    const lineChartEl=h('svg',{viewBox:`0 0 ${lcW} ${lcH}`,role:'img','aria-label':'配当金推移',style:{width:'100%',height:'auto'}},[...grid,lineEl,...lineDots]);
+    const yearRowsDetail = divHist.map((d,i)=>{
+      const prev=i>0?divHist[i-1].amt:null; let change='—',chColor=C.t3;
+      if(prev!=null){const diff=d.amt-prev; if(diff>0){change=`▲ +${diff}円`;chColor=C.pos;} else if(diff<0){change=`▼ ${diff}円`;chColor=C.neg;} else {change='－ 据置';chColor=C.t2;}}
+      return { yr:d.yr, amt:`${d.amt} 円`, change, chColor };
+    });
+    const streakRows = divHist.map((d,i)=>{
+      const prev=i>0?divHist[i-1].amt:null; let mark='•',color=C.t2,status='基準年',delta='—';
+      if(prev!=null){const diff=d.amt-prev; if(diff>0){mark='▲';color=C.pos;status='増配';delta=`+${diff}円`;} else if(diff<0){mark='▼';color=C.neg;status='減配';delta=`${diff}円`;} else {mark='－';color=C.t2;status='据置';delta='±0円';}}
+      return { yr:d.yr, mark, color, status, amt:`${d.amt}円`, delta };
+    });
+
+    const criteria = [
+      { name:'増配率（5年CAGR）', desc:'過去5年の1株配当の年平均成長率。継続的な増配の勢いを測る。', formula:'(最新年配当 ÷ 5年前配当)^(1/5) − 1',
+        bands:[{cond:'10% 以上',pts:'10'},{cond:'5% 以上 10% 未満',pts:'7'},{cond:'0% 以上 5% 未満',pts:'4'},{cond:'マイナス',pts:'0'}] },
+      { name:'連続非減配年数', desc:'配当を減らしていない連続年数。長いほど配当方針の安定を示す。', formula:'直近で減配していない連続年数',
+        bands:[{cond:'10 年 以上',pts:'10'},{cond:'5 年 以上 10 年 未満',pts:'6'},{cond:'1 年 以上 5 年 未満',pts:'3'},{cond:'0 年',pts:'0'}] },
+      { name:'予想配当性向', desc:'予想純利益のうち配当に回す割合。低すぎず高すぎない水準を高評価とする。', formula:'予想1株配当 ÷ 予想EPS × 100',
+        bands:[{cond:'30% 以上 50% 未満',pts:'10'},{cond:'50% 以上 70% 未満',pts:'6'},{cond:'30% 未満',pts:'5'},{cond:'70% 以上',pts:'2'}] },
+      { name:'EPSの5年CAGR', desc:'過去5年の1株当たり利益の年平均成長率。利益成長の持続力を測る。', formula:'(最新EPS ÷ 5年前EPS)^(1/5) − 1',
+        bands:[{cond:'10% 以上',pts:'10'},{cond:'5% 以上 10% 未満',pts:'7'},{cond:'0% 以上 5% 未満',pts:'4'},{cond:'マイナス',pts:'0'}] },
+      { name:'ROEの5年平均', desc:'過去5年の自己資本利益率の単純平均。資本効率の安定性を測る。', formula:'Σ(各年ROE) ÷ 5',
+        bands:[{cond:'12% 以上',pts:'10'},{cond:'8% 以上 12% 未満',pts:'7'},{cond:'5% 以上 8% 未満',pts:'4'},{cond:'5% 未満',pts:'1'}] },
+      { name:'配当維持可能年数', desc:'手元資金と将来キャッシュフローで、現在の配当を何年維持できるか。', formula:'(現金同等物 ＋ 5年FCF見込) ÷ 年間配当総額',
+        bands:[{cond:'15 年 以上',pts:'10'},{cond:'10 年 以上 15 年 未満',pts:'7'},{cond:'5 年 以上 10 年 未満',pts:'4'},{cond:'5 年 未満',pts:'1'}] },
+      { name:'売上高の5年CAGR', desc:'過去5年の売上高の年平均成長率。事業規模の成長を測る。', formula:'(最新売上高 ÷ 5年前売上高)^(1/5) − 1',
+        bands:[{cond:'8% 以上',pts:'10'},{cond:'4% 以上 8% 未満',pts:'7'},{cond:'0% 以上 4% 未満',pts:'4'},{cond:'マイナス',pts:'0'}] },
+      { name:'営業利益率の5年平均', desc:'過去5年の営業利益率の単純平均。本業の収益力と安定性を測る。', formula:'Σ(各年 営業利益 ÷ 売上高) ÷ 5 × 100',
+        bands:[{cond:'15% 以上',pts:'10'},{cond:'8% 以上 15% 未満',pts:'7'},{cond:'3% 以上 8% 未満',pts:'4'},{cond:'3% 未満',pts:'1'}] },
+      { name:'MIX係数', desc:'配当利回りと増配率を合成し、インカムと成長のバランスを表す係数。', formula:'配当利回り(%) ＋ 増配率(%) の重み付き合成',
+        bands:[{cond:'2.0 以上',pts:'10'},{cond:'1.5 以上 2.0 未満',pts:'7'},{cond:'1.0 以上 1.5 未満',pts:'4'},{cond:'1.0 未満',pts:'1'}] },
+      { name:'配当利回り', desc:'1株当たりの予想配当を現在株価で割った、投資額に対する年間配当の割合。', formula:'予想1株配当 ÷ 現在株価 × 100',
+        bands:[{cond:'4.0% 以上',pts:'10'},{cond:'3.0% 以上 4.0% 未満',pts:'7'},{cond:'2.0% 以上 3.0% 未満',pts:'4'},{cond:'2.0% 未満',pts:'1'}] },
+    ];
+
+    const di = st.metricDetail;
+    const detailMode = di !== null && di !== undefined;
+    let detail = {};
+    if (detailMode) {
+      const m = metrics[di], crit = criteria.find(c => c.name === m.label) || criteria[0];
+      detail = { title:m.label, current:m.value.replace('▲ ',''), pts:m.pts, desc:crit.desc,
+        isLine:m.kind==='line', isStreak:m.kind==='streak', isGeneric:m.kind==='generic',
+        chart:lineChartEl, years:yearRowsDetail, streak:streakRows, streakYears:'10 年',
+        formula:crit.formula, bands:crit.bands };
+    }
+
+    // ---- search ----
+    const all = this.allSaved();
+    const q = st.query.trim();
+    let filtered = q ? all.filter(r => r.code.includes(q) || r.name.includes(q)) : all;
+    const sort = st.sort;
+    filtered = filtered.slice().sort((a,b)=> sort==='score_desc'?b.score-a.score: sort==='score_asc'?a.score-b.score: sort==='code'?a.code.localeCompare(b.code): a.idx-b.idx);
+    const total = filtered.length;
+    const pageCount = Math.max(1, Math.ceil(total / this.perPage));
+    const page = Math.min(st.page, pageCount);
+    const start = (page - 1) * this.perPage;
+    const openStock = (code) => this.setState({ selected: code, modalOpen: true, metricDetail: null });
+    const savedRows = filtered.slice(start, start + this.perPage).map(r => ({
+      code: r.code, name: r.name, score: r.score, scoreW: `${r.score}%`,
+      price: this.yen(r.price), yld: `${r.yld.toFixed(2)}%`, payout: `${r.payout.toFixed(1)}%`,
+      aria: `${r.code} ${r.name} の解析結果を表示`,
+      onShow: () => openStock(r.code),
+      onKey: (e) => { if (e.key==='Enter'||e.key===' '){ e.preventDefault(); openStock(r.code); } },
+    }));
+    const canPrev = page>1, canNext = page<pageCount;
+    const btnBase = 'border-radius:8px;padding:9px 15px;font-size:12.5px;font-family:inherit';
+    const selRow = all.find(r => r.code === st.selected) || all[0];
+
+    // ---- portfolio ----
+    const portfolios = [
+      { name:'メインNISA', holdings:[
+        { code:'7203', name:'トヨタ自動車', qty:100, avg:2800, price:3142, score:69, yld:3.18 },
+        { code:'8058', name:'三菱商事',     qty:200, avg:2400, price:2980, score:74, yld:3.44 },
+        { code:'9432', name:'NTT',         qty:1000, avg:150, price:165, score:81, yld:3.30 },
+        { code:'9433', name:'KDDI',        qty:50, avg:4200, price:4550, score:82, yld:3.10 },
+      ]},
+      { name:'高配当コア', holdings:[
+        { code:'2914', name:'JT',          qty:300, avg:2600, price:3980, score:58, yld:4.95 },
+        { code:'8591', name:'オリックス',   qty:200, avg:2500, price:3100, score:71, yld:3.90 },
+        { code:'8001', name:'伊藤忠商事',   qty:100, avg:5800, price:7200, score:65, yld:2.80 },
+      ]},
+      { name:'成長ウォッチ', holdings:[
+        { code:'4502', name:'武田薬品工業', qty:100, avg:4000, price:4100, score:60, yld:4.20 },
+        { code:'6501', name:'日立製作所',   qty:100, avg:3000, price:3800, score:67, yld:1.80 },
+      ]},
+    ];
+    const pfIdx = Math.min(st.portfolioIdx, portfolios.length - 1);
+    const pfData = portfolios[pfIdx];
+    const pfTabs = portfolios.map((p, i) => ({ name: p.name,
+      onClick: () => this.setState({ portfolioIdx: i }),
+      style: `background:${i===pfIdx?'#1b2029':'transparent'};color:${i===pfIdx?C.t1:C.t2};border:1px solid ${i===pfIdx?C.line2:C.line};border-radius:9px;padding:8px 15px;font-size:12.5px;font-weight:${i===pfIdx?'700':'400'};cursor:pointer` }));
+    let tVal=0,tCost=0,tDiv=0,sScore=0;
+    const pfHoldings = pfData.holdings.map(x=>{
+      const value=x.qty*x.price, cost=x.qty*x.avg, pl=value-cost, plPct=pl/cost*100, annualDiv=value*x.yld/100;
+      tVal+=value; tCost+=cost; tDiv+=annualDiv; sScore+=x.score;
+      const up=pl>=0;
+      return { code:x.code, name:x.name, qty:`${x.qty.toLocaleString()} 株`, avgCost:this.yen(x.avg), price:this.yen(x.price),
+        value:this.yen(value), pl:`${up?'▲':'▼'} ${this.yen(Math.abs(pl))}`, plColor:up?C.pos:C.neg,
+        yld:`${x.yld.toFixed(2)}%`, score:x.score, onShow:()=>openStock(x.code) };
+    });
+    const totalPL=tVal-tCost, up=totalPL>=0;
+    const pf = { totalValue:this.yen(tVal), totalCost:this.yen(tCost),
+      totalPL:`${up?'▲':'▼'} ${this.yen(Math.abs(totalPL))}`, totalPLpct:`${up?'+':''}${(totalPL/tCost*100).toFixed(1)}%`, plColor:up?C.pos:C.neg };
+    const pfSummary = [
+      { label:'平均利回り（評価額）', value:`${(tDiv/tVal*100).toFixed(2)}%`, sub:`年間配当 ${this.yen(tDiv)}` },
+      { label:'取得単価利回り', value:`${(tDiv/tCost*100).toFixed(2)}%`, sub:'年間配当 ÷ 取得原価' },
+      { label:'スコア平均', value:(sScore/pfData.holdings.length).toFixed(1), sub:'数量に依らない単純平均' },
+    ];
+
+    // ---- customize ----
+    const sel = st.customSel, selCount = sel.length;
+    const toggle = (name) => { const has=sel.includes(name);
+      if (has && selCount<=5) return; if (!has && selCount>=10) return;
+      this.setState({ customSel: has ? sel.filter(x=>x!==name) : [...sel,name] }); };
+    const customRows = indicators.map(ind => {
+      const on = sel.includes(ind.name), cfg = ind.configurable;
+      return { name:ind.name, selected:on, nameColor:on?C.t1:C.t3, bg:on?C.surface:'#12151b', borderColor:on?C.line:'#1a1f28',
+        checkMark:on?'✓':'', onToggle:()=>toggle(ind.name),
+        checkStyle:`width:22px;height:22px;flex:none;border-radius:6px;border:1px solid ${on?C.action:C.line2};background:${on?C.action:'transparent'};color:${C.onAction};font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center`,
+        configurable:cfg, autoCalc:!cfg,
+        constraint: cfg ? `${ind.step}${ind.unit}きざみ ・ ${ind.min}〜${ind.max}${ind.unit}` : '個別設定なし（自動算出）',
+        full: cfg?ind.full:'', step: cfg?ind.step:1, min: cfg?ind.min:0, max: cfg?ind.max:0, unit: cfg?ind.unit:'', disabled: !on,
+        inputBorder: on?C.line2:C.line,
+        inputStyle:`flex:1;width:60px;background:transparent;border:none;outline:none;color:${on?C.t1:C.t3};font-size:13px;font-family:'Roboto Mono',monospace;padding:9px 0;text-align:right` };
+    });
+
+    const isSignup = st.authMode === 'signup';
+
+    return {
+      roleOptions, isGuest: role==='guest', isLoggedIn: loggedIn, isAdmin: role==='admin',
+      goAuth: () => this.setState({ screen: 'auth' }),
+      userEmail: role==='admin'?'admin@example.com':'you@example.com', userInitial: role==='admin'?'A':'U',
+      onLogout: () => this.setState({ role:'guest', screen:'list' }), tabs,
+      isSearch: screen==='list', isPortfolio: screen==='portfolio', isCustom: screen==='custom',
+      isCriteria: screen==='criteria', isInput: screen==='input', isAuth: screen==='auth', dataTime,
+      // search
+      query: st.query, onSearch: (e)=>this.setState({query:e.target.value,page:1}),
+      sort: st.sort, onSort: (e)=>this.setState({sort:e.target.value,page:1}),
+      sortOptions: [{key:'recent',label:'入力日時（新しい順）'},{key:'score_desc',label:'総合点（高い順）'},{key:'score_asc',label:'総合点（低い順）'},{key:'code',label:'コード順'}],
+      resultLabel: q ? `該当 ${total.toLocaleString()} 銘柄` : `全 ${total.toLocaleString()} 銘柄`,
+      hasResults: total>0, noResults: total===0,
+      pageLabel: `${(start+1).toLocaleString()}–${Math.min(start+this.perPage,total).toLocaleString()} 件 / ${total.toLocaleString()} 件`,
+      pageNum: page, pageCount, savedRows,
+      onPrev: ()=>canPrev&&this.setState({page:page-1}), onNext: ()=>canNext&&this.setState({page:page+1}),
+      prevStyle: `${btnBase};cursor:${canPrev?'pointer':'default'};background:transparent;border:1px solid ${canPrev?C.line2:'#1e242e'};color:${canPrev?C.t2:'#3a4452'}`,
+      nextStyle: `${btnBase};cursor:${canNext?'pointer':'default'};background:transparent;border:1px solid ${canNext?C.line2:'#1e242e'};color:${canNext?C.t2:'#3a4452'}`,
+      // portfolio
+      pfTabs, pfCount: portfolios.length, pf, pfSummary, pfHoldings, pfHoldingsCount: pfData.holdings.length,
+      // customize
+      selCount, selCountColor: (selCount>=5&&selCount<=10)?C.t2:C.amber, selWarn: selCount<5, customRows,
+      saveStyle: `background:${C.action};color:${C.onAction};border:none;border-radius:8px;padding:11px 22px;font-size:13px;font-weight:700;cursor:pointer`,
+      // criteria + admin
+      criteria,
+      basicFields: [{label:'銘柄コード',value:'7203',unit:''},{label:'現在株価',value:'3,142',unit:'円'},{label:'PER',value:'10.8',unit:'倍'},{label:'PBR',value:'—',unit:'倍'}],
+      yearRows: [{yr:'2026(予)',div:'100',eps:'292',op:'5,240,000'},{yr:'2025',div:'90',eps:'281',op:'5,010,000'},{yr:'2024',div:'75',eps:'256',op:'4,660,000'},{yr:'2023',div:'60',eps:'179',op:'2,720,000'}],
+      // auth
+      isSignup, setLogin: ()=>this.setState({authMode:'login'}), setSignup: ()=>this.setState({authMode:'signup'}),
+      loginTabStyle: `flex:1;background:${!isSignup?'#1b2029':'transparent'};color:${!isSignup?C.t1:C.t2};border:none;padding:11px;font-size:13px;font-weight:${!isSignup?'700':'400'};cursor:pointer`,
+      signupTabStyle: `flex:1;background:${isSignup?'#1b2029':'transparent'};color:${isSignup?C.t1:C.t2};border:none;padding:11px;font-size:13px;font-weight:${isSignup?'700':'400'};cursor:pointer`,
+      authTitle: isSignup?'アカウント作成':'ログイン', authSub: isSignup?'メールアドレスとパスワードを登録します。':'登録済みのメールアドレスでログインします。',
+      authButton: isSignup?'アカウントを作成':'ログイン', doAuth: () => this.setState({ role:'user', screen:'list' }),
+      // dialog
+      modalOpen: st.modalOpen, onCloseModal: ()=>this.setState({modalOpen:false,metricDetail:null}), stop: (e)=>e.stopPropagation(),
+      overviewMode: !detailMode, detailMode, detail, onCloseDetail: ()=>this.setState({metricDetail:null}),
+      sel: { code:selRow.code, name:selRow.name, score:selRow.score, scoreW:`${selRow.score}%`, valid:'10 / 10', market:'プライム市場' },
+      basicStats: [
+        { label:'株価', value:this.yen(selRow.price), color:C.t1 },
+        { label:'配当利回り', value:`${selRow.yld.toFixed(2)}%`, color:C.t1 },
+        { label:'PER', value:'10.8 倍', color:C.t1 },
+        { label:'PBR', value:'— データなし', color:C.t3 },
+      ],
+      metricRows, radar: { el: radarEl },
+    };
+  }
+}
+</script>
+</body>
+</html>

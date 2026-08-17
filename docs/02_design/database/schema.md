@@ -1,6 +1,6 @@
 # データベース設計
 
-> ステータス: 🟢 実装済み（2026-07-28）
+> ステータス: 🟢 銘柄・スコア部分は実装済み（2026-07-28）／🟡 認証・ポートフォリオ部分は設計のみ（2026-08-16 追加）
 > 実装: `src/infra/d1/schema.ts` / マイグレーション: `db/migrations/0000_reflective_prism.sql`
 >
 > ⚠️ **2026-07-28 に全面書き直し。** 旧版は PostgreSQL（`BIGSERIAL`/`TIMESTAMPTZ`）を前提に
@@ -8,6 +8,11 @@
 > [ADR-0001](../../adr/0001-runtime-cloudflare-workers.md) で **Cloudflare D1（SQLite）+ Drizzle ORM**
 > に決定し、テーブル構成も作り直した。ウォッチリスト・株価履歴・取り込みエラーの記録テーブルは
 > **現時点では実装していない**（用途が生まれたら追加する。§ 未実装・検討事項）。
+>
+> ✅ **2026-08-16 追記（T-078）。** [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)
+> の認証導入決定を受け、`users`/`sessions`/`portfolios`/`portfolio_holdings`/
+> `user_indicator_settings` の5テーブルを追加した（§テーブル定義（認証・ポートフォリオ））。
+> **実装（`src/infra/d1/schema.ts` へのマイグレーション反映）はまだ**（T-091・T-102 待ち）。
 
 ## 設計方針
 
@@ -29,11 +34,20 @@ companies 1 ──< financial_records
    │
    ├──1 score_cards
    │
-   └──< transformed_metrics
+   ├──< transformed_metrics
+   │
+   └──< portfolio_holdings >── N portfolios 1 ── N users
+                                                     │
+                                                     ├──< sessions
+                                                     │
+                                                     └──< user_indicator_settings
 ```
 
 `score_cards` は `companies` と1対1（`company_code` が主キーかつ外部キー）。
-すべて `ON DELETE CASCADE`。銘柄を削除すれば明細も消える。
+`companies` 側は原則 `ON DELETE CASCADE`（銘柄を削除すれば明細も消える）だが、
+**`portfolio_holdings` だけ例外**（`ON DELETE RESTRICT`。§テーブル定義（認証・ポートフォリオ）
+の注記を参照）。`users` 側は `ON DELETE CASCADE`（ユーザーを削除すれば
+セッション・ポートフォリオ・指標設定も消える）。
 
 ## テーブル定義
 
@@ -148,9 +162,124 @@ API の契約は `records` / `dividends` とも最大60件（`company-api.md`）
 再監査用のスナップショットであり、画面表示の一次ソースではない。ロジックを直したあとに
 古い整形データをそのまま見せると、画面と実装が食い違うため。
 
+## テーブル定義（認証・ポートフォリオ。2026-08-16 追加、T-078）
+
+> 🟡 **設計のみ。実装（`schema.ts`・マイグレーション）は未着手。**
+> 要求元: [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)（認証・ロール・PBKDF2）、
+> [portfolio-api.md](../api/portfolio-api.md)（API契約）、
+> [indicator-custom-page.md](../ui/pages/indicator-custom-page.md)（指標カスタマイズ）。
+> §4「依存元の設計書と突き合わせる」の結果、`portfolio-api.md` のレスポンス例
+> （`id`/`name`/`code`/`quantity`/`acquisitionPriceSen` 等）とカラム名の齟齬は無かった。
+
+### users — ユーザー
+
+| カラム              | 型      | 制約              | 説明                                                                                                                                    |
+| ------------------- | ------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| id                  | integer | PK, autoincrement | 内部専用。URL には出さない（`portfolios.id` と異なり非公開）                                                                            |
+| email               | text    | NOT NULL, UNIQUE  | ログインID                                                                                                                              |
+| password_hash       | text    | NOT NULL          | PBKDF2 の出力（[ADR-0013](../../adr/0013-multi-user-auth-small-scale.md) §決定3）                                                       |
+| password_salt       | text    | NOT NULL          | ユーザーごとにランダム生成                                                                                                              |
+| password_iterations | integer | NOT NULL          | ハッシュ時のイテレーション数（T-063で確定する値をそのまま保存。**将来値を上げても既存行のハッシュはそのまま検証できる**ようにするため） |
+| role                | text    | NOT NULL          | `user` \| `admin`。**`guest` は未ログイン状態であり行を持たない**                                                                       |
+| failed_login_count  | integer | NOT NULL, 既定 0  | ログイン失敗の連続回数。ログイン成功で 0 にリセット（[auth-api.md](../api/auth-api.md) §レート制限）                                    |
+| locked_until        | text    |                   | この時刻まではログイン試行を拒否する。UTC ISO 8601。`NULL`＝ロックなし                                                                  |
+| created_at          | text    | NOT NULL          | UTC ISO 8601                                                                                                                            |
+
+- **最初に登録したユーザーが `admin`**（[ADR-0013](../../adr/0013-multi-user-auth-small-scale.md) §決定2）。
+  「1人目か」の判定は `SELECT COUNT(*) FROM users` で行う（専用フラグ列を持たない）
+- **人数上限（`SIGNUP_MAX_USERS`）はテーブルに持たない。** 環境変数なので、
+  サインアップ時に `COUNT(*)` と比較するだけで足りる
+- **`failed_login_count`/`locked_until` はユーザー単位のレート制限**（2026-08-17 追加、T-076）。
+  IPベースではなくメールアドレス単位でロックする。詳細は [auth-api.md](../api/auth-api.md) §レート制限
+
+### sessions — セッション
+
+| カラム     | 型      | 制約                    | 説明                                      |
+| ---------- | ------- | ----------------------- | ----------------------------------------- |
+| id         | text    | PK                      | セッショントークン（Cookie の値そのもの） |
+| user_id    | integer | NOT NULL, FK → users.id | `ON DELETE CASCADE`                       |
+| expires_at | text    | NOT NULL                | UTC ISO 8601                              |
+| created_at | text    | NOT NULL                | UTC ISO 8601                              |
+
+- 期限切れ行の削除は定期実行またはログイン時の遅延削除で行う（実装時に決める。設計書の対象外）
+
+### portfolios — ポートフォリオ
+
+| カラム     | 型      | 制約                    | 説明                                                                                    |
+| ---------- | ------- | ----------------------- | --------------------------------------------------------------------------------------- |
+| id         | text    | PK                      | アプリ生成の不透明ID（例 `pf_xxxxxxxx`）。`portfolio-api.md` の例と一致させるため文字列 |
+| user_id    | integer | NOT NULL, FK → users.id | `ON DELETE CASCADE`                                                                     |
+| name       | text    | NOT NULL                | 1〜50文字（範囲検証は zod。DB は NOT NULL のみ）                                        |
+| created_at | text    | NOT NULL                | UTC ISO 8601                                                                            |
+
+- **1ユーザー最大10件の制約は DB に持たない。** 保存前に `COUNT(*)` で数えてから
+  拒否する（`portfolio-api.md` の 403）。SQLite の `CHECK` は行数を見られないため
+
+### portfolio_holdings — 保有銘柄
+
+| カラム                | 型      | 制約                          | 説明                                   |
+| --------------------- | ------- | ----------------------------- | -------------------------------------- |
+| portfolio_id          | text    | NOT NULL, FK → portfolios.id  | `ON DELETE CASCADE`                    |
+| company_code          | text    | NOT NULL, FK → companies.code | **`ON DELETE RESTRICT`**（下記の注記） |
+| quantity              | integer | NOT NULL                      | 保有数量（株）                         |
+| acquisition_price_sen | integer | NOT NULL                      | 取得単価（銭/株）                      |
+| created_at            | text    | NOT NULL                      | UTC ISO 8601                           |
+| updated_at            | text    | NOT NULL                      | UTC ISO 8601                           |
+
+PK: `(portfolio_id, company_code)`。**同じポートフォリオへの同一銘柄の重複追加を DB 層で防ぐ**
+（`portfolio-api.md` の 409 と対応）。
+
+**評価額・評価損益・現在株価・スコア等は保存しない。** [portfolio-metrics.md](../logic/portfolio-metrics.md)
+が定めるとおり、`companies`/`score_cards`/`transformed_metrics` から毎回算出する
+（`companies.price_sen` 等の「詳細表示は毎回採点し直す」既存方針と同じ。§計算とスコアの再現性）。
+
+> ⚠️ **`company_code` の外部キーを `ON DELETE RESTRICT` にする決定（この設計書の判断）。**
+> 他テーブルは銘柄削除に追随して `CASCADE` するが、ここは**銘柄が誰かに保有されている間、
+> 削除自体を拒否する**。ユーザーが記録した取得単価・数量は個人の資産記録であり、
+> 無関係な admin の銘柄削除操作で黙って失われてよいデータではないため
+> （`.claude/CLAUDE.md` が一貫して「データを黙って失わせない」立場を取っているのと同じ理由）。
+>
+> **影響: 既存の `DELETE /api/companies/:code` ハンドラに変更が要る。**
+> 保有されている銘柄の削除リクエストは FK 制約違反になるため、
+> 409（`{ "error": "この銘柄は誰かのポートフォリオに保有されているため削除できません" }`）
+> に変換する必要がある。**この対応は T-091 以降（ポートフォリオ実装時）の実装課題として残す**
+> （現在の `DELETE /api/companies/:code` はテーブルが存在しないため影響なし）。
+
+### user_indicator_settings — 指標カスタマイズ設定
+
+| カラム      | 型      | 制約                    | 説明                                                                                                                                      |
+| ----------- | ------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| user_id     | integer | NOT NULL, FK → users.id | `ON DELETE CASCADE`                                                                                                                       |
+| metric_key  | text    | NOT NULL                | `MetricKey`（①〜⑩。`transformed_metrics.metric_key` と同じ語彙）                                                                          |
+| basis_value | real    |                         | 満点となる基準値。**MIX係数の行は常に `NULL`**（設定不可。[ADR-0012](../../adr/0012-indicator-customization-scaling-and-denominator.md)） |
+
+PK: `(user_id, metric_key)`。
+
+- **「選択している」は行の存在で表す。** 選択していない指標の行は無い
+  （`transformed_metrics` が判定できた指標だけ行を持つのと同じ設計）。
+  5〜10件という選択数の制約は zod（アプリ層）で検証する（`portfolio-api.md` の 400）
+- `PUT /api/indicator-settings` は**全置き換え**なので、実装は
+  「該当 `user_id` の行を全削除 → 新しい選択ぶんを INSERT」の1トランザクションになる
+
 ## 未実装・検討事項
 
 - **株価の時系列保持** — 現在は `companies.price_sen` に最新1件のみ。日足を残すかは未定
 - **`watchlist_items`（ウォッチリスト）** — 要件定義（`features.md`）に対応する機能が無く、旧draftの下書き。実装計画なし
 - **`ingest_errors`（取り込み失敗の記録）** — TSV/CSV 自動取り込み（F-01〜F-04、未着手）を実装する際に必要になる。それまでは対象データが無い
-- **`UserScoringPolicy` 用のテーブル** — [ADR-0005](../../adr/0005-thresholds-fixed-for-now.md)。認証の要否（T-003/T-004）待ち
+- **`UserScoringPolicy` 用のテーブル** — ✅ **解消（2026-08-16）。** [ADR-0005](../../adr/0005-thresholds-fixed-for-now.md)
+  が待っていた「認証の要否」は [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md) で決着し、
+  `user_indicator_settings` として上に定義した
+- **セッションの期限切れ行の掃除方法** — 定期実行 or 遅延削除。未実装時に決める
+- **`DELETE /api/companies/:code` の 409 対応** — `portfolio_holdings` の `ON DELETE RESTRICT` により、
+  ポートフォリオ実装時にハンドラの変更が要る（上記の注記）
+- **総合点の出所が2系統（一覧の `score_cards` vs 詳細の毎回再採点）で、
+  スコアリングロジック変更直後は一時的に食い違いうる**（T-088レビューで発見、
+  2026-08-17。[company-api.md](../api/company-api.md) `GET /api/companies` に詳細を記載）。
+  現状は性能とのトレードオフとして許容。`score_cards.calc_version` を使った
+  自動再計算・古さの検知は未実装
+- ⚠️ **`score_cards` は 1銘柄1行（全ユーザー共通）の設計。指標カスタマイズ（T-101）が
+  実装され、総合点がユーザーごとの選択・基準値に依存するようになると、
+  この前提が成立しなくなる。** `score_cards.total_score` を「そのユーザーの設定での
+  総合点」に置き換えるか、ユーザーごとに動的計算するか、**T-101着手前に決める必要がある**
+  （現状は未決。`score_cards` の構造自体を見直すか、検索・ポートフォリオ一覧の
+  総合点表示方法ごと再設計するかの判断を含む）
