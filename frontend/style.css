@@ -1,22 +1,59 @@
 /*
  * 色・余白・フォントサイズはトークン化し、コンポーネントに直値を書かない
- * （`.claude/rules/frontend.md`）。
+ * （`.claude/rules/frontend.md`）。トークンの正は `docs/02_design/ui/design-tokens.md`。
  */
 :root {
-  --color-bg: #0f172a;
-  --color-surface: #1e293b;
-  --color-text: #e2e8f0;
-  --color-muted: #94a3b8;
-  --color-accent: #38bdf8;
-  --color-error: #f87171;
-  --color-warning: #fbbf24;
+  /* 色（design-tokens.md §2.1） */
+  --color-bg: #0e1014;
+  --color-surface: #161a20;
+  --color-surface-dim: #12151b;
+  --color-surface-inset: #0e1014;
+  --color-line: #262c37;
+  --color-line-row: #1e242e;
+  --color-line-strong: #333b48;
+  --color-text: #e9ebef;
+  --color-text-secondary: #98a1b0;
+  --color-text-tertiary: #626c7a;
+  --color-brand: #37b09a;
+  --color-action: #4a80f0;
+  --color-on-action: #0a1220;
+  --color-data: #c4ccd6;
+  --color-caution: #d6a13c;
+  --color-positive: #52a06f;
+  --color-negative: #cf6b5c;
+
+  /* タイポグラフィ（design-tokens.md §3） */
+  --font-ui: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Consolas, 'Courier New', monospace;
+
+  --font-size-hero: 3.25rem;
+  --font-size-display: 2.375rem;
+  --font-size-score: 1.4375rem;
+  --font-size-xl: 1.1875rem;
+  --font-size-lg: 1.0625rem;
+  --font-size-md: 1rem;
+  --font-size-base: 0.875rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-xs: 0.75rem;
+  --font-size-2xs: 0.6875rem;
+  --font-size-3xs: 0.625rem;
+
+  /* 余白・角丸・レイアウト（design-tokens.md §4） */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
-  --space-3: 1rem;
-  --space-4: 1.5rem;
-  --radius: 0.5rem;
-  --font-size-sm: 0.875rem;
-  --font-size-lg: 1.25rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1rem;
+
+  --content-max: 72.5rem;
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.6);
 }
 
 * {
@@ -27,18 +64,12 @@ body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    'Hiragino Sans',
-    'Noto Sans JP',
-    sans-serif;
+  font-family: var(--font-ui);
   line-height: 1.6;
 }
 
 main {
-  max-width: 72rem;
+  max-width: var(--content-max);
   margin: 0 auto;
   padding: var(--space-4) var(--space-3);
 }
@@ -47,18 +78,18 @@ section {
   margin-block: var(--space-4);
   padding: var(--space-3);
   background: var(--color-surface);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
 }
 
 fieldset {
-  border: 1px solid var(--color-muted);
-  border-radius: var(--radius);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
   margin-block: var(--space-3);
   padding: var(--space-3);
 }
 
 legend {
-  color: var(--color-accent);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
 
@@ -77,9 +108,9 @@ label.inline {
 
 input {
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-muted);
-  border-radius: var(--radius);
-  background: var(--color-bg);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-inset);
   color: var(--color-text);
   min-width: 6rem;
 }
@@ -88,10 +119,10 @@ button {
   padding: var(--space-2) var(--space-3);
   margin-right: var(--space-2);
   border: none;
-  border-radius: var(--radius);
-  background: var(--color-accent);
-  color: #0f172a;
-  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: var(--color-action);
+  color: var(--color-on-action);
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -104,26 +135,26 @@ button:disabled {
 .nav {
   display: flex;
   gap: var(--space-2);
-  border-bottom: 1px solid var(--color-muted);
+  border-bottom: 1px solid var(--color-line-strong);
 }
 
 .nav a {
   padding: var(--space-2) var(--space-3);
   border-bottom: 3px solid transparent;
-  color: var(--color-muted);
+  color: var(--color-text-secondary);
   text-decoration: none;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .nav a[aria-current='page'] {
-  border-bottom-color: var(--color-accent);
+  border-bottom-color: var(--color-action);
   background: var(--color-surface);
-  color: var(--color-accent);
+  color: var(--color-action);
 }
 
 /* 一覧で表示中の行。操作列のボタン文言（「表示中」）と併用する */
 .is-selected {
-  background: rgba(56, 189, 248, 0.12);
+  background: color-mix(in srgb, var(--color-action) 12%, transparent);
 }
 
 /* 表は横スクロールさせる。狭い画面で本文ごと横に伸びるのを防ぐ */
@@ -139,45 +170,57 @@ button:disabled {
 th,
 td {
   padding: var(--space-1) var(--space-2);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+  border-bottom: 1px solid var(--color-line-row);
   text-align: left;
 }
 
 .numeric {
   text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 銘柄コード・日付など、右寄せは不要だが等幅フォントは必須の表示に使う（design-tokens.md §3.1） */
+.mono {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 /* 判定不能の行。色だけに依存させないため、備考欄に必ず文言を出している */
 .is-unavailable {
-  color: var(--color-muted);
+  color: var(--color-text-tertiary);
 }
 
 .total {
   font-size: var(--font-size-lg);
 }
 
+.total strong {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .effective {
   margin-left: var(--space-2);
-  color: var(--color-muted);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
 
 .meta,
 .radar-note {
-  color: var(--color-muted);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
 
 /* ③ 予想配当性向の内訳（備考列への追記分）。備考本文と区別するため改行して出す */
 .metric-detail {
   display: block;
-  color: var(--color-muted);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
 
 .error {
-  color: var(--color-error);
+  color: var(--color-caution);
 }
 
 /*
@@ -185,16 +228,16 @@ td {
  * 文言側に ⚠ を必ず付けている（`CompanyForm.tsx`）。
  */
 .warning {
-  color: var(--color-warning);
+  color: var(--color-caution);
   font-size: var(--font-size-sm);
   white-space: normal;
 }
 
 input[aria-invalid='true'] {
-  border-color: var(--color-warning);
+  border-color: var(--color-caution);
 }
 
 footer {
   margin-top: var(--space-4);
-  color: var(--color-muted);
+  color: var(--color-text-tertiary);
 }

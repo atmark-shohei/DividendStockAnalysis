@@ -30,7 +30,12 @@ export function ScoreRadar({ metrics }: { readonly metrics: ScoringResponse['met
           <PolarGrid />
           <PolarAngleAxis dataKey="label" />
           <PolarRadiusAxis domain={[0, 10]} tickCount={6} />
-          <Radar dataKey="score" fillOpacity={0.4} />
+          <Radar
+            dataKey="score"
+            fill="var(--color-data)"
+            stroke="var(--color-data)"
+            fillOpacity={0.4}
+          />
         </RadarChart>
       </ResponsiveContainer>
       <p className="radar-note">

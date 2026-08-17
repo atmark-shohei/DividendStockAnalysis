@@ -41,7 +41,7 @@ export function MetricTable({
           const unavailable = metric.score === null;
           return (
             <tr key={metric.key} className={unavailable ? 'is-unavailable' : undefined}>
-              <td>{metric.number}</td>
+              <td className="mono">{metric.number}</td>
               <th scope="row">{metric.label}</th>
               <td className="numeric">
                 {formatMetricValue(metric.value, metric.unit, metric.key === 'dividendYield')}

@@ -70,7 +70,7 @@ export function ListPage({
                 return (
                   // 選択行は色だけで示さない（色覚多様性）。操作列にも文言を出す
                   <tr key={company.code} className={isSelected ? 'is-selected' : undefined}>
-                    <td>{company.code}</td>
+                    <td className="mono">{company.code}</td>
                     <th scope="row">{company.name}</th>
                     <td className="numeric">
                       {company.totalScore} / {company.maxTotalScore} 点
@@ -78,7 +78,7 @@ export function ListPage({
                     <td className="numeric">
                       {company.effectiveMetricCount} / {company.totalMetricCount}
                     </td>
-                    <td>{formatFetchedAt(company.fetchedAt)}</td>
+                    <td className="mono">{formatFetchedAt(company.fetchedAt)}</td>
                     <td>
                       <button
                         type="button"
@@ -160,15 +160,20 @@ function ScoringBody({
     <>
       {sourceCheckbox}
       <p className="total">
-        総合点 <strong>{selected.scoring.totalScore}</strong> / {selected.scoring.maxTotalScore} 点
+        総合点 <strong>{selected.scoring.totalScore}</strong> /{' '}
+        <span className="numeric">{selected.scoring.maxTotalScore}</span> 点
         {/* 有効指標数の併記は §0.5 の必須要件。80/100 の誤読を防ぐ */}
         <span className="effective">
-          （有効 {selected.scoring.effectiveMetricCount}/{selected.scoring.totalMetricCount} 指標）
+          （有効{' '}
+          <span className="numeric">
+            {selected.scoring.effectiveMetricCount}/{selected.scoring.totalMetricCount}
+          </span>{' '}
+          指標）
         </span>
       </p>
       <p className="meta">
         採用した配当: {dividendSourceText(selected.scoring.dividendSource)} ／ 入力日時:{' '}
-        {formatFetchedAt(selected.scoring.fetchedAt)}
+        <span className="numeric">{formatFetchedAt(selected.scoring.fetchedAt)}</span>
       </p>
       {(selected.scoring.perSource !== null || selected.scoring.pbrSource !== null) && (
         <p className="meta">
