@@ -6,6 +6,7 @@
  */
 
 import { type Company } from './company';
+import { type CompanyListQuery } from './company-list-query';
 
 /** 一覧表示用の要約。1000社規模を想定し、明細は含めない（read model） */
 export interface CompanySummary {
@@ -17,6 +18,18 @@ export interface CompanySummary {
   readonly totalMetricCount: number;
   /** 入力（解析）した日時。UTC の ISO 8601 文字列 */
   readonly fetchedAt: string;
+  /** 銭。株価が未入力なら `null` */
+  readonly priceSen: number | null;
+  /** 1/100%（500 = 5.00%）。⑩ 配当利回りが判定不能なら `null` */
+  readonly dividendYieldValue: number | null;
+  /** %（そのまま%として読む）。③ 予想配当性向が判定不能なら `null` */
+  readonly payoutRatioValue: number | null;
+}
+
+/** `CompanyRepository.listSummaries()` の戻り値。`total` はフィルタ（`q`）適用後の総件数 */
+export interface CompanyListResult {
+  readonly items: readonly CompanySummary[];
+  readonly total: number;
 }
 
 /** 保存する整形指標。再監査のため計算時点の値と計算バージョンを持つ */
@@ -47,8 +60,14 @@ export interface CompanyRepository {
    */
   save(company: Company, scoring: StoredScoring): Promise<void>;
   findByCode(code: string): Promise<Company | null>;
-  /** 一覧。N+1 を作らないため要約だけを1クエリで取る */
-  listSummaries(): Promise<readonly CompanySummary[]>;
+  /**
+   * 一覧。N+1 を作らないため要約だけを1クエリ（JOIN）で取る。
+   *
+   * `query` は既に既定値へ丸め込み済みの完全な `CompanyListQuery`（handler が保証する契約。
+   * `CompanyListQuery` 自体は型で不変条件を強制しないため、handler 以外から呼ぶ場合は
+   * 呼び出し元で `page >= 1`・`perPage` の範囲を検証すること。CR-4）。
+   */
+  listSummaries(query: CompanyListQuery): Promise<CompanyListResult>;
   deleteByCode(code: string): Promise<void>;
   /**
    * 登録済み企業の決算月一覧（重複無し）。EDINET docIDインデックスの日次バッチ
