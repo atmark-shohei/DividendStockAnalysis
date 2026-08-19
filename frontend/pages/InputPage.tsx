@@ -17,7 +17,7 @@ export function InputPage({
 }) {
   return (
     <section>
-      <h2>データ入力</h2>
+      <h2>銘柄登録</h2>
       <p className="meta">
         解析すると保存され、一覧画面へ移動して結果を表示します。入力内容は保存後に破棄されます。
       </p>

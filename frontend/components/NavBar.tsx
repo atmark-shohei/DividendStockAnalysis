@@ -1,9 +1,22 @@
-import { routeToPath, type Route } from '../routes';
+import type { AuthUser } from '../api';
+import { createListRoute, isAdmin, routeToPath, type Route } from '../routes';
 
 /**
  * 2画面の切り替え。**本物の `<a href>` を使う**（`.claude/rules/frontend.md`:
  * 対話要素は `<button>` / `<a>`）。href があるので中クリックでの別タブ表示も効く。
  */
+
+/**
+ * 「銘柄登録」タブを表示するか（`docs/02_design/ui/screen-list.md` §2。admin のみ）。
+ *
+ * **タブを隠すことは認可ではない。** 実効的な制限は BE 側の `requireRole('admin')`
+ * （`src/handler/require-role.ts`）が別途必要。T-091で `POST/DELETE /api/companies` へ
+ * 配線済み（`.claude/rules/frontend.md`）。
+ * guest 判定は常に `user === null`（`Role` 型に `'guest'` は無い）。
+ */
+export function shouldShowInputTab(user: AuthUser | null): boolean {
+  return isAdmin(user);
+}
 
 function NavLink({
   to,
@@ -34,23 +47,23 @@ function NavLink({
 
 export function NavBar({
   current,
+  user,
   onNavigate,
 }: {
   readonly current: Route;
+  readonly user: AuthUser | null;
   readonly onNavigate: (route: Route) => void;
 }) {
   return (
     <nav className="nav" aria-label="画面切り替え">
-      <NavLink
-        to={{ kind: 'list', selectedCode: null, useActualForScoring: false }}
-        active={current.kind === 'list'}
-        onNavigate={onNavigate}
-      >
-        保存済み銘柄
+      <NavLink to={createListRoute()} active={current.kind === 'list'} onNavigate={onNavigate}>
+        検索
       </NavLink>
-      <NavLink to={{ kind: 'input' }} active={current.kind === 'input'} onNavigate={onNavigate}>
-        データ入力
-      </NavLink>
+      {shouldShowInputTab(user) && (
+        <NavLink to={{ kind: 'input' }} active={current.kind === 'input'} onNavigate={onNavigate}>
+          銘柄登録
+        </NavLink>
+      )}
     </nav>
   );
 }

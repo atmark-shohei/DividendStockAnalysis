@@ -30,5 +30,5 @@
     "vitest.unit.config.ts",
     "vitest.workers.config.ts"
   ],
-  "exclude": ["node_modules", "frontend", "dist", "reference"]
+  "exclude": ["node_modules", "frontend", "dist", "reference", "tests/frontend"]
 }

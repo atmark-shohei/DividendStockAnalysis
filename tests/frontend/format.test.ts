@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   NO_DATA,
   fiscalPeriodLabel,
+  formatMetricValue,
   formatPriceAsOf,
+  formatSen,
   payoutRatioBreakdownText,
   ratioToEditableText,
   reasonText,
@@ -173,19 +175,22 @@ describe('payoutRatioBreakdownText', () => {
  * この後方互換が壊れないことを合わせて固定する。
  */
 describe('reasonText', () => {
-  const cases: readonly { readonly name: string; readonly reason: string; readonly expected: string }[] =
-    [
-      {
-        name: 'restated-history は遡及修正の専用文言（フォールバックの「判定できません」にしない）',
-        reason: 'restated-history',
-        expected: '有価証券報告書の記載が年度をまたいで一致しないため、算出できません',
-      },
-      {
-        name: '未知の理由コードはフォールバック文言のまま（restated-history追加後も壊れない）',
-        reason: 'some-future-reason',
-        expected: '判定できません',
-      },
-    ];
+  const cases: readonly {
+    readonly name: string;
+    readonly reason: string;
+    readonly expected: string;
+  }[] = [
+    {
+      name: 'restated-history は遡及修正の専用文言（フォールバックの「判定できません」にしない）',
+      reason: 'restated-history',
+      expected: '有価証券報告書の記載が年度をまたいで一致しないため、算出できません',
+    },
+    {
+      name: '未知の理由コードはフォールバック文言のまま（restated-history追加後も壊れない）',
+      reason: 'some-future-reason',
+      expected: '判定できません',
+    },
+  ];
 
   for (const { name, reason, expected } of cases) {
     it(name, () => {
@@ -195,6 +200,58 @@ describe('reasonText', () => {
 
   it('null は空文字（理由が無いこと自体を示す。既存の後方互換）', () => {
     expect(reasonText(null)).toBe('');
+  });
+});
+
+/**
+ * 解析ダイアログのヒーロー行（株価・PER・PBR。T-096・`analysis-dialog.md` §4.1、§9）が
+ * 使う表示整形。**「PBR が null の銘柄で『— データなし』と表示され、0 は出ない」**
+ * （§9 受入基準）を含め、`null`（判定不能・未入力）と 0（無配・実測ゼロ）を混同しないことを
+ * 検証する。
+ */
+describe('formatSen（解析ダイアログの株価表示）', () => {
+  it('null は — データなし（未入力の株価と0円を混同しない）', () => {
+    expect(formatSen(null)).toBe(NO_DATA);
+  });
+
+  it('0銭は「0.00 円」。null と区別する', () => {
+    expect(formatSen(0)).toBe('0.00 円');
+    expect(formatSen(0)).not.toBe(NO_DATA);
+  });
+
+  it('銭を3桁区切りの円に変換する（端数あり）', () => {
+    expect(formatSen(314_200)).toBe('3,142.00 円');
+  });
+
+  it('端数の無い銭も小数第2位までゼロ埋めする', () => {
+    expect(formatSen(100_000)).toBe('1,000.00 円');
+  });
+});
+
+describe('formatMetricValue（解析ダイアログの PER/PBR 表示。単位「倍」）', () => {
+  it('PER が null（算出不能）なら — データなし。0倍にしない', () => {
+    expect(formatMetricValue(null, '倍', false)).toBe(NO_DATA);
+  });
+
+  it('PBR が null（算出不能）なら — データなし。0倍にしない（analysis-dialog.md §9）', () => {
+    expect(formatMetricValue(null, '倍', false)).toBe(NO_DATA);
+  });
+
+  it('PER の値をそのまま「倍」付きで表示する（小数第2位まで）', () => {
+    expect(formatMetricValue(14.2, '倍', false)).toBe('14.20 倍');
+  });
+
+  it('0倍（算出結果として実際に0）は 0.00 倍。null と混同しない', () => {
+    expect(formatMetricValue(0, '倍', false)).toBe('0.00 倍');
+    expect(formatMetricValue(0, '倍', false)).not.toBe(NO_DATA);
+  });
+
+  it('⑩配当利回りは1/100%単位（isHundredthsPercent=true）で% へ戻す', () => {
+    expect(formatMetricValue(318, '%', true)).toBe('3.18%');
+  });
+
+  it('⑩配当利回りが null なら — データなし', () => {
+    expect(formatMetricValue(null, '%', true)).toBe(NO_DATA);
   });
 });
 

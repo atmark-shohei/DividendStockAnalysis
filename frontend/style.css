@@ -53,7 +53,18 @@
   --radius-2xl: 1rem;
 
   --content-max: 72.5rem;
+  --width-auth-card: 25rem;
   --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.6);
+
+  /*
+   * 解析ダイアログ専用トークン（T-096・`components.md` §3 `<Dialog>`、
+   * `docs/02_design/ui/pages/analysis-dialog.md` §3）。design-tokens.md に
+   * 汎用トークンとしての定義が無い一回限りの値だが、直値禁止（design-tokens.md §6）
+   * のため `--shadow-dialog` と同じ扱いで専用トークンとして切り出す（fe-plan.md §2.4 確認事項C）。
+   */
+  --dialog-scrim-color: rgba(6, 8, 12, 0.74);
+  --dialog-scrim-blur: 0.1875rem; /* 3px */
+  --dialog-max-width: 58.75rem; /* 940px */
 }
 
 * {
@@ -131,6 +142,66 @@ button:disabled {
   cursor: progress;
 }
 
+/* ヘッダー: タイトルと認証エリアを両端に配置する */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* ヘッダー右側の認証エリア（未ログイン: ログインリンク／ログイン済み: メール＋バッジ＋ログアウト） */
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+}
+
+/* ログイン/アカウント作成カード（`docs/02_design/ui/pages/login-page.md` §3） */
+.auth-card {
+  max-width: var(--width-auth-card);
+  margin-inline: auto;
+  border-radius: var(--radius-xl);
+}
+
+/* セグメント切替（/login ⇄ /signup）。`.nav` と同じ「下線＋色」で現在地を示す */
+.auth-tabs {
+  display: flex;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-line-strong);
+  margin-bottom: var(--space-3);
+}
+
+.auth-tabs a {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 3px solid transparent;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.auth-tabs a[aria-current='page'] {
+  border-bottom-color: var(--color-action);
+  color: var(--color-action);
+}
+
+/* パスワードのハッシュ化文言（ログイン/アカウント作成カードの脚注） */
+.auth-footnote {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+}
+
+/* ヘッダーの「管理者」バッジ専用。常に caution 色（design-tokens.md §2.2） */
+.role-badge {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-caution) 20%, transparent);
+  color: var(--color-caution);
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+}
+
 /* 画面切り替え。現在地は下線と背景の両方で示す（色だけに依存させない） */
 .nav {
   display: flex;
@@ -186,6 +257,13 @@ td {
   font-variant-numeric: tabular-nums;
 }
 
+/* 一覧行のコード表示専用（search-page.md §4「コード」欄の書式）。.mono は
+ * font-family のみを持つ汎用クラスのため、サイズ・色はここで別クラスとして足す */
+.company-code {
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-tertiary);
+}
+
 /* 判定不能の行。色だけに依存させないため、備考欄に必ず文言を出している */
 .is-unavailable {
   color: var(--color-text-tertiary);
@@ -237,7 +315,273 @@ input[aria-invalid='true'] {
   border-color: var(--color-caution);
 }
 
+/*
+ * 検索行（`docs/02_design/ui/pages/search-page.md` §3）。検索ボックス＋件数ラベル＋
+ * ソートを1行、折り返さない。件数・ソートは幅を伸縮させない（`flex: none`）
+ */
+.search-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.search-bar input[type='search'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.search-count {
+  flex: none;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.search-sort {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* 一覧の銘柄セル（銘柄名＋コード） */
+.company-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.company-name {
+  display: inline-block;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+/* 総合点セル。`<ScoreBar>` ＋ 数値 ＋ 有効指標数（`search-page.md` §4）。
+ * 総合点が最大の視覚的要素になるよう、他の数値列より大きく太くする */
+.score-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.score-value {
+  font-size: var(--font-size-score);
+  font-weight: 700;
+}
+
+/* 「点」は数値と同じ行内に置きつつ、太さ・大きさだけ弱める（search-page.md §4） */
+.score-unit {
+  font-size: var(--font-size-base);
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+}
+
+.score-effective {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-3xs);
+}
+
+/* `<ScoreBar>`（`components.md` §2）。塗りは常に `--color-data`（緑・赤は使わない） */
+.score-bar {
+  display: block;
+}
+
+.score-bar-track {
+  display: block;
+  height: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-line);
+  overflow: hidden;
+}
+
+.score-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-data);
+}
+
+/* 配当性向・株価は二次情報（`search-page.md` §4） */
+.text-secondary {
+  color: var(--color-text-secondary);
+}
+
+/* 空状態カード（破線枠。`search-page.md` §5） */
+.empty-state {
+  padding: var(--space-5);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-dim);
+  text-align: center;
+}
+
+.empty-state-heading {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.empty-state-description {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* ページング（`components.md` §3 `<Pagination>`）。前後端は button:disabled の既存スタイル */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.pagination-status {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* ロード中のプレースホルダ（`search-page.md` §6）。実データと同じ行高を確保する */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.skeleton-row {
+  height: 2.5rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-dim);
+}
+
 footer {
   margin-top: var(--space-4);
   color: var(--color-text-tertiary);
+}
+
+/*
+ * 解析ダイアログ（T-096・`docs/02_design/ui/pages/analysis-dialog.md` §3、
+ * `components.md` §3 `<Dialog>`）。scrim はフルビューポート固定、カードは中央寄せ。
+ */
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow-y: auto;
+  padding: var(--space-5);
+  background: var(--dialog-scrim-color);
+  backdrop-filter: blur(var(--dialog-scrim-blur));
+}
+
+.dialog-card {
+  width: 100%;
+  max-width: var(--dialog-max-width);
+  margin-block: var(--space-6);
+  padding: var(--space-4);
+  border-radius: var(--radius-2xl);
+  background: var(--color-surface);
+  /* このアプリで唯一シャドウを使う場所（design-tokens.md §4） */
+  box-shadow: var(--shadow-dialog);
+}
+
+/* ダイアログの見出し行（銘柄名 ＋ ✕ ボタン。`analysis-dialog.md` §3） */
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.dialog-header h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+}
+
+/* ✕ ボタンは副次ボタンの見た目にする（`--color-action` の塗りつぶしを使わない） */
+.dialog-close {
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-weight: 400;
+}
+
+/* 総合スコアカード内のヒーロー行（株価・配当利回り・PER・PBR。`analysis-dialog.md` §4.1） */
+.dialog-hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-block: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-line-row);
+}
+
+.dialog-hero-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.dialog-hero-row dt {
+  color: var(--color-text-secondary);
+}
+
+.dialog-hero-row dd {
+  margin: 0;
+}
+
+/*
+ * 指標行クリックの stretched button（`search-page.md` §4.1 と同じパターン）。
+ * 実体の `<button>` はセル内の見出しテキストを表示するだけの見た目（`background: none`）で、
+ * `::after` を `position: absolute; inset: 0` にして行全体（`.metric-row`。
+ * `position: relative` を持つ最も近い祖先）まで当たり判定を広げる。
+ */
+.metric-row {
+  position: relative;
+}
+
+.metric-row-button {
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.metric-row-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+/* キーボードフォーカス時、行全体の当たり判定に沿って可視のフォーカスリングを出す
+ * （`search-page.md` §4.1「フォーカス時は box-shadow: inset 3px 0 0 var(--color-action)」） */
+.metric-row-button:focus-visible::after {
+  box-shadow: inset 3px 0 0 var(--color-action);
+}
+
+/* 視覚上隠すが SR には読ませる（標準的な visually-hidden パターン）。
+ * ここの px 値はデザイントークン（色・余白・フォントサイズ）ではなく、
+ * 要素を1pxに縮めて隠すための技術的な固定値なので design-tokens.md §6 の
+ * 「直値禁止」の対象外として扱う（CR-7） */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

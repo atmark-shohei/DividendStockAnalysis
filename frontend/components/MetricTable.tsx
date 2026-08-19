@@ -12,17 +12,26 @@ import { NO_DATA, formatMetricValue, payoutRatioBreakdownText, reasonText } from
  * `dividendSource` と同じ置き方。`src/handler/dto/company-input.ts` 実装済みの形）。
  * ③ 行を描画するときだけこの3つを使い、既存の行構造・汎用ループは変えない
  * （備考列への追記。Manager決定、2026-08-06）。
+ *
+ * 各行は stretched button 化されている（`docs/02_design/ui/pages/search-page.md` §4.1 と
+ * 同じパターン。`onRowClick(metric.key)` を呼び `?metric=` へ遷移する。T-096・確認事項D、
+ * Manager確認済み）。`<tr onClick>` にせず、実体の `<button>` を指標名セルに置き、
+ * CSS（`.metric-row-button::after`）で当たり判定を行全体に広げる
+ * （`.claude/rules/frontend.md`「対話要素は button/a を使う」）。
  */
 export function MetricTable({
   metrics,
   payoutRatioSource,
   payoutRatioForecast,
   payoutRatioActual,
+  onRowClick,
 }: {
   readonly metrics: ScoringResponse['metrics'];
   readonly payoutRatioSource: ScoringResponse['payoutRatioSource'];
   readonly payoutRatioForecast: ScoringResponse['payoutRatioForecast'];
   readonly payoutRatioActual: ScoringResponse['payoutRatioActual'];
+  /** 指標行クリック（T-096追加）。`?metric=<key>` への遷移は呼び出し側の責務 */
+  readonly onRowClick: (key: ScoringResponse['metrics'][number]['key']) => void;
 }) {
   return (
     <table className="metric-table">
@@ -40,9 +49,22 @@ export function MetricTable({
         {metrics.map((metric) => {
           const unavailable = metric.score === null;
           return (
-            <tr key={metric.key} className={unavailable ? 'is-unavailable' : undefined}>
+            <tr
+              key={metric.key}
+              className={unavailable ? 'metric-row is-unavailable' : 'metric-row'}
+            >
               <td className="mono">{metric.number}</td>
-              <th scope="row">{metric.label}</th>
+              <th scope="row">
+                <button
+                  type="button"
+                  className="metric-row-button"
+                  onClick={() => {
+                    onRowClick(metric.key);
+                  }}
+                >
+                  {metric.label}
+                </button>
+              </th>
               <td className="numeric">
                 {formatMetricValue(metric.value, metric.unit, metric.key === 'dividendYield')}
               </td>

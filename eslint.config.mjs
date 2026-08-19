@@ -74,8 +74,10 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Worker 側とフロントエンドで tsconfig が違う（lib と jsx が異なるため）
+    // Worker 側とフロントエンドで tsconfig が違う（lib と jsx が異なるため）。
+    // tests/frontend は tsconfig.frontend.json 側（DOM lib）で見るので除外する
     files: ['src/**/*.ts', 'tests/**/*.ts', 'drizzle.config.ts', 'vitest*.config.ts'],
+    ignores: ['tests/frontend/**'],
     languageOptions: {
       parserOptions: { project: './tsconfig.json', tsconfigRootDir: import.meta.dirname },
     },
@@ -93,7 +95,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['frontend/**/*.{ts,tsx}', 'vite.config.ts'],
+    files: ['frontend/**/*.{ts,tsx}', 'vite.config.ts', 'tests/frontend/**/*.{ts,tsx}'],
     languageOptions: {
       parserOptions: { project: './tsconfig.frontend.json', tsconfigRootDir: import.meta.dirname },
     },

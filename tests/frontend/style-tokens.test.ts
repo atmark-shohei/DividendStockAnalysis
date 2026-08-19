@@ -55,6 +55,7 @@ describe('style.css のトークン網羅性（design-tokens.md §2〜§4）', (
     ['--radius-xl', '0.875rem'],
     ['--radius-2xl', '1rem'],
     ['--content-max', '72.5rem'],
+    ['--width-auth-card', '25rem'],
   ];
 
   it.each(expectedTokens)('%s が %s で :root に定義されている', (name, value) => {
@@ -77,15 +78,23 @@ describe('style.css のトークン網羅性（design-tokens.md §2〜§4）', (
     expect(styleCss).toMatch(/--shadow-dialog:\s*0 24px 64px rgba\(0, 0, 0, 0\.6\);/);
   });
 
-  it('トークンは43個（色17 + フォント族2 + フォントサイズ11 + 余白6 + 角丸5 + content-max1 + shadow-dialog1）', () => {
+  it('--dialog-scrim-color / --dialog-scrim-blur / --dialog-max-width が定義されている（T-096・確認事項C。design-tokens.md に汎用トークンの定義が無いためダイアログ専用トークンとして切り出した）', () => {
+    expect(styleCss).toMatch(/--dialog-scrim-color:\s*rgba\(6, 8, 12, 0\.74\);/);
+    expect(styleCss).toMatch(/--dialog-scrim-blur:\s*0\.1875rem;/);
+    expect(styleCss).toMatch(/--dialog-max-width:\s*58\.75rem;/);
+  });
+
+  it('トークンは47個（色17 + フォント族2 + フォントサイズ11 + 余白6 + 角丸5 + content-max1 + width-auth-card1 + shadow-dialog1 + dialog専用3）', () => {
     // fe-plan.md は「42トークン」と記載していたが、内訳（17+2+11+6+5+1+1）を計算すると43。
+    // その後 CR-3（T-091 FEレビュー）で `--width-auth-card` を追加したため44になった。
+    // T-096 で dialog 専用トークン（scrim-color/scrim-blur/max-width）を3個追加し47になった。
     // design-tokens.md §2〜§4 のトークンは漏れなく:root に定義されているので、
-    // ここでは実際の定義数（43）を正として検証する。
+    // ここでは実際の定義数（47）を正として検証する。
     const rootBlockMatch = styleCss.match(/:root\s*\{([\s\S]*?)\n\}/);
     expect(rootBlockMatch).not.toBeNull();
     const rootBlock = rootBlockMatch?.[1] ?? '';
     const declarationCount = (rootBlock.match(/--[a-z0-9-]+:\s*[^;]+;/g) ?? []).length;
-    expect(declarationCount).toBe(43);
+    expect(declarationCount).toBe(47);
   });
 });
 
@@ -115,9 +124,9 @@ describe('style.css の旧トークン・旧カラーコードの残存禁止', 
 });
 
 describe('style.css の rgba 直書き禁止（design-tokens.md §7 受入基準）', () => {
-  it('rgba( の出現は --shadow-dialog の定義行1箇所のみ', () => {
+  it('rgba( の出現は --shadow-dialog / --dialog-scrim-color の定義行2箇所のみ（T-096でscrim用トークンを追加）', () => {
     const matches = styleCss.match(/rgba\(/g) ?? [];
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(2);
   });
 
   it('.is-selected は color-mix() で --color-action を参照する（rgba直値を使わない）', () => {
@@ -172,11 +181,20 @@ describe('frontend/**/*.tsx に色・rgba直値が無い（design-tokens.md §6 
     '../../frontend/App.tsx',
     '../../frontend/pages/InputPage.tsx',
     '../../frontend/pages/ListPage.tsx',
+    '../../frontend/pages/AuthPage.tsx',
     '../../frontend/components/NavBar.tsx',
     '../../frontend/components/MetricTable.tsx',
     '../../frontend/components/ScoreRadar.tsx',
     '../../frontend/components/BalanceSheetFields.tsx',
     '../../frontend/components/CompanyForm.tsx',
+    '../../frontend/components/AuthForm.tsx',
+    '../../frontend/components/AuthStatus.tsx',
+    '../../frontend/components/RoleBadge.tsx',
+    '../../frontend/components/ScoreBar.tsx',
+    '../../frontend/components/Pagination.tsx',
+    '../../frontend/components/EmptyState.tsx',
+    '../../frontend/components/Skeleton.tsx',
+    '../../frontend/components/Dialog.tsx',
   ];
 
   it.each(tsxFiles)('%s に #RRGGBB / rgba( の直値が無い', (relativePath) => {
@@ -193,22 +211,53 @@ describe('ListPage.tsx の --font-mono 適用（class 付与の検証。CR-1/CR-
     'utf-8',
   );
 
-  it('一覧表の銘柄コード列（company.code）に mono class が付与されている', () => {
-    expect(listPageSource).toMatch(/className="mono">\{company\.code\}/);
+  it('一覧表の銘柄コード列（company.code）に mono company-code class が付与されている（CR-1是正）', () => {
+    expect(listPageSource).toMatch(/className="mono company-code">\{company\.code\}/);
   });
 
-  it('一覧表の入力日時列（formatFetchedAt(company.fetchedAt)）に mono class が付与されている', () => {
-    expect(listPageSource).toMatch(/className="mono">\{formatFetchedAt\(company\.fetchedAt\)\}/);
+  it('.company-code が --font-size-2xs / --color-text-tertiary を参照する（CR-1是正）', () => {
+    const companyCodeBlockMatch = styleCss.match(/\.company-code\s*\{([\s\S]*?)\}/);
+    expect(companyCodeBlockMatch).not.toBeNull();
+    expect(companyCodeBlockMatch?.[1]).toContain('var(--font-size-2xs)');
+    expect(companyCodeBlockMatch?.[1]).toContain('var(--color-text-tertiary)');
   });
 
-  it('総合点の分母（maxTotalScore）に numeric class が付与されている', () => {
-    expect(listPageSource).toMatch(/className="numeric">\{selected\.scoring\.maxTotalScore\}/);
-  });
-
-  it('解析結果詳細の入力日時（formatFetchedAt(selected.scoring.fetchedAt)）に numeric class が付与されている', () => {
+  it('総合点セルの「点」が .score-unit で数値より弱い書体になっている（CR-2是正）', () => {
     expect(listPageSource).toMatch(
-      /className="numeric">\{formatFetchedAt\(selected\.scoring\.fetchedAt\)\}/,
+      /score-value">\s*\{company\.totalScore\} \/ \{company\.maxTotalScore\}\s*<span className="score-unit">/,
     );
+    const scoreUnitBlockMatch = styleCss.match(/\.score-unit\s*\{([\s\S]*?)\}/);
+    expect(scoreUnitBlockMatch).not.toBeNull();
+    expect(scoreUnitBlockMatch?.[1]).toContain('var(--font-size-base)');
+    expect(scoreUnitBlockMatch?.[1]).toContain('font-weight: 400;');
+  });
+
+  // T-094: 検索一覧に入力日時列は無い（`search-page.md` §4 の行仕様に記載が無い）。
+  // 代わりに配当利回り・配当性向・株価が numeric class で表示される
+  it('一覧表の配当利回り列（dividendYieldValue）に numeric class が付与されている', () => {
+    expect(listPageSource).toMatch(
+      /className="numeric">\s*\{formatMetricValue\(company\.dividendYieldValue, '%', true\)\}/,
+    );
+  });
+
+  it('一覧表の配当性向列（payoutRatioValue）に numeric class が付与されている（二次情報として text-secondary も付与）', () => {
+    expect(listPageSource).toMatch(
+      /className="numeric text-secondary">\s*\{formatMetricValue\(company\.payoutRatioValue, '%', false\)\}/,
+    );
+  });
+
+  it('一覧表の株価列（priceSen）に numeric class が付与されている', () => {
+    expect(listPageSource).toMatch(
+      /className="numeric text-secondary">\{formatSen\(company\.priceSen\)\}/,
+    );
+  });
+
+  it('総合点の分母（maxTotalScore）に numeric class が付与されている（T-096: ScoringBody 内でローカル変数 scoring に束縛）', () => {
+    expect(listPageSource).toMatch(/className="numeric">\{scoring\.maxTotalScore\}/);
+  });
+
+  it('解析結果詳細の入力日時（formatFetchedAt(scoring.fetchedAt)）に numeric class が付与されている（T-096: ローカル変数 scoring）', () => {
+    expect(listPageSource).toMatch(/className="numeric">\{formatFetchedAt\(scoring\.fetchedAt\)\}/);
   });
 });
 
