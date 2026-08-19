@@ -73,6 +73,12 @@ export interface CompanyScoring {
   readonly perSource: PerSource | null;
   /** ⑨ PBR の出所 */
   readonly pbrSource: PbrSource | null;
+  /** ユーザーが手入力した現在株価（銭）。未入力なら `null`（`company.priceSen` をそのまま通す） */
+  readonly priceSen: number | null;
+  /** ⑨ PER（倍）。`perSource` と対になる実数。算出不能なら `null` */
+  readonly per: number | null;
+  /** ⑨ PBR（倍）。`pbrSource` と対になる実数。算出不能なら `null` */
+  readonly pbr: number | null;
   /** 入力（解析）した日時。画面に必ず出す（`CLAUDE.md`） */
   readonly fetchedAt: string;
 }
@@ -167,6 +173,9 @@ export function scoreCompany(company: Company, useActualForScoring = false): Com
     payoutRatioActual: payoutRatioResult.actual,
     perSource: company.multiples.perSource,
     pbrSource: company.multiples.pbrSource,
+    priceSen: company.priceSen,
+    per: company.multiples.per,
+    pbr: company.multiples.pbr,
     fetchedAt: company.fetchedAt,
   };
 }

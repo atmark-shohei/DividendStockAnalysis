@@ -13,6 +13,11 @@ import {
 } from '@/infra/d1/company-repository';
 import type { AnalyzeCompanyRequest } from '@/handler/dto/company-input';
 
+import {
+  TEST_ADMIN_SESSION_COOKIE,
+  buildAuthTestDependencies,
+} from '../handler/support/build-app-dependencies';
+
 /**
  * 明細の一括 INSERT が D1 のバインド変数上限（1文あたり100個）で落ちた回帰の再現テスト。
  *
@@ -61,6 +66,7 @@ function app() {
     marketDataSource: unusedMarketDataSource,
     edinetHistorySource: unusedEdinetHistorySource,
     edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup,
+    ...buildAuthTestDependencies(),
     now: () => FIXED_NOW,
   });
 }
@@ -104,10 +110,11 @@ function payload(overrides: Partial<AnalyzeCompanyRequest> = {}): AnalyzeCompany
   };
 }
 
+/** `POST /api/companies` は `requireRole(['admin'])` で保護される。admin セッションで叩く */
 async function post(request: AnalyzeCompanyRequest) {
   return app().request('/api/companies', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', cookie: TEST_ADMIN_SESSION_COOKIE },
     body: JSON.stringify(request),
   });
 }

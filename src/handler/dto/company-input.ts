@@ -161,6 +161,12 @@ export interface ScoringResponse {
   readonly perSource: 'forecast-eps' | 'actual-eps' | 'manual' | null;
   /** ⑨ PBR の出所 */
   readonly pbrSource: 'actual-bps' | 'manual' | null;
+  /** 銭。株価が未入力なら `null` */
+  readonly priceSen: number | null;
+  /** 倍。算出不能なら `null` */
+  readonly per: number | null;
+  /** 倍。算出不能なら `null` */
+  readonly pbr: number | null;
   readonly fetchedAt: string;
   readonly metrics: readonly MetricView[];
 }
@@ -191,6 +197,9 @@ export function toScoringResponse(scoring: CompanyScoring): ScoringResponse {
     },
     perSource: scoring.perSource,
     pbrSource: scoring.pbrSource,
+    priceSen: scoring.priceSen,
+    per: scoring.per,
+    pbr: scoring.pbr,
     fetchedAt: scoring.fetchedAt,
     metrics: METRIC_KEYS.map((key) => {
       const metric = scoring.card.metrics[key];

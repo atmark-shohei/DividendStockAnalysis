@@ -374,6 +374,49 @@ describe('スコアカードの組み立て', () => {
 });
 
 /**
+ * `priceSen`/`per`/`pbr` の配線確認（ブロッカー解消計画 §2.1・§5.1）。
+ * 計算はしない。`company.priceSen`/`company.multiples.per`/`company.multiples.pbr` を
+ * そのまま転記しているかだけを見る（`perSource`/`pbrSource` と同じ扱い）。
+ */
+describe('priceSen/per/pbr の配線（company からそのまま転記）', () => {
+  it('値がある場合、そのまま転記される', () => {
+    const target: Company = {
+      ...company([record(2025)]),
+      priceSen: 100_000,
+      multiples: { per: 9, perSource: 'actual-eps', pbr: 1, pbrSource: 'actual-bps' },
+    };
+    const scoring = scoreCompany(target);
+    expect(scoring.priceSen).toBe(100_000);
+    expect(scoring.per).toBe(9);
+    expect(scoring.pbr).toBe(1);
+  });
+
+  it('境界値: すべて欠損なら null のまま通る（0 に丸めない）', () => {
+    const target: Company = {
+      ...company([record(2025)]),
+      priceSen: null,
+      multiples: { per: null, perSource: null, pbr: null, pbrSource: null },
+    };
+    const scoring = scoreCompany(target);
+    expect(scoring.priceSen).toBeNull();
+    expect(scoring.per).toBeNull();
+    expect(scoring.pbr).toBeNull();
+  });
+
+  it('境界値: per だけ算出できて pbr が欠損している場合、独立して転記される', () => {
+    const target: Company = {
+      ...company([record(2025)]),
+      priceSen: 100_000,
+      multiples: { per: 9, perSource: 'actual-eps', pbr: null, pbrSource: null },
+    };
+    const scoring = scoreCompany(target);
+    expect(scoring.priceSen).toBe(100_000);
+    expect(scoring.per).toBe(9);
+    expect(scoring.pbr).toBeNull();
+  });
+});
+
+/**
  * `company.epsHistoryRestated` / `revenueHistoryRestated` の配線確認
  * （`docs/02_design/logic/edinet-history-import.md` §4.3・§9。判定ロジックそのものは
  * `tests/domain/scoring/eps-cagr.test.ts` / `revenue-cagr.test.ts` で尽くしてある）。

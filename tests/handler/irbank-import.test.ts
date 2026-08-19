@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { type Company } from '@/domain/company/company';
-import { type CompanyRepository, type CompanySummary } from '@/domain/company/company-repository';
+import {
+  type CompanyListResult,
+  type CompanyRepository,
+} from '@/domain/company/company-repository';
 import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document-index';
 import { type EdinetHistorySource } from '@/domain/company/edinet-history-source';
 import {
@@ -12,6 +15,8 @@ import {
 import { type MarketDataSource } from '@/domain/company/market-data-source';
 import { type Result, err, ok } from '@/domain/shared/result';
 import { createApp } from '@/handler/app';
+
+import { buildAuthTestDependencies } from './support/build-app-dependencies';
 
 /**
  * GET /api/irbank/:code の結線テスト。
@@ -29,7 +34,7 @@ function unusedRepository(): CompanyRepository {
   return {
     save: (): Promise<void> => fail(),
     findByCode: (): Promise<Company | null> => fail(),
-    listSummaries: (): Promise<readonly CompanySummary[]> => fail(),
+    listSummaries: (): Promise<CompanyListResult> => fail(),
     deleteByCode: (): Promise<void> => fail(),
     listFiscalYearEndMonths: (): Promise<readonly number[]> => fail(),
   };
@@ -80,6 +85,7 @@ function app(financialSource: FinancialSource) {
     marketDataSource: unusedMarketDataSource(),
     edinetHistorySource: unusedEdinetHistorySource(),
     edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup(),
+    ...buildAuthTestDependencies(),
     now: () => new Date('2026-07-28T00:00:00.000Z'),
   });
 }

@@ -43,6 +43,13 @@
       "when": 1786802846206,
       "tag": "0005_milky_white_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786982923274,
+      "tag": "0006_fat_shaman",
+      "breakpoints": true
     }
   ]
 }

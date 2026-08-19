@@ -188,3 +188,34 @@ export const edinetDocumentSummary = sqliteTable('edinet_document_summary', {
   /** 保存時刻。UTC の ISO 8601。**有効期限には使わない**（§4.8.4） */
   cachedAt: text('cached_at').notNull(),
 });
+
+/**
+ * ユーザー（T-091。`docs/02_design/database/schema.md` §テーブル定義（認証・ポートフォリオ））。
+ *
+ * `created_at` は `companies` と異なり **DB の `CURRENT_TIMESTAMP` 既定値を使わず、
+ * アプリ側の `now()` 注入から明示的に埋める**（`sessions.expiresAt` の計算と同じ時計を
+ * 使うことでテストから固定できるようにするため。T-091計画 §2.3）。
+ */
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  passwordSalt: text('password_salt').notNull(),
+  passwordIterations: integer('password_iterations').notNull(),
+  /** 'user' | 'admin'。`guest`（未ログイン）は行を持たない */
+  role: text('role').notNull(),
+  failedLoginCount: integer('failed_login_count').notNull().default(0),
+  /** この時刻まではログイン試行を拒否する。UTC ISO 8601。NULL = ロックなし */
+  lockedUntil: text('locked_until'),
+  createdAt: text('created_at').notNull(),
+});
+
+/** セッション（T-091）。`id` が Cookie の値そのもの（不透明トークン） */
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  userId: integer('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  expiresAt: text('expires_at').notNull(),
+  createdAt: text('created_at').notNull(),
+});

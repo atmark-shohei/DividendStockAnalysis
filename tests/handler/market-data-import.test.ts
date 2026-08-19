@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { type Company } from '@/domain/company/company';
-import { type CompanyRepository, type CompanySummary } from '@/domain/company/company-repository';
+import {
+  type CompanyListResult,
+  type CompanyRepository,
+} from '@/domain/company/company-repository';
 import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document-index';
 import { type EdinetHistorySource } from '@/domain/company/edinet-history-source';
 import { type FinancialSource } from '@/domain/company/financial-source';
@@ -12,6 +15,8 @@ import {
 } from '@/domain/company/market-data-source';
 import { type Result, err, ok } from '@/domain/shared/result';
 import { createApp } from '@/handler/app';
+
+import { buildAuthTestDependencies } from './support/build-app-dependencies';
 
 /**
  * GET /api/market-data/:code の結線テスト。
@@ -28,7 +33,7 @@ function unusedRepository(): CompanyRepository {
   return {
     save: (): Promise<void> => fail(),
     findByCode: (): Promise<Company | null> => fail(),
-    listSummaries: (): Promise<readonly CompanySummary[]> => fail(),
+    listSummaries: (): Promise<CompanyListResult> => fail(),
     deleteByCode: (): Promise<void> => fail(),
     listFiscalYearEndMonths: (): Promise<readonly number[]> => fail(),
   };
@@ -77,6 +82,7 @@ function app(marketDataSource: MarketDataSource) {
     marketDataSource,
     edinetHistorySource: unusedEdinetHistorySource(),
     edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup(),
+    ...buildAuthTestDependencies(),
     now: () => new Date('2026-08-03T00:00:00.000Z'),
   });
 }

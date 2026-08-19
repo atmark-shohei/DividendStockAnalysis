@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { type Company } from '@/domain/company/company';
-import { type CompanyRepository, type CompanySummary } from '@/domain/company/company-repository';
+import {
+  type CompanyListResult,
+  type CompanyRepository,
+} from '@/domain/company/company-repository';
 import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document-index';
 import {
   type EdinetHistoryError,
@@ -12,6 +15,8 @@ import { type FinancialSource } from '@/domain/company/financial-source';
 import { type MarketDataSource } from '@/domain/company/market-data-source';
 import { type Result, err, ok } from '@/domain/shared/result';
 import { createApp } from '@/handler/app';
+
+import { buildAuthTestDependencies } from './support/build-app-dependencies';
 
 /**
  * GET /api/edinet/:code の結線テスト。
@@ -28,7 +33,7 @@ function unusedRepository(): CompanyRepository {
   return {
     save: (): Promise<void> => fail(),
     findByCode: (): Promise<Company | null> => fail(),
-    listSummaries: (): Promise<readonly CompanySummary[]> => fail(),
+    listSummaries: (): Promise<CompanyListResult> => fail(),
     deleteByCode: (): Promise<void> => fail(),
     listFiscalYearEndMonths: (): Promise<readonly number[]> => fail(),
   };
@@ -75,6 +80,7 @@ function app(edinetHistorySource: EdinetHistorySource) {
     marketDataSource: unusedMarketDataSource(),
     edinetHistorySource,
     edinetDocumentIndexLookup: stubIndex,
+    ...buildAuthTestDependencies(),
     now: () => new Date('2026-08-08T00:00:00.000Z'),
   });
 }
@@ -227,7 +233,9 @@ describe('取得に成功する', () => {
     );
 
     const response = await app(source).request('/api/edinet/9433');
-    const body = (await response.json()) as { years: readonly { operatingMarginPercent: unknown }[] };
+    const body = (await response.json()) as {
+      years: readonly { operatingMarginPercent: unknown }[];
+    };
 
     expect(body.years[0]?.operatingMarginPercent).toBeNull();
   });

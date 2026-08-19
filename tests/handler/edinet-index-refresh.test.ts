@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { type Company } from '@/domain/company/company';
-import { type CompanyRepository, type CompanySummary } from '@/domain/company/company-repository';
+import {
+  type CompanyListResult,
+  type CompanyRepository,
+} from '@/domain/company/company-repository';
 import {
   type EdinetDocumentIndexEntry,
   type EdinetDocumentIndexLookup,
@@ -13,6 +16,8 @@ import { type FinancialSource } from '@/domain/company/financial-source';
 import { type MarketDataSource } from '@/domain/company/market-data-source';
 import { err, ok } from '@/domain/shared/result';
 import { type AppDependencies, createApp } from '@/handler/app';
+
+import { buildAuthTestDependencies } from './support/build-app-dependencies';
 
 /**
  * POST /api/admin/edinet/index/refresh の結線テスト。
@@ -31,7 +36,7 @@ function unusedRepository(): CompanyRepository {
   return {
     save: (): Promise<void> => fail(),
     findByCode: (): Promise<Company | null> => fail(),
-    listSummaries: (): Promise<readonly CompanySummary[]> => fail(),
+    listSummaries: (): Promise<CompanyListResult> => fail(),
     deleteByCode: (): Promise<void> => fail(),
     listFiscalYearEndMonths: (): Promise<readonly number[]> => fail(),
   };
@@ -98,6 +103,7 @@ function app(options: {
   return createApp({
     repository: unusedRepository(),
     ...unusedSources(),
+    ...buildAuthTestDependencies(),
     now: () => new Date('2026-08-09T00:00:00.000Z'),
     edinetIndexAdmin: admin,
   });

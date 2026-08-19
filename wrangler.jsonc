@@ -6,6 +6,15 @@
   "compatibility_date": "2026-07-22",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  "vars": {
+    // サインアップ受付の ON/OFF・上限人数（ADR-0013 §決定2）。秘密情報ではないので vars で管理する。
+    // 未設定なら安全側（受付停止）に倒す（src/index.ts の signupConfigOf）
+    "SIGNUP_ENABLED": "false",
+    "SIGNUP_MAX_USERS": "5",
+    // Cookie の Secure 属性。未設定/"false"以外は常に true（安全側）。
+    // ローカル http で手動確認する場合だけ .dev.vars に "false" を上書きする
+    "COOKIE_SECURE": "true",
+  },
   // React アプリ（Vite の出力）。API 以外のパスはここへ流す
   "assets": {
     "directory": "./dist/frontend",

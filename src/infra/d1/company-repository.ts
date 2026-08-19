@@ -7,12 +7,14 @@
 
 import { type DrizzleD1Database, drizzle } from 'drizzle-orm/d1';
 import { type BatchItem } from 'drizzle-orm/batch';
-import { eq } from 'drizzle-orm';
+import { type AnyColumn, and, asc, desc, eq, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 
 import { type Company, type PbrSource, type PerSource } from '../../domain/company/company';
+import { type CompanyListQuery } from '../../domain/company/company-list-query';
 import {
+  type CompanyListResult,
   type CompanyRepository,
-  type CompanySummary,
   type StoredScoring,
 } from '../../domain/company/company-repository';
 import { type DividendRecordKind } from '../../domain/company/dividend-record';
@@ -76,6 +78,56 @@ function toDividendKind(raw: string): DividendRecordKind | null {
 
 /** `listFiscalYearEndMonths` の暫定実装が返す定数（1〜12月すべて） */
 const ALL_MONTHS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+/**
+ * `listSummaries()` 用。`transformed_metrics` は `(companyCode, metricKey)` 複合PKで
+ * 1社最大2行（`dividendYield`/`payoutRatio`）を持つ。単純な LEFT JOIN だと1社が2行に
+ * 増えてページングの行数がずれるため、`metric_key` 条件付きの別名 LEFT JOIN を2本張り、
+ * 1社1行に保つ（BE計画 §5.1）。
+ */
+const dividendYieldMetrics = alias(transformedMetrics, 'dividend_yield_metrics');
+const payoutRatioMetrics = alias(transformedMetrics, 'payout_ratio_metrics');
+
+/**
+ * SQLite `LIKE` のワイルドカード文字（`%`/`_`）とエスケープ文字自身（`\`）をエスケープする。
+ *
+ * 未エスケープのまま `%${q}%` に埋め込むと、`q='_'` や `q='100%'` のように `LIKE` の
+ * 特殊文字を検索語に含めた場合、意図しない部分一致が起こる（BE レビュー CR-1）。
+ * `\` を最初にエスケープしないと `%`/`_` の直前に付けたエスケープ文字自身が
+ * 二重解釈されるので、置換順序を守ること。
+ */
+export function escapeLikeValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+/**
+ * `column LIKE '%<escaped q>%' ESCAPE '\'` を組み立てる。
+ *
+ * `like()`（drizzle-orm）は `ESCAPE` 句を指定できないため使わない（CR-1）。
+ */
+function likeQuery(column: AnyColumn, value: string) {
+  return sql`${column} LIKE ${`%${escapeLikeValue(value)}%`} ESCAPE '\\'`;
+}
+
+/**
+ * `listSummaries()` の `sort` → `orderBy` の対応。`sort=created_desc`（既定）は `fetchedAt` 降順。
+ *
+ * 主キー（`score_cards.total_score`/`companies.fetched_at`）は同値が大量に発生しうるため、
+ * `companies.code` 昇順を第2ソートキーとして必ず付与し、`LIMIT/OFFSET` によるページングで
+ * 同じ行が複数ページに重複・欠落しないようにする（BE レビュー CR-2）。
+ */
+function orderByForSort(sort: CompanyListQuery['sort']) {
+  switch (sort) {
+    case 'created_desc':
+      return [desc(companies.fetchedAt), asc(companies.code)];
+    case 'score_desc':
+      return [desc(scoreCards.totalScore), asc(companies.code)];
+    case 'score_asc':
+      return [asc(scoreCards.totalScore), asc(companies.code)];
+    case 'code_asc':
+      return [asc(companies.code)];
+  }
+}
 
 const PER_SOURCES: readonly PerSource[] = ['forecast-eps', 'actual-eps', 'manual'];
 const PBR_SOURCES: readonly PbrSource[] = ['actual-bps', 'manual'];
@@ -265,30 +317,80 @@ export class D1CompanyRepository implements CompanyRepository {
     };
   }
 
-  /** 一覧は1クエリ。N+1 を作らない（`.claude/rules/backend.md`） */
-  async listSummaries(): Promise<readonly CompanySummary[]> {
-    const rows = await this.db
+  /**
+   * 一覧は「JOIN一覧クエリ + 別COUNTクエリ」の計2クエリ（BE計画 §5.1）。
+   * `companies` × `score_cards` × `transformed_metrics`（⑩⑬用の2本を別名JOIN）を
+   * 1クエリの JOIN で取得し、行数に比例したクエリは発行しない（N+1 を作らない）。
+   *
+   * `q`（銘柄コード・銘柄名の部分一致）は SQLite 既定の `LIKE`（ASCII大文字小文字非区別）に
+   * 委ねる（Manager確認済み。`LOWER()` の明示は不要。BE計画 §6-3）。
+   * ワイルドカード文字（`%`/`_`）はエスケープしてから渡す（`escapeLikeValue`。CR-1）。
+   */
+  async listSummaries(query: CompanyListQuery): Promise<CompanyListResult> {
+    const whereClause =
+      query.q === ''
+        ? undefined
+        : or(likeQuery(companies.code, query.q), likeQuery(companies.name, query.q));
+
+    const rowsQuery = this.db
       .select({
         code: companies.code,
         name: companies.name,
         fetchedAt: companies.fetchedAt,
+        priceSen: companies.priceSen,
         totalScore: scoreCards.totalScore,
         effectiveMetricCount: scoreCards.effectiveMetricCount,
+        dividendYieldValue: dividendYieldMetrics.value,
+        payoutRatioValue: payoutRatioMetrics.value,
       })
       .from(companies)
-      .leftJoin(scoreCards, eq(scoreCards.companyCode, companies.code));
+      .leftJoin(scoreCards, eq(scoreCards.companyCode, companies.code))
+      .leftJoin(
+        dividendYieldMetrics,
+        and(
+          eq(dividendYieldMetrics.companyCode, companies.code),
+          eq(dividendYieldMetrics.metricKey, 'dividendYield'),
+        ),
+      )
+      .leftJoin(
+        payoutRatioMetrics,
+        and(
+          eq(payoutRatioMetrics.companyCode, companies.code),
+          eq(payoutRatioMetrics.metricKey, 'payoutRatio'),
+        ),
+      );
 
-    return rows
-      .map((row) => ({
+    const rows = await (whereClause === undefined ? rowsQuery : rowsQuery.where(whereClause))
+      .orderBy(...orderByForSort(query.sort))
+      .limit(query.perPage)
+      .offset((query.page - 1) * query.perPage);
+
+    const countQuery = this.db.select({ count: sql<number>`count(*)` }).from(companies);
+    const countRows = await (whereClause === undefined
+      ? countQuery
+      : countQuery.where(whereClause));
+    const total = countRows[0]?.count ?? 0;
+
+    return {
+      items: rows.map((row) => ({
         code: row.code,
         name: row.name,
+        // `score_cards` に対応行が無い（LEFT JOIN が null）場合の防御。
+        // `save()` が companies と score_cards を常にアトミックに書き込むため
+        // （schema.ts の score_cards.company_code は companies.code への FK かつ PK）、
+        // 通常運用では到達しない分岐（CR-7）。将来 score_cards だけを個別に削除する経路が
+        // できた場合に備えた型合わせであり、実データでの再現テストは無い。
         totalScore: row.totalScore ?? 0,
         maxTotalScore: MAX_TOTAL_SCORE,
         effectiveMetricCount: row.effectiveMetricCount ?? 0,
         totalMetricCount: TOTAL_METRIC_COUNT,
         fetchedAt: row.fetchedAt,
-      }))
-      .sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt));
+        priceSen: row.priceSen,
+        dividendYieldValue: row.dividendYieldValue,
+        payoutRatioValue: row.payoutRatioValue,
+      })),
+      total,
+    };
   }
 
   /**

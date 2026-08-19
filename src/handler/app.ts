@@ -10,6 +10,10 @@
 
 import { Hono } from 'hono';
 
+import { type PasswordHasher } from '../domain/auth/password-hasher';
+import { type SessionRepository } from '../domain/auth/session-repository';
+import { type SessionTokenGenerator } from '../domain/auth/session-token-generator';
+import { type UserRepository } from '../domain/auth/user-repository';
 import { type CompanyRepository } from '../domain/company/company-repository';
 import {
   type EdinetDocumentIndexLookup,
@@ -25,6 +29,8 @@ import { importFromIrBank } from '../usecase/import-from-irbank';
 import { importMarketData } from '../usecase/import-market-data';
 import { deleteCompany, getCompanyScoring, listCompanies } from '../usecase/read-companies';
 import { refreshEdinetDocumentIndex } from '../usecase/refresh-edinet-document-index';
+import { registerAuthRoutes } from './auth-routes';
+import { companyListQuery } from './dto/company-list-query';
 import {
   analyzeCompanyRequest,
   toCompany,
@@ -53,10 +59,25 @@ import {
   toMarketDataImportResponse,
 } from './dto/market-data-import';
 import { parsePriceInput } from './dto/price-input';
+import { requireRole } from './require-role';
 
 export interface AppDependencies {
   /** リポジトリは**インターフェースで**受け取る。D1 を直接は知らない */
   readonly repository: CompanyRepository;
+  /** ユーザー認証。**インターフェースで**受け取る（`src/infra/d1/user-repository.ts`） */
+  readonly userRepository: UserRepository;
+  /** セッション。**インターフェースで**受け取る */
+  readonly sessionRepository: SessionRepository;
+  /** パスワードハッシュ。**インターフェースで**受け取る（`src/infra/auth/`） */
+  readonly passwordHasher: PasswordHasher;
+  /** セッショントークン生成。**インターフェースで**受け取る */
+  readonly sessionTokenGenerator: SessionTokenGenerator;
+  /** `SIGNUP_ENABLED`。未設定は呼び出し側（`src/index.ts`）が安全側（false）に倒す */
+  readonly signupEnabled: boolean;
+  /** `SIGNUP_MAX_USERS`。未設定は呼び出し側が 0 に倒す（実質サインアップ不可） */
+  readonly maxUsers: number;
+  /** Cookie の `Secure` 属性。未設定時は呼び出し側（`src/index.ts`）が安全側（true）に倒す */
+  readonly cookieSecure: boolean;
   /** IRバンク取り込み。**インターフェースで**受け取り、fetch の詳細を知らない */
   readonly financialSource: FinancialSource;
   /** Yahoo からの市場データ取り込み。**インターフェースで**受け取る */
@@ -108,6 +129,27 @@ const COMPANY_CODE_PATTERN = /^\d{3}[0-9A-Z]$/;
 export function createApp(dependencies: AppDependencies): Hono {
   const app = new Hono();
 
+  registerAuthRoutes(app, {
+    userRepository: dependencies.userRepository,
+    sessionRepository: dependencies.sessionRepository,
+    passwordHasher: dependencies.passwordHasher,
+    sessionTokenGenerator: dependencies.sessionTokenGenerator,
+    signupEnabled: dependencies.signupEnabled,
+    maxUsers: dependencies.maxUsers,
+    cookieSecure: dependencies.cookieSecure,
+    now: dependencies.now,
+  });
+
+  /** 銘柄登録・更新・削除の保護（`screen-list.md` §2。ADR-0013 制約1の解消） */
+  const adminOnly = requireRole(
+    {
+      userRepository: dependencies.userRepository,
+      sessionRepository: dependencies.sessionRepository,
+      now: dependencies.now,
+    },
+    ['admin'],
+  );
+
   app.get('/api/health', (context) => context.json({ status: 'ok' }));
 
   /** 株価入力の検証だけを行う。画面が入力中に呼ぶ */
@@ -120,12 +162,30 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json(parsePriceInput(raw));
   });
 
+  /**
+   * 検索・ソート・サーバサイドページング（`docs/02_design/api/company-api.md` §GET /api/companies）。
+   *
+   * `q`/`sort`/`page`/`perPage` は**不正値・未知値でも400にせず既定値へ丸める**
+   * （`useActualForScoring` 等の他クエリと違う扱い。検索は誤入力頻度が高いフィールドのため）。
+   * `companyListQuery.parse()` は `.catch()` を使っているため常に成功する（400分岐は無い）。
+   */
   app.get('/api/companies', async (context) => {
-    const summaries = await listCompanies(dependencies.repository);
-    return context.json({ companies: summaries });
+    const query = companyListQuery.parse({
+      q: context.req.query('q'),
+      sort: context.req.query('sort'),
+      page: context.req.query('page'),
+      perPage: context.req.query('perPage'),
+    });
+    const result = await listCompanies(dependencies.repository, query);
+    return context.json({
+      companies: result.items,
+      page: query.page,
+      perPage: query.perPage,
+      total: result.total,
+    });
   });
 
-  app.post('/api/companies', async (context) => {
+  app.post('/api/companies', adminOnly, async (context) => {
     const body: unknown = await context.req.json().catch(() => null);
     const parsed = analyzeCompanyRequest.safeParse(body);
     if (!parsed.success) {
@@ -341,7 +401,7 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json(toScoringResponse(scoring));
   });
 
-  app.delete('/api/companies/:code', async (context) => {
+  app.delete('/api/companies/:code', adminOnly, async (context) => {
     const code = context.req.param('code');
     if (!COMPANY_CODE_PATTERN.test(code)) {
       return context.json({ error: '銘柄コードの形式が不正です' }, 400);

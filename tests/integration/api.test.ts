@@ -1,6 +1,10 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { type Session } from '@/domain/auth/session';
+import { type SessionRepository } from '@/domain/auth/session-repository';
+import { type User } from '@/domain/auth/user';
+import { type UserRepository } from '@/domain/auth/user-repository';
 import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document-index';
 import { type EdinetHistorySource } from '@/domain/company/edinet-history-source';
 import { type FinancialSource } from '@/domain/company/financial-source';
@@ -8,6 +12,13 @@ import { type MarketDataSource } from '@/domain/company/market-data-source';
 import { createApp } from '@/handler/app';
 import { D1CompanyRepository } from '@/infra/d1/company-repository';
 import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/company-input';
+
+import {
+  TEST_ADMIN_SESSION_COOKIE,
+  buildAuthTestDependencies,
+  fakePasswordHasher,
+  fakeSessionTokenGenerator,
+} from '../handler/support/build-app-dependencies';
 
 /**
  * handler → usecase → domain → infra(D1) の結線を通しで確認する。
@@ -56,6 +67,7 @@ function app() {
     marketDataSource: unusedMarketDataSource,
     edinetHistorySource: unusedEdinetHistorySource,
     edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup,
+    ...buildAuthTestDependencies(),
     now: () => FIXED_NOW,
   });
 }
@@ -106,10 +118,11 @@ function samplePayload(overrides: Partial<AnalyzeCompanyRequest> = {}): AnalyzeC
   };
 }
 
+/** `POST /api/companies` は `requireRole(['admin'])` で保護される。admin セッションで叩く */
 async function post(payload: AnalyzeCompanyRequest) {
   return app().request('/api/companies', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', cookie: TEST_ADMIN_SESSION_COOKIE },
     body: JSON.stringify(payload),
   });
 }
@@ -169,11 +182,25 @@ describe('POST /api/companies', () => {
     const payload = samplePayload({ priceSen: 100_001 });
     const body = (await (await post(payload)).json()) as ScoringResponse;
     expect(body.metrics.find((metric) => metric.key === 'dividendYield')?.value).toBe(600);
+    expect(body.priceSen).toBe(100_001);
 
     const stored = await env.DB.prepare('SELECT price_sen FROM companies WHERE code = ?')
       .bind('9433')
       .first<{ price_sen: number }>();
     expect(stored?.price_sen).toBe(100_001);
+  });
+
+  it('priceSen/per/pbr が採点結果に数値のまま返る（ブロッカー解消計画 §5.3）', async () => {
+    const postBody = (await (await post(samplePayload())).json()) as ScoringResponse;
+    expect(postBody.priceSen).toBe(100_000);
+    expect(postBody.per).toBe(9);
+    expect(postBody.pbr).toBe(1);
+
+    // GET 側（再採点後）でも同じ値が返ることを確認する
+    const getBody = (await (await app().request('/api/companies/9433')).json()) as ScoringResponse;
+    expect(getBody.priceSen).toBe(100_000);
+    expect(getBody.per).toBe(9);
+    expect(getBody.pbr).toBe(1);
   });
 
   it('⑨ PER/PBR の出所が D1 を往復し、詳細取得の応答にも出る（2026-07-29 追加）', async () => {
@@ -203,12 +230,20 @@ describe('POST /api/companies', () => {
     const body = (await (await post(payload)).json()) as ScoringResponse;
     expect(body.perSource).toBeNull();
     expect(body.pbrSource).toBeNull();
+    expect(body.per).toBeNull();
+    expect(body.pbr).toBeNull();
+  });
+
+  it('priceSen が未入力（null）なら null のまま返る。0 にしない（境界値）', async () => {
+    const payload = samplePayload({ priceSen: null });
+    const body = (await (await post(payload)).json()) as ScoringResponse;
+    expect(body.priceSen).toBeNull();
   });
 
   it('入力が不正なら 400。内部情報は返さない', async () => {
     const response = await app().request('/api/companies', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', cookie: TEST_ADMIN_SESSION_COOKIE },
       body: JSON.stringify({ code: 'あ', name: '' }),
     });
     expect(response.status).toBe(400);
@@ -290,6 +325,109 @@ function payoutRatioSamplePayload(
   };
 }
 
+const NON_ADMIN_USER_ID = 2;
+const NON_ADMIN_SESSION_ID = 'test-user-session-id';
+const NON_ADMIN_SESSION_COOKIE = `session_id=${NON_ADMIN_SESSION_ID}`;
+
+const nonAdminUser: User = {
+  id: NON_ADMIN_USER_ID,
+  email: 'user@example.com',
+  passwordHash: 'unused',
+  passwordSalt: 'unused',
+  passwordIterations: 10_000,
+  role: 'user',
+  failedLoginCount: 0,
+  lockedUntil: null,
+  createdAt: '2026-01-01T00:00:00.000Z',
+};
+
+const nonAdminUserRepository: UserRepository = {
+  findByEmail: () => Promise.resolve(null),
+  findById: (id) => Promise.resolve(id === NON_ADMIN_USER_ID ? nonAdminUser : null),
+  count: () => Promise.resolve(2),
+  insert: () => {
+    throw new Error('このテストで UserRepository.insert が呼ばれるのは想定外');
+  },
+  updateLoginAttempt: () => Promise.resolve(),
+  updatePasswordHash: () => Promise.resolve(),
+};
+
+const nonAdminSessionRepository: SessionRepository = {
+  insert: () => Promise.resolve(),
+  findById: (id) =>
+    Promise.resolve(
+      id === NON_ADMIN_SESSION_ID
+        ? ({
+            id: NON_ADMIN_SESSION_ID,
+            userId: NON_ADMIN_USER_ID,
+            expiresAt: '2099-01-01T00:00:00.000Z',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          } satisfies Session)
+        : null,
+    ),
+  deleteById: () => Promise.resolve(),
+};
+
+/**
+ * `role: 'user'` のセッションを持つ app（`requireRole(['admin'])` の 403 経路の確認用）。
+ * `docs/02_design/ui/screen-list.md` §2「保護は API 側でも必ず行う」・
+ * ADR-0013 制約1（現状、銘柄の登録・更新・削除は誰でも実行できる）の解消確認（T-091計画 §4.5・§7）。
+ */
+function appWithNonAdminSession() {
+  return createApp({
+    repository: new D1CompanyRepository(env.DB),
+    financialSource: unusedFinancialSource,
+    marketDataSource: unusedMarketDataSource,
+    edinetHistorySource: unusedEdinetHistorySource,
+    edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup,
+    userRepository: nonAdminUserRepository,
+    sessionRepository: nonAdminSessionRepository,
+    passwordHasher: fakePasswordHasher(),
+    sessionTokenGenerator: fakeSessionTokenGenerator(),
+    signupEnabled: false,
+    maxUsers: 0,
+    cookieSecure: true,
+    now: () => FIXED_NOW,
+  });
+}
+
+describe('POST/DELETE /api/companies — ロールガード（admin限定）', () => {
+  it('POST: 未ログイン（Cookie無し）は401', async () => {
+    const response = await appWithNonAdminSession().request('/api/companies', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(samplePayload()),
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it('POST: role=user は403（adminではない）', async () => {
+    const response = await appWithNonAdminSession().request('/api/companies', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: NON_ADMIN_SESSION_COOKIE,
+      },
+      body: JSON.stringify(samplePayload()),
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it('POST: role=admin は通過する（201）', async () => {
+    const response = await post(samplePayload());
+    expect(response.status).toBe(201);
+  });
+
+  it('DELETE: role=user は403', async () => {
+    await post(samplePayload());
+    const response = await appWithNonAdminSession().request('/api/companies/9433', {
+      method: 'DELETE',
+      headers: { cookie: NON_ADMIN_SESSION_COOKIE },
+    });
+    expect(response.status).toBe(403);
+  });
+});
+
 describe('POST /api/companies — useActualForScoring', () => {
   it('未指定なら予想を採用する（既定 false）', async () => {
     const body = (await (await post(payoutRatioSamplePayload())).json()) as ScoringResponse;
@@ -345,6 +483,43 @@ describe('GET /api/companies', () => {
     const body = (await (await app().request('/api/companies')).json()) as { companies: unknown[] };
     expect(body.companies).toEqual([]);
   });
+
+  /**
+   * 検索・ソート・サーバサイドページング（T-093。`docs/02_design/api/company-api.md`
+   * §GET /api/companies）。JOIN・ORDER BY・LIMIT/OFFSET そのものの網羅は
+   * `tests/integration/company-list-search.test.ts`（実D1、リポジトリ直叩き）で行う。
+   * ここでは **handler → usecase → infra の結線**（POST で保存 → GET で検索できるか）だけを見る。
+   */
+  it('page/perPage/total を応答に同梱する', async () => {
+    await post(samplePayload());
+    const response = await app().request('/api/companies');
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as { page: number; perPage: number; total: number };
+    expect(body.page).toBe(1);
+    expect(body.perPage).toBe(15);
+    expect(body.total).toBe(1);
+  });
+
+  it('q（銘柄コード・銘柄名の部分一致）で絞り込める', async () => {
+    await post(samplePayload());
+    await post(samplePayload({ code: '7203', name: 'トヨタ自動車' }));
+
+    const response = await app().request('/api/companies?q=トヨタ');
+    const body = (await response.json()) as { companies: { code: string }[]; total: number };
+    expect(body.companies.map((c) => c.code)).toEqual(['7203']);
+    expect(body.total).toBe(1);
+  });
+
+  it('未知の sort・範囲外の page/perPage は 400 にならず既定値へ丸まる', async () => {
+    await post(samplePayload());
+    const response = await app().request('/api/companies?sort=unknown&page=0&perPage=9999');
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as { page: number; perPage: number };
+    expect(body.page).toBe(1);
+    expect(body.perPage).toBe(15);
+  });
 });
 
 describe('GET /api/companies/:code', () => {
@@ -373,7 +548,10 @@ describe('GET /api/companies/:code', () => {
 describe('DELETE /api/companies/:code', () => {
   it('削除すると一覧からも明細からも消える', async () => {
     await post(samplePayload());
-    const response = await app().request('/api/companies/9433', { method: 'DELETE' });
+    const response = await app().request('/api/companies/9433', {
+      method: 'DELETE',
+      headers: { cookie: TEST_ADMIN_SESSION_COOKIE },
+    });
     expect(response.status).toBe(204);
 
     const remaining = await env.DB.prepare(
@@ -408,6 +586,7 @@ describe('GET /api/market-data/:code', () => {
       marketDataSource,
       edinetHistorySource: unusedEdinetHistorySource,
       edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup,
+      ...buildAuthTestDependencies(),
       now: () => FIXED_NOW,
     });
   }
