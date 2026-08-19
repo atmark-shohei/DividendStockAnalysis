@@ -1,6 +1,7 @@
 # ログイン / アカウント作成（F-54）
 
-> ステータス: 🟡 設計のみ（2026-08-16 保留解除）。実装は T-091（認証実装）待ち
+> ステータス: 🟡 FE実装済み（2026-08-18、T-091 FE分）。BE（`src/handler/dto/auth.ts` 等）との
+> 結合確認待ち。他画面のロールガード・nav出し分けは T-092
 > URL: `/login` と `/signup`（[screen-list.md](../screen-list.md) §1・§3.5 が正）
 > 対応する機能ID: [F-54](../../../01_requirements/features.md)
 > 認証方式: [ADR-0013](../../../adr/0013-multi-user-auth-small-scale.md)（少人数向け自前認証。招待制なし）
@@ -8,6 +9,10 @@
 
 ## 変更履歴
 
+- **2026-08-18**: FE実装（T-091 FE分）。`frontend/pages/AuthPage.tsx` +
+  `frontend/components/{AuthForm,AuthStatus,RoleBadge}.tsx`。
+  `src/handler/dto/auth.ts` が未着手だったため、`frontend/api.ts` に型を一時的に手書きした
+  （BE T-091 完了後に type-only import へ置き換え予定）
 - **2026-08-16**: 保留を解除（T-075）。ADR-0013 の決定に沿ってアカウント作成モードを追記し、
   「認証なし」だった場合の削除方針を撤回した
 

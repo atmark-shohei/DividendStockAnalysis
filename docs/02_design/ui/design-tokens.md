@@ -135,8 +135,12 @@
 --radius-2xl: 1rem; /* 16px  ダイアログ */
 
 --content-max: 72.5rem; /* 1160px  コンテンツ最大幅（中央寄せ） */
+--width-auth-card: 25rem; /* 400px  認証カード幅 */
+--dialog-max-width: 58.75rem; /* 940px  解析ダイアログのカード最大幅（T-096） */
 
 --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.6);
+--dialog-scrim-color: rgba(6, 8, 12, 0.74); /* 解析ダイアログの背景スクリム（T-096） */
+--dialog-scrim-blur: 0.1875rem; /* 3px  スクリムのbackdrop-filter（T-096） */
 ```
 
 > ⚠️ **`--space-3` / `--space-4` は現行と値が変わる。**

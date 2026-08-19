@@ -29,6 +29,17 @@
 | 最新実績レコード | `latestActualRecord`         | ドメインサービス | `Company.records` から最新の実績（`isForecast: false`）レコードを返す。`latestForecastRecord` の対                                                                                                               |
 | 実績配当の選択   | `selectLatestActualDividend` | ドメインサービス | 配当履歴（`DividendRecord[]`）から実績（`kind: 'actual'`）のうち最新年度のものを選ぶ。`selectLatestForecastDividend` の対                                                                                        |
 
+## 会社一覧検索（T-093。2026-08-18 追加）
+
+> 仕様の正: `docs/02_design/api/company-api.md` §GET /api/companies。`GET /api/companies` の
+> 検索・ソート・サーバサイドページングで使う。
+
+| 日本語         | 英語（コード名）    | 種別                  | 定義                                                                                                                                                                                                                                                                                                                                                                                                           |
+| -------------- | ------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 一覧検索クエリ | `CompanyListQuery`  | DTO（検証済みクエリ） | `q`（部分一致文字列）/ `sort` / `page` / `perPage` の組。**handler 側の zod（`companyListQuery`）が既に既定値へ丸め込み済み**の状態で usecase・infra へ渡る契約。不正値・未知値でも 400 にせず既定値へ倒す（他クエリと異なる方針）。**型自身は不変条件を強制しない**（`page`/`perPage` の範囲チェックは無い）。handler 以外から `listSummaries()` を呼ぶ経路を追加する場合は、呼び出し元で同等の検証を行うこと |
+| 一覧ソートキー | `CompanySortKey`    | 値オブジェクト        | `'created_desc'`（既定） / `'score_desc'` / `'score_asc'` / `'code_asc'`。DB 側 `ORDER BY` に対応する（JS側ソートはしない）                                                                                                                                                                                                                                                                                    |
+| 一覧検索結果   | `CompanyListResult` | read model            | `listSummaries()` の戻り値。`items`（`CompanySummary[]`）と `total`（`q` 適用後のフィルタ後総件数。ページングの影響を受けない）の組                                                                                                                                                                                                                                                                            |
+
 ## 市場データ（Yahoo Finance）
 
 > 仕様の正: `docs/02_design/logic/market-data-source.md`。IRバンク（`FinancialSource`）とは
@@ -51,30 +62,30 @@
 > Yahoo（`MarketDataSource`）とは別の外部データ源ポート。④⑦が要求する「6期以上前」の
 > EPS・売上高、⑥が要求する流動資産・投資有価証券を補完する。
 
-| 日本語                     | 英語（コード名）                | 種別           | 定義                                                                                                     |
-| -------------------------- | -------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
-| EDINET履歴取得源           | `EdinetHistorySource`            | ポート         | EDINET有価証券報告書から④⑦用の年度別EPS・売上高、⑥用の貸借対照表項目を取得する。定義はdomain、実装は`src/infra/edinet/` |
-| EDINET年度別データ         | `EdinetHistoryYear`              | 値オブジェクト | 1年度ぶんのEDINET由来EPS・売上高（銭）と出所docID                                                        |
-| EDINET貸借対照表スナップショット | `EdinetBalanceSheetSnapshot`  | 値オブジェクト | ⑥用。前期末時点の流動資産・投資有価証券（銭）と出所docID                                                 |
-| EDINET履歴取得結果         | `EdinetHistoryResult`            | 値オブジェクト | `EdinetHistorySource.fetchHistory`の戻り値。年度別データ最大6件・遡及修正フラグ・貸借対照表を持つ         |
-| docIDインデックスの1件     | `EdinetDocumentIndexEntry`       | 値オブジェクト | `(companyCode, fiscalYear)` → `docId`の対応。`documents.json`の`secCode`から`companyCode`へ変換して保存する |
-| docIDインデックス読み取り  | `EdinetDocumentIndexLookup`      | ポート         | `fetchHistory`が読むだけの窓口。`findDocId`（特定年度）・`findLatest`（最新年度）を持つ                   |
-| docIDインデックス永続化    | `EdinetDocumentIndexRepository`  | ポート         | 日次バッチが書き込む窓口。`upsertMany`・`lastRefreshedAt`・`recordRefresh`を持つ。定義はdomain、実装はD1  |
-| 書類一覧取得源             | `EdinetDocumentsListSource`      | ポート         | 日次バッチ（`refresh-edinet-document-index`）が使う、指定日の書類一覧取得ポート。フィルタ・変換済みのdomain型を返す |
-| 遡及修正フラグ             | `historyRestated`                | 値オブジェクト | `EpsCagrInput`/`RevenueCagrInput`の入力。`true`なら`unavailable('restated-history')`に倒す               |
-| ④用遡及修正フラグ          | `epsHistoryRestated`             | 値オブジェクト | `Company`のフィールド。EDINET取り込みの重複4期突き合わせで検出。既定`false`（EDINET未実施）              |
-| ⑦用遡及修正フラグ          | `revenueHistoryRestated`         | 値オブジェクト | 同上（売上高）                                                                                            |
-| データ出所（明細）         | `sourceDocId`                    | 値オブジェクト | `financial_records`の1行がどの有報（docID）由来かを示す。IRバンク・手入力由来なら`NULL`。現状書き込み経路なし（CR-4スコープ外） |
-| データ出所（貸借対照表）   | `bsSourceDocId`                  | 値オブジェクト | `companies`テーブル。⑥用`currentAssetsSen`/`investmentSecuritiesSen`の出所。同上                          |
-| 遡及修正による判定不能     | `'restated-history'`             | 値オブジェクト | `UnavailableReason`の新種別。④⑦専用。EDINETの重複4期が一致せず系列の連続性が保証できない                  |
-| 履歴取り込み               | `importEdinetHistory`            | ユースケース   | `EdinetHistorySource`への薄い委譲。**保存はしない**（取得のみ）                                           |
-| docIDインデックス再構築    | `refreshEdinetDocumentIndex`     | ユースケース   | 日次バッチ本体。`documents.json`を走査し`EdinetDocumentIndexRepository.upsertMany()`を呼ぶ               |
-| EDINETフィルング突き合わせ | `mergeEdinetFilings`             | ドメインサービス | 最新有報＋1年前有報の重複4期を突き合わせ、6期分の年度別データと遡及修正フラグを組み立てる純粋関数        |
-| パース結果キャッシュの1件           | `EdinetDocumentSummary`          | 値オブジェクト | 有報1本（`docId`単位）のパース結果。`ParsedSummaryCsv`と同じ形（④⑤⑥⑦用のEPS・売上高・ROE・貸借対照表・診断）。定義は`src/infra/edinet/document-summary-cache.ts`。**T-054で`operatingIncomeSenByOffset`（⑧用、長さ2固定）を追加済み** |
-| パース結果キャッシュ                | `EdinetDocumentSummaryCache`     | ポート         | `docId`をキーに`EdinetDocumentSummary`を読み書きする。**`docId`は不変文書の識別子なのでTTL・無効化を持たない**。定義・実装ともinfra（domainを経由しない。§4.8.2）。`find`/`save`とも読み書き失敗を`throw`せず`null`/無視で吸収する契約 |
-| パース結果キャッシュ実装（D1）      | `D1EdinetDocumentSummaryCacheRepository` | 実装（infra/d1） | `EdinetDocumentSummaryCache`のD1実装。テーブルは`edinet_document_summary`（`doc_id`主キー）。壊れた/旧版の行は`schema_version`不一致または形チェック失敗として`null`（ミス扱い）を返す |
-| キャッシュ形の版                    | `schema_version`                 | 値オブジェクト | `edinet_document_summary`のカラム。次のいずれかを変更したら必ず上げる: `EdinetDocumentSummary`の形／候補要素IDリストの変更／単位検証ロジックの変更／数値パースロジックの変更（詳細は`docs/02_design/logic/edinet-history-import.md` §4.8.3）。不一致の行はキャッシュミス扱い（`CURRENT_SCHEMA_VERSION`） |
-| パース結果キャッシュ全削除（管理用）| `POST /api/admin/edinet/document-summary-cache/clear` | APIエンドポイント | `edinet_document_summary`を全行削除する管理用エンドポイント。`schema_version`の上げ忘れに対する保険。認証は`edinetIndexAdmin`と同じ`X-Admin-Token`パターン。応答`{ cleared: number }`（設計書に記載の無い実装判断。要ドキュメント反映） |
+| 日本語                               | 英語（コード名）                                      | 種別              | 定義                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------ | ----------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| EDINET履歴取得源                     | `EdinetHistorySource`                                 | ポート            | EDINET有価証券報告書から④⑦用の年度別EPS・売上高、⑥用の貸借対照表項目を取得する。定義はdomain、実装は`src/infra/edinet/`                                                                                                                                                                                  |
+| EDINET年度別データ                   | `EdinetHistoryYear`                                   | 値オブジェクト    | 1年度ぶんのEDINET由来EPS・売上高（銭）と出所docID                                                                                                                                                                                                                                                        |
+| EDINET貸借対照表スナップショット     | `EdinetBalanceSheetSnapshot`                          | 値オブジェクト    | ⑥用。前期末時点の流動資産・投資有価証券（銭）と出所docID                                                                                                                                                                                                                                                 |
+| EDINET履歴取得結果                   | `EdinetHistoryResult`                                 | 値オブジェクト    | `EdinetHistorySource.fetchHistory`の戻り値。年度別データ最大6件・遡及修正フラグ・貸借対照表を持つ                                                                                                                                                                                                        |
+| docIDインデックスの1件               | `EdinetDocumentIndexEntry`                            | 値オブジェクト    | `(companyCode, fiscalYear)` → `docId`の対応。`documents.json`の`secCode`から`companyCode`へ変換して保存する                                                                                                                                                                                              |
+| docIDインデックス読み取り            | `EdinetDocumentIndexLookup`                           | ポート            | `fetchHistory`が読むだけの窓口。`findDocId`（特定年度）・`findLatest`（最新年度）を持つ                                                                                                                                                                                                                  |
+| docIDインデックス永続化              | `EdinetDocumentIndexRepository`                       | ポート            | 日次バッチが書き込む窓口。`upsertMany`・`lastRefreshedAt`・`recordRefresh`を持つ。定義はdomain、実装はD1                                                                                                                                                                                                 |
+| 書類一覧取得源                       | `EdinetDocumentsListSource`                           | ポート            | 日次バッチ（`refresh-edinet-document-index`）が使う、指定日の書類一覧取得ポート。フィルタ・変換済みのdomain型を返す                                                                                                                                                                                      |
+| 遡及修正フラグ                       | `historyRestated`                                     | 値オブジェクト    | `EpsCagrInput`/`RevenueCagrInput`の入力。`true`なら`unavailable('restated-history')`に倒す                                                                                                                                                                                                               |
+| ④用遡及修正フラグ                    | `epsHistoryRestated`                                  | 値オブジェクト    | `Company`のフィールド。EDINET取り込みの重複4期突き合わせで検出。既定`false`（EDINET未実施）                                                                                                                                                                                                              |
+| ⑦用遡及修正フラグ                    | `revenueHistoryRestated`                              | 値オブジェクト    | 同上（売上高）                                                                                                                                                                                                                                                                                           |
+| データ出所（明細）                   | `sourceDocId`                                         | 値オブジェクト    | `financial_records`の1行がどの有報（docID）由来かを示す。IRバンク・手入力由来なら`NULL`。現状書き込み経路なし（CR-4スコープ外）                                                                                                                                                                          |
+| データ出所（貸借対照表）             | `bsSourceDocId`                                       | 値オブジェクト    | `companies`テーブル。⑥用`currentAssetsSen`/`investmentSecuritiesSen`の出所。同上                                                                                                                                                                                                                         |
+| 遡及修正による判定不能               | `'restated-history'`                                  | 値オブジェクト    | `UnavailableReason`の新種別。④⑦専用。EDINETの重複4期が一致せず系列の連続性が保証できない                                                                                                                                                                                                                 |
+| 履歴取り込み                         | `importEdinetHistory`                                 | ユースケース      | `EdinetHistorySource`への薄い委譲。**保存はしない**（取得のみ）                                                                                                                                                                                                                                          |
+| docIDインデックス再構築              | `refreshEdinetDocumentIndex`                          | ユースケース      | 日次バッチ本体。`documents.json`を走査し`EdinetDocumentIndexRepository.upsertMany()`を呼ぶ                                                                                                                                                                                                               |
+| EDINETフィルング突き合わせ           | `mergeEdinetFilings`                                  | ドメインサービス  | 最新有報＋1年前有報の重複4期を突き合わせ、6期分の年度別データと遡及修正フラグを組み立てる純粋関数                                                                                                                                                                                                        |
+| パース結果キャッシュの1件            | `EdinetDocumentSummary`                               | 値オブジェクト    | 有報1本（`docId`単位）のパース結果。`ParsedSummaryCsv`と同じ形（④⑤⑥⑦用のEPS・売上高・ROE・貸借対照表・診断）。定義は`src/infra/edinet/document-summary-cache.ts`。**T-054で`operatingIncomeSenByOffset`（⑧用、長さ2固定）を追加済み**                                                                    |
+| パース結果キャッシュ                 | `EdinetDocumentSummaryCache`                          | ポート            | `docId`をキーに`EdinetDocumentSummary`を読み書きする。**`docId`は不変文書の識別子なのでTTL・無効化を持たない**。定義・実装ともinfra（domainを経由しない。§4.8.2）。`find`/`save`とも読み書き失敗を`throw`せず`null`/無視で吸収する契約                                                                   |
+| パース結果キャッシュ実装（D1）       | `D1EdinetDocumentSummaryCacheRepository`              | 実装（infra/d1）  | `EdinetDocumentSummaryCache`のD1実装。テーブルは`edinet_document_summary`（`doc_id`主キー）。壊れた/旧版の行は`schema_version`不一致または形チェック失敗として`null`（ミス扱い）を返す                                                                                                                   |
+| キャッシュ形の版                     | `schema_version`                                      | 値オブジェクト    | `edinet_document_summary`のカラム。次のいずれかを変更したら必ず上げる: `EdinetDocumentSummary`の形／候補要素IDリストの変更／単位検証ロジックの変更／数値パースロジックの変更（詳細は`docs/02_design/logic/edinet-history-import.md` §4.8.3）。不一致の行はキャッシュミス扱い（`CURRENT_SCHEMA_VERSION`） |
+| パース結果キャッシュ全削除（管理用） | `POST /api/admin/edinet/document-summary-cache/clear` | APIエンドポイント | `edinet_document_summary`を全行削除する管理用エンドポイント。`schema_version`の上げ忘れに対する保険。認証は`edinetIndexAdmin`と同じ`X-Admin-Token`パターン。応答`{ cleared: number }`（設計書に記載の無い実装判断。要ドキュメント反映）                                                                  |
 
 ## スコアリング
 
@@ -103,16 +114,49 @@
 | ③ 内訳の画面向け型   | `PayoutRatioSideView`      | DTO              | `ScoringResponse` の `payoutRatioForecast` / `payoutRatioActual` に使う画面向け型。`MetricScore` の内訳（`score` / `value` / `unavailableReason`）を DTO 形に落としたもの（`src/handler/dto/company-input.ts`） |
 | 実績優先フラグ       | `useActualForScoring`      | 値オブジェクト   | ③ の採点に実績を強制採用するか。`true` なら実績が判定不能でも予想へフォールバックしない。既定 `false`。**リクエスト単位の一時指定で永続化しない**（`UserScoringPolicy` 未導入のため。設計書 §7 決定5）          |
 
+## 認証（T-091。2026-08-18 追加）
+
+> 仕様の正: `docs/02_design/api/auth-api.md`。認証方式・ロール・PBKDF2の決定根拠は
+> [ADR-0013](../adr/0013-multi-user-auth-small-scale.md)。テーブルは `docs/02_design/database/schema.md`
+> §テーブル定義（認証・ポートフォリオ）。
+>
+> 認証の要否（T-003 / T-004）は ADR-0013 で決着した（少人数向け自前認証・多ユーザー）。
+> これに伴い、旧draftの `MasterUser`/`Viewer`（下記「命名で使わない語」参照）は使わない語になった。
+
+| 日本語                 | 英語（コード名）            | 種別             | 定義                                                                                                                                                   |
+| ---------------------- | --------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ユーザー               | `User`                      | 集約ルート       | ログインユーザー。email・パスワードハッシュ・ロール・ログイン失敗回数・ロック期限を持つ。`Company` と同じ「interface＋純関数」で実装（クラス化しない） |
+| ロール                 | `Role`                      | 値オブジェクト   | `'user'` \| `'admin'`。**`guest`（未ログイン）は行を持たないのでこの型には現れない**                                                                   |
+| セッション             | `Session`                   | エンティティ     | ログインセッション。`id`（不透明トークン）が Cookie の値そのもの                                                                                       |
+| ユーザーリポジトリ     | `UserRepository`            | ポート           | `User` の永続化IF。定義はdomain、実装は `src/infra/d1/user-repository.ts`                                                                              |
+| セッションリポジトリ   | `SessionRepository`         | ポート           | `Session` の永続化IF。定義はdomain、実装は `src/infra/d1/session-repository.ts`                                                                        |
+| パスワード資格情報     | `PasswordCredential`        | 値オブジェクト   | `hash`/`salt`/`iterations` の組                                                                                                                        |
+| パスワードハッシュ     | `PasswordHasher`            | ポート           | PBKDF2-HMAC-SHA256でハッシュ化・検証する。定義はdomain、実装は `src/infra/auth/webcrypto-password-hasher.ts`                                           |
+| ダミー資格情報         | `DUMMY_PASSWORD_CREDENTIAL` | 値オブジェクト   | タイミング攻撃対策用の固定資格情報。メール不存在時も同じ計算コストの `verify()` を1回実行するために使う                                                |
+| PBKDF2イテレーション数 | `PBKDF2_ITERATIONS`         | 値オブジェクト   | `10,000`（ADR-0013 §決定3。Workers Freeプラン維持のための明示的リスク受容）。`users.password_iterations` に実測値を保存し段階移行する                  |
+| セッショントークン生成 | `SessionTokenGenerator`     | ポート           | 不透明・推測不能なセッショントークンを生成する。定義はdomain、実装は `src/infra/auth/webcrypto-session-token-generator.ts`                             |
+| セッション有効期限日数 | `SESSION_TTL_DAYS`          | 値オブジェクト   | `30`（実装時の確定値。`docs/02_design/api/auth-api.md` §セッション）                                                                                   |
+| ログイン試行結果       | `LoginAttemptOutcome`       | 値オブジェクト   | `failedLoginCount`/`lockedUntil` の組。ログイン失敗・成功のたびに更新する                                                                              |
+| ログイン失敗の記録     | `recordFailedLogin`         | ドメインサービス | 失敗を1回記録する純関数。5回連続失敗で15分ロックを立てる                                                                                               |
+| ログイン成功の記録     | `recordSuccessfulLogin`     | ドメインサービス | 失敗回数・ロックの両方をリセットする純関数                                                                                                             |
+| ロック中判定           | `isAccountLocked`           | ドメインサービス | `lockedUntil` が現在時刻より未来かどうかを判定する純関数                                                                                               |
+| セッション期限切れ判定 | `isSessionExpired`          | ドメインサービス | `expiresAt` が現在時刻以前かどうかを判定する純関数                                                                                                     |
+| サインアップエラー     | `SignupError`               | 値オブジェクト   | `signup-disabled` / `signup-limit-reached` / `email-already-exists` の判別ユニオン                                                                     |
+| ログインエラー         | `LoginError`                | 値オブジェクト   | `invalid-credentials` / `account-locked` の判別ユニオン。**メール不存在とパスワード不一致は区別しない**（アカウント存在を漏らさない）                  |
+| サインアップ可否判定   | `evaluateSignupEligibility` | ドメインサービス | `SIGNUP_ENABLED`・`SIGNUP_MAX_USERS` から受付可否を判定する純関数                                                                                      |
+| 新規登録者のロール決定 | `roleForNewSignup`          | ドメインサービス | 最初の登録者（`COUNT(*)===0`）だけ `admin` を返す純関数（ADR-0013 §決定2）                                                                             |
+| サインアップ           | `signup`                    | ユースケース     | `src/usecase/signup.ts`。人数上限チェックとINSERTの競合状態は許容する（設計書に明記）                                                                  |
+| ログイン               | `login`                     | ユースケース     | `src/usecase/login.ts`。タイミング攻撃対策・レート制限・PBKDF2段階移行を担う                                                                           |
+| ログアウト             | `logout`                    | ユースケース     | `src/usecase/logout.ts`。存在しないセッションでもエラーにしない（常に成功扱い）                                                                        |
+| 現在ユーザー取得       | `getCurrentUser`            | ユースケース     | `src/usecase/get-current-user.ts`。`GET /api/auth/me` と `requireRole` ミドルウェアが共有する                                                          |
+| ロールガード           | `requireRole`               | ミドルウェア     | `src/handler/require-role.ts`。`getCurrentUser` を使い、未ログインは401・ロール不一致は403を返す。`X-Admin-Token`（EDINET管理用）とは別物              |
+| セッションCookie名     | `SESSION_COOKIE_NAME`       | 値オブジェクト   | `'session_id'`。`HttpOnly; Secure; SameSite=Lax`                                                                                                       |
+
 ## 🔴 未決（決着するまでコードで使わない）
 
-認証の要否（T-003 / T-004）が未決のため、以下は**まだ実装に登場させない**。
-単一ユーザーに決まった場合、この3語は不要になる。
-
-| 日本語           | 英語（コード名）    | 種別       | 定義                                                   |
-| ---------------- | ------------------- | ---------- | ------------------------------------------------------ |
-| スコアリング方針 | `UserScoringPolicy` | 集約ルート | ユーザーごとの閾値上書き設定。未設定指標はデフォルトへ |
-| マスターユーザー | `MasterUser`        | ロール     | 会社データ・デフォルト閾値を管理できるユーザー         |
-| 一般ユーザー     | `Viewer`            | ロール     | 閲覧と自分の閾値上書きができるユーザー                 |
+| 日本語           | 英語（コード名）    | 種別       | 定義                                                                                            |
+| ---------------- | ------------------- | ---------- | ----------------------------------------------------------------------------------------------- |
+| スコアリング方針 | `UserScoringPolicy` | 集約ルート | ユーザーごとの閾値上書き設定。未設定指標はデフォルトへ。指標カスタマイズ（T-101）着手まで未実装 |
 
 ## 命名で使わない語（禁止シノニム）
 
@@ -121,5 +165,7 @@
 - `Rank`, `Grade`, `Rating` → `Score` に統一
 - `Firm`, `Corporation` → `Company` に統一
 - `Yen`, 単独の `Amount` → 金額は `Sen` に統一。円で持たない
+- `MasterUser`, `Viewer` → ADR-0013 が確定した `Role`（`'user'` \| `'admin'`。`guest` は未ログイン）に統一。
+  認証未決時代の旧draft語で、2026-08-18（T-091）に使わない語へ変更した
 
 > 遵守状況（2026-07-28 実測）: `src/` 全体で違反 **0件**。

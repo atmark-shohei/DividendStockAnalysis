@@ -1,7 +1,8 @@
 # データベース設計
 
-> ステータス: 🟢 銘柄・スコア部分は実装済み（2026-07-28）／🟡 認証・ポートフォリオ部分は設計のみ（2026-08-16 追加）
+> ステータス: 🟢 銘柄・スコア・認証部分は実装済み（2026-08-18）／🟡 ポートフォリオ部分は設計のみ
 > 実装: `src/infra/d1/schema.ts` / マイグレーション: `db/migrations/0000_reflective_prism.sql`
+> （認証部分は `db/migrations/0006_fat_shaman.sql`）
 >
 > ⚠️ **2026-07-28 に全面書き直し。** 旧版は PostgreSQL（`BIGSERIAL`/`TIMESTAMPTZ`）を前提に
 > `stocks`/`dividends`/`stock_prices`/`watchlist_items`/`users`/`ingest_errors` を定義していたが、
@@ -12,7 +13,14 @@
 > ✅ **2026-08-16 追記（T-078）。** [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)
 > の認証導入決定を受け、`users`/`sessions`/`portfolios`/`portfolio_holdings`/
 > `user_indicator_settings` の5テーブルを追加した（§テーブル定義（認証・ポートフォリオ））。
-> **実装（`src/infra/d1/schema.ts` へのマイグレーション反映）はまだ**（T-091・T-102 待ち）。
+>
+> ✅ **2026-08-18 追記（T-091）。** `users`/`sessions` を実装した
+> （`src/infra/d1/schema.ts`、マイグレーション `db/migrations/0006_fat_shaman.sql`）。
+> `users.created_at`/`sessions.created_at` は下表の記載と異なり、
+> **DB の既定値ではなくアプリ側の `now()` 注入で埋める**
+> （`sessions.expires_at` の計算と同じ時計を使い、テストから固定できるようにするため。
+> `companies.created_at` 等の `CURRENT_TIMESTAMP` パターンとは意図的に異なる）。
+> `portfolios`/`portfolio_holdings`/`user_indicator_settings` の実装は未着手（T-102 待ち）。
 
 ## 設計方針
 
@@ -164,7 +172,9 @@ API の契約は `records` / `dividends` とも最大60件（`company-api.md`）
 
 ## テーブル定義（認証・ポートフォリオ。2026-08-16 追加、T-078）
 
-> 🟡 **設計のみ。実装（`schema.ts`・マイグレーション）は未着手。**
+> 🟢 **`users`/`sessions` は実装済み**（2026-08-18、T-091。`src/infra/d1/schema.ts`、
+> マイグレーション `db/migrations/0006_fat_shaman.sql`）。
+> 🟡 **`portfolios`/`portfolio_holdings`/`user_indicator_settings` は設計のみ。実装は未着手**（T-102待ち）。
 > 要求元: [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)（認証・ロール・PBKDF2）、
 > [portfolio-api.md](../api/portfolio-api.md)（API契約）、
 > [indicator-custom-page.md](../ui/pages/indicator-custom-page.md)（指標カスタマイズ）。
@@ -269,7 +279,10 @@ PK: `(user_id, metric_key)`。
 - **`UserScoringPolicy` 用のテーブル** — ✅ **解消（2026-08-16）。** [ADR-0005](../../adr/0005-thresholds-fixed-for-now.md)
   が待っていた「認証の要否」は [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md) で決着し、
   `user_indicator_settings` として上に定義した
-- **セッションの期限切れ行の掃除方法** — 定期実行 or 遅延削除。未実装時に決める
+- **セッションの期限切れ行の掃除方法** — ✅ **遅延削除を実装（2026-08-18、T-091）。**
+  `GET /api/auth/me`・`requireRole` が経由する `getCurrentUser()` が期限切れを検出した時点で
+  `deleteById` する。**定期実行によるバッチ掃除は未実装**（期限切れのまま一度も
+  アクセスされないセッション行は残り続ける。少人数運用のため許容し、対応は見送り）
 - **`DELETE /api/companies/:code` の 409 対応** — `portfolio_holdings` の `ON DELETE RESTRICT` により、
   ポートフォリオ実装時にハンドラの変更が要る（上記の注記）
 - **総合点の出所が2系統（一覧の `score_cards` vs 詳細の毎回再採点）で、

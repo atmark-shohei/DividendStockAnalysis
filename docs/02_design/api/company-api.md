@@ -1,17 +1,39 @@
 # 銘柄・スコアリング API 仕様
 
-> ステータス: 🟢 既存部分は実装済み（2026-07-28）／🟡 検索・ページング・配当履歴は設計のみ（2026-08-17追加）
+> ステータス: 🟢 既存部分は実装済み（2026-07-28）／🟢 `GET /api/companies` の検索・ソート・
+> サーバサイドページングは実装済み（T-093, 2026-08-18）／🟡 `GET /api/companies/:code/dividends`
+> （配当年次履歴）は設計のみ・未実装（T-093のスコープ外。実装タスクは別途起票）
 > 実装: `src/handler/app.ts` / DTO: `src/handler/dto/company-input.ts`, `src/handler/dto/price-input.ts`,
 > `src/handler/dto/irbank-import.ts`, `src/handler/dto/market-data-import.ts`,
-> `src/handler/dto/edinet-import.ts`
+> `src/handler/dto/edinet-import.ts`, `src/handler/dto/company-list-query.ts`
 >
 > 管理用の `POST /api/admin/edinet/index/refresh`（docIDインデックスのバックフィル）は
 > **この文書では未記載**。別タスクで起こす。
 
 ## 変更履歴
 
+- **2026-08-20**（T-096 着手前のブロッカー解消）: `ScoringResponse` に `priceSen`/`per`/`pbr`
+  （数値）を実装。下記の 2026-08-17・2026-08-18 の記載は**設計のみで実装が伴っておらず**、
+  「実装済み」という記述が誤りだった（`src/usecase/score-company.ts` の `CompanyScoring`、
+  `src/handler/dto/company-input.ts` の `ScoringResponse`/`toScoringResponse()` に該当
+  フィールドが存在しなかった）。本タスクでこの2ファイルへ配線を追加し、記載どおりの実装に
+  追いついた。値は `Company.priceSen`/`Company.multiples.per`/`Company.multiples.pbr`
+  （既に D1 に永続化済み）をそのまま転記するのみで、計算式・閾値の変更は無いため
+  `SCORING_CALC_VERSION` は上げていない。一覧（`GET /api/companies`・`CompanySummary`）
+  への `per`/`pbr` 追加は本タスクのスコープ外（設計書に記載が無く、指示にも含まれない）。
+- **2026-08-18**（T-093）: `GET /api/companies` の検索・ソート・サーバサイドページングを実装。
+  `q`/`sort`/`page`/`perPage` は不正値・未知値でも 400 にせず既定値へ丸める（zod `.catch()`）。
+  `companies` × `score_cards` × `transformed_metrics`（`metric_key` 条件付き別名JOIN2本）を
+  1クエリの JOIN で取得し、`total` は別の `COUNT(*)` クエリ（計2クエリ）で求める。
+  `CompanySummary` に `priceSen`/`dividendYieldValue`/`payoutRatioValue` を追加。
+  **`GET /api/companies/:code/dividends`（配当年次履歴）は本タスクのスコープ外**（Manager確認済み。
+  BE計画 §0・§6-1）。~~`ScoringResponse` への `priceSen`/`per`/`pbr` 追加は既に実装済み
+  （`GET /api/companies/:code` の応答。下記 §GET /api/companies/:code 参照）。~~
+  → ✅ 訂正（2026-08-20）: この時点では未実装だった。実装は上記 2026-08-20 のエントリを参照。
 - **2026-08-17**（T-077）: `GET /api/companies` に検索・ソート・サーバサイドページングを追加。
-  `ScoringResponse` に `priceSen`/`per`/`pbr`（数値）を追加。
+  ~~`ScoringResponse` に `priceSen`/`per`/`pbr`（数値）を追加。~~
+  → ✅ 訂正（2026-08-20）: このエントリは設計追加の記録であり、実装は伴っていなかった。
+  実装は上記 2026-08-20 のエントリを参照。
   `GET /api/companies/:code/dividends`（配当年次履歴）を新規追加。
   [search-page.md](../ui/pages/search-page.md)・[analysis-dialog.md](../ui/pages/analysis-dialog.md)
   が要求していた項目（§データ取得（API要件））に対応
@@ -97,8 +119,11 @@
 
 保存済み銘柄の一覧（要約）。1000社規模を想定し、明細は含めない read model。
 
-> 🟡 **検索・ソート・ページングは 2026-08-17 追加**（T-077）。
+> 🟢 **検索・ソート・ページングは 2026-08-17 設計（T-077）→ 2026-08-18 実装済み（T-093）。**
 > [search-page.md](../ui/pages/search-page.md) §2・§8 の要求に対応する。
+> 実装: `src/handler/dto/company-list-query.ts`（zod, 既定値丸め込み）,
+> `src/domain/company/company-list-query.ts`（`CompanyListQuery`/`CompanySortKey`）,
+> `src/infra/d1/company-repository.ts`（`listSummaries()`）。
 
 クエリパラメータ:
 
@@ -477,7 +502,8 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 }
 ```
 
-> 🟡 **`priceSen`/`per`/`pbr` は 2026-08-17 追加**（T-077）。
+> 🟢 **`priceSen`/`per`/`pbr` は 2026-08-17 設計（T-077）→ 2026-08-20 実装
+> （T-096 着手前のブロッカー解消）。**
 > [analysis-dialog.md §7](../ui/pages/analysis-dialog.md) の要求に対応する。
 > 従来 `perSource`/`pbrSource`（出所ラベル）しか返しておらず、**近似値の実数そのものが
 > フロントから見えなかった**（`companies.per`/`companies.pbr` には既にある値）。
@@ -518,8 +544,10 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 
 ## GET /api/companies/:code/dividends
 
-> 🟡 **2026-08-17 新規追加**（T-077）。[analysis-dialog.md §5.1・§5.2](../ui/pages/analysis-dialog.md)
-> の指標詳細（①配当推移の折れ線グラフ、②連続非減配年数のリスト）が使う。
+> 🟡 **設計のみ・未実装（2026-08-17 設計追加, T-077）。** [analysis-dialog.md §5.1・§5.2](../ui/pages/analysis-dialog.md)
+> の指標詳細（①配当推移の折れ線グラフ、②連続非減配年数のリスト）が使う想定。
+> **T-093（検索API）のスコープには含まれない**（Manager確認済み。BE計画 §0・§6-1）。
+> 実装タスクは別途起票が必要（`app.ts` に該当ルートは無い）。
 
 保存済みの配当履歴を**年度昇順**（古い年→新しい年）で返す。グラフ・リストの描画順に合わせるため、
 他の一覧エンドポイント（降順が既定）とは向きが逆であることに注意。
@@ -575,9 +603,9 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 - **認証は意図的に付けない。** [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md) の
   決定どおり、検索（`GET /api/companies` 系）は guest（未ログイン）でも使える公開画面
   （[screen-list.md](../ui/screen-list.md) §2）が呼ぶため。**銘柄の登録・更新・削除
-  （`POST`/`DELETE`）は T-092（ルートガード実装）で admin 限定にする。それまでは
-  この文書の記載どおり誰からでも呼べる**（[ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)
-  制約1の指摘どおり、現状は無防備）
+  （`POST`/`DELETE`）は admin 限定にした**（✅ T-091で実装済み。`src/handler/app.ts` の
+  `adminOnly`〈`requireRole('admin')`〉ミドルウェアを通る。[ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)
+  制約1への対応が完了している）
 
 ## 関連ドキュメント
 

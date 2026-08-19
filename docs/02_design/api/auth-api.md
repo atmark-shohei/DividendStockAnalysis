@@ -1,12 +1,26 @@
 # 認証系 API 仕様
 
-> ステータス: 🟡 設計のみ（2026-08-16 保留解除）。実装は T-091 待ち
+> ステータス: 🟢 実装済み（2026-08-18、T-091）
 > 認証方式: [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)（少人数向け自前認証。招待制なし。PBKDF2）
 > テーブル: [schema.md](../database/schema.md)（`users`/`sessions`）
 > 呼び出し元: [login-page.md](../ui/pages/login-page.md)
+> 実装: `src/domain/auth/` `src/usecase/{signup,login,logout,get-current-user}.ts`
+> `src/infra/d1/{user,session}-repository.ts` `src/infra/auth/*`
+> `src/handler/{auth-routes,auth-cookie,require-role,dto/auth-input}.ts`
 
 ## 変更履歴
 
+- **2026-08-18**: 実装完了（T-091）。設計時点で「実装時に決める」としていた3点を確定した:
+  - セッションTTLは **30日**（`SESSION_TTL_DAYS`。`src/domain/auth/session-policy.ts`）
+  - Cookie名は **`session_id`**。トークンは `crypto.getRandomValues(32byte)` の16進文字列
+  - `SIGNUP_ENABLED`/`SIGNUP_MAX_USERS` は `wrangler.jsonc` の `vars`。**未設定時は受付停止**（安全側）
+  - あわせて `POST/DELETE /api/companies` に `requireRole(['admin'])` を配線した
+    （`screen-list.md` §2「保護は API 側でも必ず行う」、ADR-0013 制約1の解消。この節は
+    auth-api.md のスコープ外だが、既存 API への影響として記録する）
+  - **メールアドレスの大文字小文字は正規化しない**（区別する）。`Foo@example.com` と
+    `foo@example.com` は別アカウントとして登録できる。`users.email` の `UNIQUE` 制約も
+    ケースセンシティブ。BEレビュー（CR-review）の推測仕様1件として指摘され、Manager確認の結果、
+    上記のとおり確定した（2026-08-18）
 - **2026-08-16**: 保留を解除（T-076）。「認証が必要」と決まった場合の雛形だった内容を、
   ADR-0013 の決定に沿って具体化した
 
@@ -151,10 +165,16 @@
 
 ## セッション
 
-- Cookie 名・詳細は実装時に決めるが、値は `sessions.id`（不透明なトークン）そのもの
-- `HttpOnly; Secure; SameSite=Lax`（既存 draft の要件を維持）
-- 有効期限（`sessions.expires_at`）は実装時に決める。期限切れのセッションで
-  `GET /me` を呼ぶと 401（同時に `sessions` の当該行を削除してよい＝遅延削除）
+- ✅ **Cookie 名は `session_id`**（2026-08-18確定）。値は `sessions.id`（不透明なトークン。
+  `crypto.getRandomValues(32byte)` の16進文字列＝256bit相当のエントロピー）そのもの
+- `HttpOnly; Secure; SameSite=Lax`（既存 draft の要件を維持）。
+  ✅ **`Secure` 属性は `COOKIE_SECURE`（`wrangler.jsonc` の `vars`。既定 `"true"`）で
+  切替可能**（2026-08-18確定）。本番の既定動作は変わらない（常に `Secure`）。
+  ローカル `wrangler dev`（http）でブラウザ手動確認したい場合のみ、`.dev.vars` に
+  `COOKIE_SECURE=false` を追記して無効化できる（`src/index.ts` の `cookieSecureOf()`）
+- ✅ **有効期限（`sessions.expires_at`）は 30日**（2026-08-18確定。`SESSION_TTL_DAYS`）。
+  期限切れのセッションで `GET /me` を呼ぶと 401（同時に `sessions` の当該行を削除する＝遅延削除。
+  実装済み。定期実行によるバッチ掃除は無い。`schema.md` §未実装・検討事項）
 
 ---
 

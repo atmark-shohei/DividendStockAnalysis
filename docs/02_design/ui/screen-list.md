@@ -1,6 +1,27 @@
 # 画面一覧・遷移図
 
-> ステータス: 🟡 設計確定・実装未着手（2026-08-16 全面改訂）／🟢 `/` と `/input` は実装済み
+> ステータス: 🟡 設計確定・実装未着手（2026-08-16 全面改訂）／🟢 `/` と `/input` は実装済み／
+> 🟢 `/login` `/signup` は FE・BE とも実装済み（2026-08-18、T-091。結合テスト
+> `tests/integration/auth-flow.test.ts` で確認済み）／
+> 🟢 ロールガード（`resolveRouteGuardRedirect`）・nav出し分け（`shouldShowInputTab`）は FE 実装済み
+> （2026-08-18、T-092）。`/input` の**実効的な**制限（BE `requireRole('admin')`）も
+> T-091で `POST/DELETE /api/companies` へ配線済み。ラベルを「銘柄登録」へ変更済み（T-104）
+>
+> 🟢 `/`（検索）は §3.1 の `q`/`sort`/`page` を含めて FE 実装済み（2026-08-19、T-094。
+> `pages/ListPage.tsx`。詳細は [search-page.md](./pages/search-page.md) の変更履歴）。
+>
+> 🟢 `routes.ts` の `?metric=` 形式チェック（`parseRoute`/`routeToPath`/`createListRoute`）は
+> 実装済み（2026-08-19、T-095）。
+>
+> 🟢 **解析ダイアログの枠組み（F-51）は実装済み**（2026-08-20、T-096。
+> `frontend/components/Dialog.tsx` 新規実装＋概要モードの移設）。フォーカストラップ・
+> Escape・`aria-modal`・背景クリック・フォーカス復帰・概要モード（総合スコア・
+> ヒーロー行の株価/PER/PBR・レーダー・指標比較表）まで実装。**指標詳細モード
+> （F-52・F-53、`?metric=<キー>`）は枠組み（「← 指標一覧へ戻る」＋現在値・スコア）のみ**で、
+> 中身（線グラフ・連続年数リスト・汎用の条件表）は T-097/T-098 未着手のまま
+> （プレースホルダー表示）。`?metric=` の実在検証（`resolveActiveMetric`。
+> [ADR-0014](../../adr/0014-analysis-dialog-url-state.md) §決定3）はダイアログ側
+> （`pages/ListPage.tsx`）で実装済み。
 >
 > ⚠️ **2026-08-16 に 2画面 → 6画面へ全面改訂した。**
 > [design_mock](../../design_mock/README.md) の反映（[design-mock-alignment.md](../../03_tasks/design-mock-alignment.md) T-071）と、
@@ -12,6 +33,20 @@
 - **2026-07-28**: ルーティング無しの単一ページ → URL ルーティングによる2画面へ分割
 - **2026-08-16**: 6画面へ全面改訂。ロールによる出し分け、解析結果のモーダル化、
   検索のサーバサイドページングを反映
+- **2026-08-19**（T-094）: `/`（検索）の `q`/`sort`/`page`・空状態・ページング・一覧行の
+  総合点表示（`<ScoreBar>`）を FE 実装。F-50 を 🔴 → 🟢 に更新。F-51（解析ダイアログの
+  モーダル化）は引き続きスコープ外（行クリックは既存のインライン表示を維持。T-096）
+- **2026-08-19**（T-095）: `routes.ts` に `?metric=` クエリパラメータの形式チェックを追加
+  （`Route`型の `kind: 'list'` に `metric: string | null` フィールド、`parseRoute`/
+  `routeToPath`/`createListRoute` へ反映）。ルーティング層のみの変更で、F-51〜F-53
+  （ダイアログ UI 本体）の状態は 🔴 のまま変わらない（T-096 未着手）。
+- **2026-08-20**（T-096）: `frontend/components/Dialog.tsx` を新規実装（フォーカストラップ・
+  `aria-modal`・Escape・背景クリック・フォーカス復帰）し、`pages/ListPage.tsx` の
+  解析結果インライン表示を `<Dialog>` でラップして概要モード（総合スコア・ヒーロー行の
+  株価/PER/PBR・レーダー・指標比較表）を移設。F-51 を 🔴 → 🟢 に更新。
+  `MetricTable.tsx` の行クリックで `?metric=` へ遷移する導線も実装。**指標詳細モードの
+  中身（F-52線グラフ・F-53連続年数リスト・汎用の条件表）は未実装のまま**
+  （プレースホルダー表示。T-097/T-098 に委ねる。fe-plan.md §0 確認事項A、Manager確認済み）。
 
 ---
 
@@ -20,17 +55,17 @@
 **画面の選択も、銘柄の選択も、検索条件も、すべて URL が正。**
 リロード・共有・戻る/進むで状態が失われない（`.claude/rules/frontend.md`）。
 
-| URL           | 画面             | ロール      | 実装                           | 詳細設計                                                     |
-| :------------ | :--------------- | :---------- | :----------------------------- | :----------------------------------------------------------- |
-| `/`           | 検索             | 全員        | 🟡 `pages/ListPage` を改修     | [search-page.md](./pages/search-page.md)（T-072）            |
-| `/criteria`   | 評価基準         | 全員        | 🔴 未実装                      | [criteria-tab.md](./pages/criteria-tab.md)                   |
-| `/portfolio`  | ポートフォリオ   | user, admin | 🔴 未実装                      | [portfolio-page.md](./pages/portfolio-page.md)（T-081）      |
-| `/indicators` | 指標カスタマイズ | user, admin | 🔴 未実装                      | [indicator-custom-page.md](./pages/indicator-custom-page.md) |
-| `/input`      | 銘柄登録         | **admin**   | 🟢 `pages/InputPage`（要制限） | [market-data-import.md](./pages/market-data-import.md)       |
-| `/login`      | ログイン         | 未ログイン  | 🔴 未実装                      | [login-page.md](./pages/login-page.md)（T-075）              |
-| `/signup`     | アカウント作成   | 未ログイン  | 🔴 未実装                      | 同上（1画面2モード）                                         |
+| URL           | 画面             | ロール      | 実装                                                                             | 詳細設計                                                     |
+| :------------ | :--------------- | :---------- | :------------------------------------------------------------------------------- | :----------------------------------------------------------- |
+| `/`           | 検索             | 全員        | 🟢 `pages/ListPage`（T-094・T-096。指標詳細モードの中身=F-52/F-53のみ未実装）    | [search-page.md](./pages/search-page.md)（T-072）            |
+| `/criteria`   | 評価基準         | 全員        | 🔴 未実装                                                                        | [criteria-tab.md](./pages/criteria-tab.md)                   |
+| `/portfolio`  | ポートフォリオ   | user, admin | 🔴 未実装                                                                        | [portfolio-page.md](./pages/portfolio-page.md)（T-081）      |
+| `/indicators` | 指標カスタマイズ | user, admin | 🔴 未実装                                                                        | [indicator-custom-page.md](./pages/indicator-custom-page.md) |
+| `/input`      | 銘柄登録         | **admin**   | 🟢 `pages/InputPage`（FE ガード・BE制限・ラベルとも実装済み。T-091/T-092/T-104） | [market-data-import.md](./pages/market-data-import.md)       |
+| `/login`      | ログイン         | 未ログイン  | 🟢 `pages/AuthPage`（FE・BEとも実装済み。T-091）                                 | [login-page.md](./pages/login-page.md)（T-075）              |
+| `/signup`     | アカウント作成   | 未ログイン  | 🟢 同上（1画面2モード）                                                          | 同上（1画面2モード）                                         |
 
-- **`/input` のパスは変えない。** 画面名は「データ入力」→「銘柄登録」に変わるが、
+- **`/input` のパスは変えない。** 画面名は「データ入力」→「銘柄登録」（T-104で変更済み）。
   パスを変えても得るものが無く、既存のテスト・ドキュメントの参照が壊れるだけ
 - **ログインとアカウント作成は1つの画面の2モード**（試作のセグメント切替）。
   ただし URL は分ける。共有・ブックマークできるほうが素直で、
@@ -170,11 +205,11 @@
 | F-32   | 保存済み銘柄タブ（→ 検索へ発展）     | 🟢   | `/`                            |
 | F-33   | 銘柄間の横並び比較                   | 🔴   | 未着手（P2 へ降格。D-6）       |
 | F-34   | 免責文言の常時表示                   | 🟢   | footer（全画面）               |
-| F-50   | 銘柄検索（検索・ソート・ページング） | 🔴   | `/`                            |
-| F-51   | 解析ダイアログ（モーダル化）         | 🔴   | `/?code=` / `/portfolio?code=` |
+| F-50   | 銘柄検索（検索・ソート・ページング） | 🟢   | `/`                            |
+| F-51   | 解析ダイアログ（モーダル化）         | 🟢   | `/?code=` / `/portfolio?code=` |
 | F-52   | 指標詳細（配当推移の線グラフ）       | 🔴   | `?metric=dividendGrowthRate`   |
 | F-53   | 指標詳細（連続非減配年数のリスト）   | 🔴   | `?metric=consecutiveYears`     |
-| F-54   | 認証（サインアップ・ログイン）       | 🔴   | `/login` / `/signup`           |
+| F-54   | 認証（サインアップ・ログイン）       | 🟡   | `/login` / `/signup`           |
 | F-55   | ロールによる画面の出し分け           | 🔴   | nav（§2）                      |
 | F-56   | ポートフォリオ管理                   | 🔴   | `/portfolio`                   |
 | F-57   | ポートフォリオ集計                   | 🔴   | `/portfolio`                   |
