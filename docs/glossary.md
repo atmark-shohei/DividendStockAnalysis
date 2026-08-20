@@ -28,6 +28,8 @@
 | 実績配当         | `ActualDividend`             | 値オブジェクト   | ③ 実績側が実績EPSと年度を突き合わせるための実績配当（`fiscalYear` / `amountSen`）。`ForecastDividend` の対（2026-08-06 追加）                                                                                    |
 | 最新実績レコード | `latestActualRecord`         | ドメインサービス | `Company.records` から最新の実績（`isForecast: false`）レコードを返す。`latestForecastRecord` の対                                                                                                               |
 | 実績配当の選択   | `selectLatestActualDividend` | ドメインサービス | 配当履歴（`DividendRecord[]`）から実績（`kind: 'actual'`）のうち最新年度のものを選ぶ。`selectLatestForecastDividend` の対                                                                                        |
+| 年度別配当履歴   | `DividendHistoryYear`        | 値オブジェクト   | `GET /api/companies/:code/dividends` が返す1年度ぶんの配当（`fiscalYear` / `amountSen` / `isForecast`）。①配当推移の折れ線グラフ・②連続非減配年数のリストが使う（2026-08-20 追加、T-097）                       |
+| 年度別配当履歴の集約 | `dividendHistoryByYear`  | ドメインサービス | 配当履歴（`DividendRecord[]`）を年度ごとに1件へ集約し、年度昇順で返す。同一年度に複数区分があれば `actual > revised > forecast` の優先順位で選ぶ（値の有無では分岐しない）。`selectLatestActualDividend` 等（最新年度だけ選ぶ）とは異なり全年度を対象にする（2026-08-20 追加、T-097） |
 
 ## 会社一覧検索（T-093。2026-08-18 追加）
 

@@ -10,6 +10,7 @@ import {
   type CompanyListResult,
   type CompanyRepository,
 } from '../domain/company/company-repository';
+import { type DividendHistoryYear, dividendHistoryByYear } from '../domain/company/dividend-record';
 import { type CompanyScoring, scoreCompany } from './score-company';
 
 /**
@@ -41,6 +42,22 @@ export async function getCompanyScoring(
   const company = await repository.findByCode(code);
   if (company === null) return null;
   return scoreCompany(company, useActualForScoring);
+}
+
+/**
+ * 1社の配当履歴（年度ごとに1件へ集約済み）。①配当推移の折れ線グラフ・
+ * ②連続非減配年数のリストが使う（`GET /api/companies/:code/dividends`）。
+ *
+ * 集約ロジック（区分の優先順位・並び替え）は domain（`dividendHistoryByYear`）に
+ * 置き、ここでは薄い委譲に留める（`getCompanyScoring` と同型）。
+ */
+export async function getCompanyDividendHistory(
+  repository: CompanyRepository,
+  code: string,
+): Promise<DividendHistoryYear[] | null> {
+  const company = await repository.findByCode(code);
+  if (company === null) return null;
+  return dividendHistoryByYear(company.dividends);
 }
 
 export async function deleteCompany(repository: CompanyRepository, code: string): Promise<void> {

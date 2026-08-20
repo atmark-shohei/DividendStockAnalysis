@@ -545,6 +545,59 @@ describe('GET /api/companies/:code', () => {
   });
 });
 
+/**
+ * handler → usecase → domain → infra(D1) の結線確認（①配当推移の折れ線グラフ・
+ * ②連続非減配年数のリストが使う）。年度別集約の境界値（優先順位の総当り等）は
+ * `tests/domain/company/dividend-record.test.ts` で尽くしてあるので、ここでは
+ * **層をまたいだときに順序・優先順位が壊れないか**だけを見る。
+ */
+describe('GET /api/companies/:code/dividends', () => {
+  it('200: 保存済みの配当履歴を年度昇順で返す。予想年だけ isForecast: true', async () => {
+    // samplePayload(): 2020〜2025 実績 + 2026 予想
+    await post(samplePayload());
+    const response = await app().request('/api/companies/9433/dividends');
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as {
+      dividends: { fiscalYear: number; amountSen: number | null; isForecast: boolean }[];
+    };
+    expect(body.dividends.map((d) => d.fiscalYear)).toEqual([
+      2020, 2021, 2022, 2023, 2024, 2025, 2026,
+    ]);
+    expect(
+      body.dividends.every((d) => (d.fiscalYear === 2026 ? d.isForecast : !d.isForecast)),
+    ).toBe(true);
+  });
+
+  it('未保存コードは 404', async () => {
+    const response = await app().request('/api/companies/1234/dividends');
+    expect(response.status).toBe(404);
+  });
+
+  it('コード形式が不正なら 400', async () => {
+    const response = await app().request('/api/companies/abc/dividends');
+    expect(response.status).toBe(400);
+  });
+
+  it('同一年度に forecast と actual が混在しても actual を採用する（層をまたいでも優先順位が壊れない）', async () => {
+    const payload = samplePayload({
+      dividends: [
+        { fiscalYear: 2025, kind: 'forecast', annualAmountSen: 9_999 },
+        { fiscalYear: 2025, kind: 'actual', annualAmountSen: 6_000 },
+        { fiscalYear: 2024, kind: 'actual', annualAmountSen: 5_600 },
+      ],
+    });
+    await post(payload);
+    const response = await app().request('/api/companies/9433/dividends');
+    const body = (await response.json()) as {
+      dividends: { fiscalYear: number; amountSen: number | null; isForecast: boolean }[];
+    };
+
+    const fy2025 = body.dividends.find((d) => d.fiscalYear === 2025);
+    expect(fy2025).toEqual({ fiscalYear: 2025, amountSen: 6_000, isForecast: false });
+  });
+});
+
 describe('DELETE /api/companies/:code', () => {
   it('削除すると一覧からも明細からも消える', async () => {
     await post(samplePayload());

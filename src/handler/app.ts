@@ -27,10 +27,16 @@ import { analyzeCompany } from '../usecase/analyze-company';
 import { importEdinetHistory } from '../usecase/import-edinet-history';
 import { importFromIrBank } from '../usecase/import-from-irbank';
 import { importMarketData } from '../usecase/import-market-data';
-import { deleteCompany, getCompanyScoring, listCompanies } from '../usecase/read-companies';
+import {
+  deleteCompany,
+  getCompanyDividendHistory,
+  getCompanyScoring,
+  listCompanies,
+} from '../usecase/read-companies';
 import { refreshEdinetDocumentIndex } from '../usecase/refresh-edinet-document-index';
 import { registerAuthRoutes } from './auth-routes';
 import { companyListQuery } from './dto/company-list-query';
+import { toDividendHistoryResponse } from './dto/company-dividends';
 import {
   analyzeCompanyRequest,
   toCompany,
@@ -399,6 +405,24 @@ export function createApp(dependencies: AppDependencies): Hono {
       return context.json({ error: '指定された銘柄は保存されていません' }, 404);
     }
     return context.json(toScoringResponse(scoring));
+  });
+
+  /**
+   * 保存済みの配当履歴を年度昇順（古い年→新しい年）で返す。①配当推移の折れ線グラフ・
+   * ②連続非減配年数のリストが使う（`docs/02_design/api/company-api.md` 545-586行目）。
+   * `GET /api/companies/:code` と同じ可視性（無認証で閲覧可）に揃える。
+   */
+  app.get('/api/companies/:code/dividends', async (context) => {
+    const code = context.req.param('code');
+    if (!COMPANY_CODE_PATTERN.test(code)) {
+      return context.json({ error: '銘柄コードの形式が不正です' }, 400);
+    }
+
+    const history = await getCompanyDividendHistory(dependencies.repository, code);
+    if (history === null) {
+      return context.json({ error: '指定された銘柄は保存されていません' }, 404);
+    }
+    return context.json(toDividendHistoryResponse(history));
   });
 
   app.delete('/api/companies/:code', adminOnly, async (context) => {

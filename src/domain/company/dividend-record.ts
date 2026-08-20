@@ -195,6 +195,64 @@ export function selectLatestForecastDividend(
   return { fiscalYear: latest.fiscalYear, amountSen: latest.annualAmountSen };
 }
 
+/** 年度ごとに1件へ集約した配当履歴（①配当推移の折れ線グラフ・②連続非減配年数のリストが使う） */
+export interface DividendHistoryYear {
+  /** 決算年度。2024年3月期なら 2024 */
+  readonly fiscalYear: number;
+  /** 年間配当の合計（銭）。null=データなし。0=無配（別物） */
+  readonly amountSen: number | null;
+  /** true: forecast/revised が採用された年。false: actual が採用された年 */
+  readonly isForecast: boolean;
+}
+
+/**
+ * 同一年度に複数区分が並んだときの優先度（`GET /api/companies/:code/dividends` 用）。
+ *
+ * `KIND_PRIORITY`（上）とは意味が逆（`actual` が最優先）。あちらは「最新年度に
+ * 予想があれば予想を採る」ための優先度で、こちらは「過去の年度をどう1点に
+ * 集約するか」の優先度（設計書 `company-api.md` 545-586行目）。数値の意味を
+ * 混同しないよう別定数にする。
+ */
+const HISTORY_KIND_PRIORITY: Readonly<Record<DividendRecordKind, number>> = {
+  actual: 2,
+  revised: 1,
+  forecast: 0,
+};
+
+/**
+ * 配当履歴を**年度ごとに1件へ集約**し、年度昇順（古い年→新しい年）で返す
+ * （`GET /api/companies/:code/dividends`。設計書 `company-api.md` 545-586行目）。
+ *
+ * 同一年度に複数区分がある場合は `actual > revised > forecast` の優先順位で選ぶ。
+ * **金額が `null` の行も除外しない**（「その年度は存在しない」と「値が無い」を
+ * 区別するため。`.claude/CLAUDE.md`「`null`（判定不能）と0点は別物」）。
+ * 優先順位の判定も値の有無では条件分岐しない（`actual` が `null` でも `actual` を採用する）。
+ *
+ * `fiscalYear` が壊れている（`Number.isSafeInteger` でない）行は他の選択関数と同じ方針で除外する。
+ */
+export function dividendHistoryByYear(records: readonly DividendRecord[]): DividendHistoryYear[] {
+  const byYear = new Map<number, DividendRecord>();
+  for (const record of records) {
+    if (!Number.isSafeInteger(record.fiscalYear)) continue;
+
+    const current = byYear.get(record.fiscalYear);
+    if (
+      current === undefined ||
+      HISTORY_KIND_PRIORITY[record.kind] > HISTORY_KIND_PRIORITY[current.kind]
+    ) {
+      byYear.set(record.fiscalYear, record);
+    }
+  }
+
+  return [...byYear.values()]
+    .sort((a, b) => a.fiscalYear - b.fiscalYear)
+    .map((record) => ({
+      fiscalYear: record.fiscalYear,
+      amountSen: record.annualAmountSen,
+      isForecast: record.kind !== 'actual',
+    }));
+}
+
 /**
  * 実績配当（`kind === 'actual'`）のうち最新年度のものを返す。
  *

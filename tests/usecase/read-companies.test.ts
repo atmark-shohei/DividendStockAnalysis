@@ -6,7 +6,7 @@ import {
   type CompanyListResult,
   type CompanyRepository,
 } from '@/domain/company/company-repository';
-import { listCompanies } from '@/usecase/read-companies';
+import { getCompanyDividendHistory, listCompanies } from '@/usecase/read-companies';
 
 /**
  * `listCompanies` は薄い委譲（ドメイン計算は無い）。
@@ -66,5 +66,62 @@ describe('listCompanies', () => {
     const result = await listCompanies(fakeRepository(spy), query);
 
     expect(result).toBe(SAMPLE_RESULT);
+  });
+});
+
+const SAMPLE_COMPANY: Company = {
+  code: '9433',
+  name: 'テスト通信',
+  records: [],
+  dividends: [
+    { fiscalYear: 2026, kind: 'forecast', annualAmountSen: 6_000 },
+    { fiscalYear: 2025, kind: 'actual', annualAmountSen: 5_800 },
+    { fiscalYear: 2024, kind: 'actual', annualAmountSen: 5_600 },
+  ],
+  balanceSheet: {
+    currentAssetsSen: null,
+    investmentSecuritiesSen: null,
+    totalLiabilitiesSen: null,
+    previousDividendTotalSen: null,
+  },
+  multiples: { per: null, perSource: null, pbr: null, pbrSource: null },
+  priceSen: null,
+  fetchedAt: '2026-07-28T00:00:00.000Z',
+  epsHistoryRestated: false,
+  revenueHistoryRestated: false,
+};
+
+/**
+ * `getCompanyDividendHistory` は薄い委譲（ドメイン計算は `dividendHistoryByYear` に任せる）。
+ * ここで見たいのは「`findByCode` の結果に domain 関数を適用して返すか」「null の伝播」だけ。
+ * 集約ロジックそのもの（優先順位・境界値）は `tests/domain/company/dividend-record.test.ts` で尽くす。
+ */
+describe('getCompanyDividendHistory', () => {
+  function fakeCompanyRepository(company: Company | null): CompanyRepository {
+    return {
+      save: (): Promise<void> => unimplemented('CompanyRepository.save'),
+      findByCode: (): Promise<Company | null> => Promise.resolve(company),
+      listSummaries: (): Promise<CompanyListResult> =>
+        unimplemented('CompanyRepository.listSummaries'),
+      deleteByCode: (): Promise<void> => unimplemented('CompanyRepository.deleteByCode'),
+      listFiscalYearEndMonths: (): Promise<readonly number[]> =>
+        unimplemented('CompanyRepository.listFiscalYearEndMonths'),
+    };
+  }
+
+  it('findByCode が Company を返す → dividendHistoryByYear を適用した結果が返る', async () => {
+    const result = await getCompanyDividendHistory(fakeCompanyRepository(SAMPLE_COMPANY), '9433');
+
+    expect(result).toEqual([
+      { fiscalYear: 2024, amountSen: 5_600, isForecast: false },
+      { fiscalYear: 2025, amountSen: 5_800, isForecast: false },
+      { fiscalYear: 2026, amountSen: 6_000, isForecast: true },
+    ]);
+  });
+
+  it('findByCode が null を返す → null を返す（404 への変換は handler の責務）', async () => {
+    const result = await getCompanyDividendHistory(fakeCompanyRepository(null), '0000');
+
+    expect(result).toBeNull();
   });
 });
