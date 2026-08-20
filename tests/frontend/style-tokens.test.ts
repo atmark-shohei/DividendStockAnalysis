@@ -271,3 +271,92 @@ describe('MetricTable.tsx の --font-mono 適用（class 付与の検証。CR-7 
     expect(metricTableSource).toMatch(/className="mono">\{metric\.number\}/);
   });
 });
+
+describe('MetricTable.tsx のスコア列に <ScoreBar> が追加されている（T-096 fe-review CR-1 是正）', () => {
+  const metricTableSource = readFileSync(
+    resolve(__dirname, '../../frontend/components/MetricTable.tsx'),
+    'utf-8',
+  );
+
+  it('判定可の行に <ScoreBar value={metric.score} max={MAX_METRIC_SCORE} /> が描画される', () => {
+    expect(metricTableSource).toMatch(
+      /<ScoreBar value=\{metric\.score\} max=\{MAX_METRIC_SCORE\} \/>/,
+    );
+  });
+
+  it('MAX_METRIC_SCORE が定数化されている（マジックナンバー禁止。ai/rules/fe/coding-standards.md §4）', () => {
+    expect(metricTableSource).toMatch(/const MAX_METRIC_SCORE = 10;/);
+  });
+
+  it('判定不能に 0 を出さない。0 に丸めかねない旧パターン `unavailable ? NO_DATA` が残っていない', () => {
+    expect(metricTableSource).not.toMatch(/unavailable \? NO_DATA/);
+  });
+
+  it('スコア列の判定は metric.score === null を直接見る（TypeScript narrowing のため）', () => {
+    expect(metricTableSource).toMatch(/\{metric\.score === null \? \(\s*NO_DATA/);
+  });
+});
+
+describe('MetricTable.tsx に「›」装飾列が追加されている（T-096 fe-review CR-2 是正）', () => {
+  const metricTableSource = readFileSync(
+    resolve(__dirname, '../../frontend/components/MetricTable.tsx'),
+    'utf-8',
+  );
+
+  it('<thead> に aria-hidden な装飾列見出しがある', () => {
+    expect(metricTableSource).toMatch(/<th scope="col" aria-hidden="true" \/>/);
+  });
+
+  it('各行末尾に aria-hidden な「›」セルがある', () => {
+    expect(metricTableSource).toMatch(/<td aria-hidden="true">›<\/td>/);
+  });
+});
+
+describe('ListPage.tsx のダイアログ内エラー表示に role="alert"（T-096 fe-review CR-3 是正）', () => {
+  const listPageSource = readFileSync(
+    resolve(__dirname, '../../frontend/pages/ListPage.tsx'),
+    'utf-8',
+  );
+
+  it('解析結果取得失敗時の <p className="meta"> に role="alert" が付与されている', () => {
+    expect(listPageSource).toMatch(
+      /<p className="meta" role="alert">\s*解析結果を表示できませんでした。/,
+    );
+  });
+});
+
+describe('ListPage.tsx のダイアログ見出しに銘柄コードが併記されている（T-096 fe-review CR-4 是正）', () => {
+  const listPageSource = readFileSync(
+    resolve(__dirname, '../../frontend/pages/ListPage.tsx'),
+    'utf-8',
+  );
+
+  it('<h2> 内で selected.code が mono company-code class 付きで描画される', () => {
+    expect(listPageSource).toMatch(
+      /\{selected\.code !== null && <span className="mono company-code">\{selected\.code\}<\/span>\}/,
+    );
+  });
+});
+
+describe('概要モードの2カラム化（T-096 fe-review CR-5 是正。analysis-dialog.md §3）', () => {
+  const listPageSource = readFileSync(
+    resolve(__dirname, '../../frontend/pages/ListPage.tsx'),
+    'utf-8',
+  );
+
+  it('ListPage.tsx: 総合スコアカード（dialog-summary-score）とレーダーチャート（dialog-summary-chart）が dialog-summary でグリッド化されている', () => {
+    expect(listPageSource).toMatch(/<div className="dialog-summary">/);
+    expect(listPageSource).toMatch(/<div className="dialog-summary-score">/);
+    expect(listPageSource).toMatch(/<div className="dialog-summary-chart">/);
+  });
+
+  it('style.css: .dialog-summary が2列グリッドで、左カラム幅を --space-* の組み合わせ（新規トークン無し）で表現している', () => {
+    const dialogSummaryBlockMatch = styleCss.match(/\.dialog-summary\s*\{([\s\S]*?)\}/);
+    expect(dialogSummaryBlockMatch).not.toBeNull();
+    const block = dialogSummaryBlockMatch?.[1] ?? '';
+    expect(block).toContain('display: grid;');
+    expect(block).toMatch(
+      /grid-template-columns:\s*calc\(var\(--space-6\) \* 8 \+ var\(--space-4\)\) 1fr;/,
+    );
+  });
+});

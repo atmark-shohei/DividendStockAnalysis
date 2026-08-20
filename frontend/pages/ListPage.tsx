@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { CompanySummary } from '@/domain/company/company-repository';
 
@@ -379,9 +379,41 @@ function ScoringBody({
   readonly onBackToOverview: () => void;
   readonly onClose: () => void;
 }) {
+  // モード切替時のフォーカス管理（analysis-dialog.md §8 の「閉じたら戻す」の対象外で、
+  // 概要⇄詳細のモード内遷移。CR-8是正、選択肢(a): 見出しへ寄せる方式。
+  // titleRef: 概要モードの見出し（詳細→概要のとき）。backButtonRef: 「← 指標一覧へ戻る」
+  // （概要→詳細のとき）。ScoringBody はモード切替時に再マウントされず、同一コンポーネント
+  // インスタンスとして再レンダーされ続けるため ref は保持される
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const backButtonRef = useRef<HTMLButtonElement>(null);
+  const previousActiveMetricRef = useRef<typeof activeMetric>(null);
+
+  useEffect(() => {
+    const enteredDetail = previousActiveMetricRef.current === null && activeMetric !== null;
+    const leftDetail = previousActiveMetricRef.current !== null && activeMetric === null;
+    if (enteredDetail) backButtonRef.current?.focus();
+    if (leftDetail) titleRef.current?.focus();
+    previousActiveMetricRef.current = activeMetric;
+    // `activeMetric` のみを依存にする（`backButtonRef`/`titleRef`/`previousActiveMetricRef` は
+    // ref のため依存に含めない。`eslint-plugin-react-hooks` は未導入のため exhaustive-deps の
+    // 自動検知は無い。手動で意図を明記する）
+  }, [activeMetric]);
+
   const header = (
     <div className="dialog-header">
-      <h2 id={DIALOG_TITLE_ID}>{selectedName}</h2>
+      {/* 市場区分はこのアプリのドメインに存在しないため省略する（analysis-dialog.md §3 は
+          「銘柄名 + コード・市場区分」だが、市場区分データが無い以上コードのみ併記する）。
+          一覧行と同じ `mono company-code` クラスを流用し新規CSSを増やさない
+          （fe-review.md CR-4）。`selected.code` は `ScoringBody` が実際に描画される時点では
+          常に非null（`open={selected.code !== null}` の `<Dialog>` が false のとき children を
+          評価しないため）だが、型が `string | null` のままなので TS 上のガードを残す。
+          `{selectedName}` と `<span>` は同一行に置く（JSX は式↔要素間の改行だけの空白を
+          畳み込んで除去するため、別行に分けると銘柄名とコードの間の区切りが消える。
+          fe-review-round2.md NEW-1 是正） */}
+      <h2 id={DIALOG_TITLE_ID} ref={titleRef} tabIndex={-1}>
+        {selectedName}{' '}
+        {selected.code !== null && <span className="mono company-code">{selected.code}</span>}
+      </h2>
       <button type="button" className="dialog-close" onClick={onClose} aria-label="閉じる">
         ✕
       </button>
@@ -398,11 +430,18 @@ function ScoringBody({
   }
 
   if (selected.scoring === null) {
-    // 何が起きたかは App のエラー表示（role="alert"）が出す。ここは次の行動だけ示す
+    // analysis-dialog.md §6「取得に失敗した場合、ダイアログ内に role="alert" でエラーを
+    // 表示し、次の行動を示す」。App 側の role="alert"（App.tsx の error 表示）はダイアログ外の
+    // DOM 位置にあり、フォーカストラップ中の SR に読み上げられる保証が無いため、
+    // ダイアログ内にも専用の role="alert" を持たせる（App 側の error state・表示は
+    // ネットワーク障害以外の一般エラー経路として残す。重複読み上げより情報欠落のほうが
+    // 実害が大きいという §6 の意図を優先する）
     return (
       <>
         {header}
-        <p className="meta">解析結果を表示できませんでした。一覧から選び直してください。</p>
+        <p className="meta" role="alert">
+          解析結果を表示できませんでした。一覧から選び直してください。
+        </p>
       </>
     );
   }
@@ -413,7 +452,7 @@ function ScoringBody({
     return (
       <>
         {header}
-        <button type="button" onClick={onBackToOverview}>
+        <button type="button" ref={backButtonRef} onClick={onBackToOverview}>
           ← 指標一覧へ戻る
         </button>
         <p className="total">
@@ -443,64 +482,74 @@ function ScoringBody({
   return (
     <>
       {header}
-      <p className="total">
-        総合点 <strong>{scoring.totalScore}</strong> /{' '}
-        <span className="numeric">{scoring.maxTotalScore}</span> 点
-        {/* 有効指標数の併記は §0.5 の必須要件。80/100 の誤読を防ぐ */}
-        <span className="effective">
-          （有効{' '}
-          <span className="numeric">
-            {scoring.effectiveMetricCount}/{scoring.totalMetricCount}
-          </span>{' '}
-          指標）
-        </span>
-      </p>
-      <ScoreBar value={scoring.totalScore} max={scoring.maxTotalScore} />
       <p className="meta">
         採用した配当: {dividendSourceText(scoring.dividendSource)} ／ 入力日時:{' '}
         <span className="numeric">{formatFetchedAt(scoring.fetchedAt)}</span>
       </p>
-      {/* ヒーロー行: 株価・配当利回り・PER・PBR（`analysis-dialog.md` §4.1）。
-          PBR等が null のとき formatMetricValue/formatSen が NO_DATA（—）を返す */}
-      <dl className="dialog-hero">
-        <div className="dialog-hero-row">
-          <dt>株価</dt>
-          <dd className="numeric">{formatSen(scoring.priceSen)}</dd>
+      {/* ヒーロー行の2カラム化（analysis-dialog.md §3「ヒーロー行は2列グリッド
+          （左270px固定・右は残り幅）」。fe-review.md CR-5 是正）。
+          「採用した配当／入力日時」の meta 行はどちらのカラムにも属さない付帯情報のため、
+          グリッドの外（上）に残す（§3 のASCII図に明示的な位置指定が無いための実装判断） */}
+      <div className="dialog-summary">
+        <div className="dialog-summary-score">
+          <p className="total">
+            総合点 <strong>{scoring.totalScore}</strong> /{' '}
+            <span className="numeric">{scoring.maxTotalScore}</span> 点
+            {/* 有効指標数の併記は §0.5 の必須要件。80/100 の誤読を防ぐ */}
+            <span className="effective">
+              （有効{' '}
+              <span className="numeric">
+                {scoring.effectiveMetricCount}/{scoring.totalMetricCount}
+              </span>{' '}
+              指標）
+            </span>
+          </p>
+          <ScoreBar value={scoring.totalScore} max={scoring.maxTotalScore} />
+          {/* ヒーロー行: 株価・配当利回り・PER・PBR（`analysis-dialog.md` §4.1）。
+              PBR等が null のとき formatMetricValue/formatSen が NO_DATA（—）を返す */}
+          <dl className="dialog-hero">
+            <div className="dialog-hero-row">
+              <dt>株価</dt>
+              <dd className="numeric">{formatSen(scoring.priceSen)}</dd>
+            </div>
+            <div className="dialog-hero-row">
+              <dt>配当利回り</dt>
+              <dd className="numeric">
+                {dividendYieldMetric === null
+                  ? NO_DATA
+                  : formatMetricValue(dividendYieldMetric.value, dividendYieldMetric.unit, true)}
+              </dd>
+            </div>
+            <div className="dialog-hero-row">
+              <dt>PER</dt>
+              <dd className="numeric">
+                {formatMetricValue(scoring.per, '倍', false)}
+                {scoring.perSource !== null && `（${multipleSourceText(scoring.perSource)}）`}
+              </dd>
+            </div>
+            <div className="dialog-hero-row">
+              <dt>PBR</dt>
+              <dd className="numeric">
+                {formatMetricValue(scoring.pbr, '倍', false)}
+                {scoring.pbrSource !== null && `（${multipleSourceText(scoring.pbrSource)}）`}
+              </dd>
+            </div>
+          </dl>
+          <p className="meta">
+            <label className="inline">
+              <input
+                type="checkbox"
+                checked={payoutRatioSourceControl.checked}
+                onChange={(event) => payoutRatioSourceControl.onToggle(event.target.checked)}
+              />
+              実績配当性向を採点に使う
+            </label>
+          </p>
         </div>
-        <div className="dialog-hero-row">
-          <dt>配当利回り</dt>
-          <dd className="numeric">
-            {dividendYieldMetric === null
-              ? NO_DATA
-              : formatMetricValue(dividendYieldMetric.value, dividendYieldMetric.unit, true)}
-          </dd>
+        <div className="dialog-summary-chart">
+          <ScoreRadar metrics={scoring.metrics} />
         </div>
-        <div className="dialog-hero-row">
-          <dt>PER</dt>
-          <dd className="numeric">
-            {formatMetricValue(scoring.per, '倍', false)}
-            {scoring.perSource !== null && `（${multipleSourceText(scoring.perSource)}）`}
-          </dd>
-        </div>
-        <div className="dialog-hero-row">
-          <dt>PBR</dt>
-          <dd className="numeric">
-            {formatMetricValue(scoring.pbr, '倍', false)}
-            {scoring.pbrSource !== null && `（${multipleSourceText(scoring.pbrSource)}）`}
-          </dd>
-        </div>
-      </dl>
-      <p className="meta">
-        <label className="inline">
-          <input
-            type="checkbox"
-            checked={payoutRatioSourceControl.checked}
-            onChange={(event) => payoutRatioSourceControl.onToggle(event.target.checked)}
-          />
-          実績配当性向を採点に使う
-        </label>
-      </p>
-      <ScoreRadar metrics={scoring.metrics} />
+      </div>
       <MetricTable
         metrics={scoring.metrics}
         payoutRatioSource={scoring.payoutRatioSource}

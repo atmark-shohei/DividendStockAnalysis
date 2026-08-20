@@ -264,6 +264,13 @@ td {
   color: var(--color-text-tertiary);
 }
 
+/* ダイアログ見出しのコードのみ色を上書きする（analysis-dialog.md §3「コード・市場区分は
+ * --color-text-secondary」。一覧行の .company-code は --color-text-tertiary のまま維持する。
+ * fe-review-round2.md NEW-2 是正、ユーザー決定: 実装を設計書に合わせる） */
+.dialog-header .company-code {
+  color: var(--color-text-secondary);
+}
+
 /* 判定不能の行。色だけに依存させないため、備考欄に必ず文言を出している */
 .is-unavailable {
   color: var(--color-text-tertiary);
@@ -538,6 +545,24 @@ footer {
 }
 
 /*
+ * ヒーロー行の2カラムグリッド（analysis-dialog.md §3「ヒーロー行は2列グリッド
+ * （左270px固定・右は残り幅）」。fe-review.md CR-5 是正）。
+ * Manager決定（T-096 fe-fix-plan CR-5, 2026-08-20）: 案B採用。新規トークンは追加せず、
+ * 既存 --space-*（4/8/12/16/24/32px、すべて4の倍数）の組み合わせで近似する。
+ * 270px は 4の倍数ではない（270 mod 4 = 2）ため --space-* の合計だけでは厳密には作れない。
+ * 最も自然な式 var(--space-6)×8 + var(--space-4) = 256px + 16px = 272px を採用する
+ * （目標270pxとの差は +2px。940px幅のカードに対し約0.2%で視覚的に無視できる差）。
+ * .dialog-summary-score / .dialog-summary-chart 自体には新規スタイルを追加しない
+ * （`<p>`/`<dl>` の余白はブラウザ既定のマージンのままにし、挙動変更を最小にする）
+ */
+.dialog-summary {
+  display: grid;
+  grid-template-columns: calc(var(--space-6) * 8 + var(--space-4)) 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+/*
  * 指標行クリックの stretched button（`search-page.md` §4.1 と同じパターン）。
  * 実体の `<button>` はセル内の見出しテキストを表示するだけの見た目（`background: none`）で、
  * `::after` を `position: absolute; inset: 0` にして行全体（`.metric-row`。
@@ -565,7 +590,10 @@ footer {
 }
 
 /* キーボードフォーカス時、行全体の当たり判定に沿って可視のフォーカスリングを出す
- * （`search-page.md` §4.1「フォーカス時は box-shadow: inset 3px 0 0 var(--color-action)」） */
+ * （`search-page.md` §4.1「フォーカス時は box-shadow: inset 3px 0 0 var(--color-action)」）。
+ * ここの 3px は色・余白・フォントサイズのデザイントークンではなく、フォーカスリングの
+ * 太さという UI実装上の固定値であり、design-tokens.md §6「直値禁止」の対象外として扱う
+ * （.sr-only の 1px と同じ整理。Manager決定: T-096 fe-review CR-6, 2026-08-20） */
 .metric-row-button:focus-visible::after {
   box-shadow: inset 3px 0 0 var(--color-action);
 }

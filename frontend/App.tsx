@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type {
   AnalyzeCompanyRequest,
@@ -202,21 +202,40 @@ export function App() {
    * 両方を外す（`docs/adr/0014-analysis-dialog-url-state.md` §決定4）。`handleDelete`
    * 内の削除後処理（同じく selectedCode を外す navigate）と同型
    */
-  const handleCloseDialog = () => {
+  const handleCloseDialog = useCallback(() => {
     navigate(createListRoute({ q, sort, page }));
-  };
+  }, [navigate, q, sort, page]);
 
   /** 指標行クリック。`?metric=<key>` を付ける（`code` はそのまま維持） */
-  const handleOpenMetric = (metric: string) => {
-    if (selectedCode === null) return;
-    navigate(createListRoute({ selectedCode, metric, useActualForScoring, q, sort, page }));
-  };
+  const handleOpenMetric = useCallback(
+    (metric: string) => {
+      if (selectedCode === null) return;
+      navigate(createListRoute({ selectedCode, metric, useActualForScoring, q, sort, page }));
+    },
+    [navigate, selectedCode, useActualForScoring, q, sort, page],
+  );
 
   /** 「← 指標一覧へ戻る」。`?metric=` だけを外す（`code` は残す。ADR-0014 §決定4） */
-  const handleBackToOverview = () => {
+  const handleBackToOverview = useCallback(() => {
     if (selectedCode === null) return;
     navigate(createListRoute({ selectedCode, metric: null, useActualForScoring, q, sort, page }));
-  };
+  }, [navigate, selectedCode, useActualForScoring, q, sort, page]);
+
+  /**
+   * `dialogHandlers` オブジェクトを `useMemo` 化する（CR-7是正）。インラインで毎レンダー
+   * 新しいオブジェクト・関数を生成すると、`ListPage`/`Dialog` 側の `useEffect` 依存配列に
+   * 渡ったときに毎回再実行されうる（`Dialog.tsx` の `open`/`onClose` を監視する useEffect 等）。
+   * `handleCloseDialog`/`handleOpenMetric`/`handleBackToOverview` を先に `useCallback` で
+   * 参照安定化したうえで、それらをまとめる本オブジェクトも `useMemo` で安定化する
+   */
+  const dialogHandlers = useMemo(
+    () => ({
+      onClose: handleCloseDialog,
+      onOpenMetric: handleOpenMetric,
+      onBackToOverview: handleBackToOverview,
+    }),
+    [handleCloseDialog, handleOpenMetric, handleBackToOverview],
+  );
 
   const handleToggleUseActualForScoring = (checked: boolean) => {
     if (selectedCode === null) return;
@@ -372,11 +391,7 @@ export function App() {
           }}
           rowActions={{ onSelect: handleSelect, onDelete: handleDelete }}
           activeMetricParam={route.kind === 'list' ? route.metric : null}
-          dialogHandlers={{
-            onClose: handleCloseDialog,
-            onOpenMetric: handleOpenMetric,
-            onBackToOverview: handleBackToOverview,
-          }}
+          dialogHandlers={dialogHandlers}
         />
       )}
 

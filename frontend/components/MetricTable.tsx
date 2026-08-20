@@ -1,5 +1,9 @@
 import type { ScoringResponse } from '../api';
 import { NO_DATA, formatMetricValue, payoutRatioBreakdownText, reasonText } from '../format';
+import { ScoreBar } from './ScoreBar';
+
+/** 指標スコアの上限（0..10点。scoring/bands.ts の区分に対応。analysis-dialog.md §4.2 の max=10） */
+const MAX_METRIC_SCORE = 10;
 
 /**
  * 指標ごとのスコア一覧。
@@ -43,6 +47,9 @@ export function MetricTable({
           <th scope="col">算出値</th>
           <th scope="col">スコア</th>
           <th scope="col">備考</th>
+          {/* 装飾のみの列（analysis-dialog.md §4.2「›: 装飾のみ、aria-hidden」）。
+              見出しテキストが無い列をSRが「列見出し不明」と読まないよう列見出しごと隠す */}
+          <th scope="col" aria-hidden="true" />
         </tr>
       </thead>
       <tbody>
@@ -68,8 +75,21 @@ export function MetricTable({
               <td className="numeric">
                 {formatMetricValue(metric.value, metric.unit, metric.key === 'dividendYield')}
               </td>
-              {/* 判定不能に 0 を出さない。0点と「計算できなかった」は別物（§0.5） */}
-              <td className="numeric">{unavailable ? NO_DATA : `${metric.score} 点`}</td>
+              {/* 判定不能に 0 を出さない。0点と「計算できなかった」は別物（§0.5）。
+                  スコアバーは判定可の行だけ描画する
+                  （analysis-dialog.md §4.2「判定不能時はバー無し」）。
+                  TypeScript の narrowing のため、`unavailable`（boolean変数）越しではなく
+                  ここで直接 `metric.score === null` を判定する */}
+              <td className="numeric">
+                {metric.score === null ? (
+                  NO_DATA
+                ) : (
+                  <>
+                    <ScoreBar value={metric.score} max={MAX_METRIC_SCORE} />
+                    {`${metric.score} 点`}
+                  </>
+                )}
+              </td>
               <td>
                 {reasonText(metric.unavailableReason)}
                 {/* ③ だけ予想・実績の内訳と採用元を併記する（既存の行構造は変えない） */}
@@ -83,6 +103,7 @@ export function MetricTable({
                   </div>
                 )}
               </td>
+              <td aria-hidden="true">›</td>
             </tr>
           );
         })}
