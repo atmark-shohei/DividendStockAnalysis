@@ -1,8 +1,8 @@
 # 銘柄・スコアリング API 仕様
 
 > ステータス: 🟢 既存部分は実装済み（2026-07-28）／🟢 `GET /api/companies` の検索・ソート・
-> サーバサイドページングは実装済み（T-093, 2026-08-18）／🟡 `GET /api/companies/:code/dividends`
-> （配当年次履歴）は設計のみ・未実装（T-093のスコープ外。実装タスクは別途起票）
+> サーバサイドページングは実装済み（T-093, 2026-08-18）／🟢 `GET /api/companies/:code/dividends`
+> （配当年次履歴）は実装済み（T-097, 2026-08-20）
 > 実装: `src/handler/app.ts` / DTO: `src/handler/dto/company-input.ts`, `src/handler/dto/price-input.ts`,
 > `src/handler/dto/irbank-import.ts`, `src/handler/dto/market-data-import.ts`,
 > `src/handler/dto/edinet-import.ts`, `src/handler/dto/company-list-query.ts`
@@ -12,6 +12,14 @@
 
 ## 変更履歴
 
+- **2026-08-20**（T-097）: `GET /api/companies/:code/dividends`（配当年次履歴）を実装。
+  `src/handler/app.ts` に `GET /api/companies/:code` の直後のルートとして追加した（無認証）。
+  `dividends[]` は年度昇順で返り、`amountSen: null` の年度も除外せず含める
+  （データ欠損を「行が無い」ではなく `null` で表現する）。同一年度に複数区分がある場合は
+  `actual` > `revised` > `forecast` の優先順位で1件を採用し、この優先順位判定は
+  `amountSen` の値の有無では分岐しない（`actual` が `null` でも `actual` を採用する）。
+  上記「GET /api/companies/:code/dividends」節の 🟡（設計のみ・未実装）表記を 🟢（実装済み）
+  に更新した。
 - **2026-08-20**（T-096 着手前のブロッカー解消）: `ScoringResponse` に `priceSen`/`per`/`pbr`
   （数値）を実装。下記の 2026-08-17・2026-08-18 の記載は**設計のみで実装が伴っておらず**、
   「実装済み」という記述が誤りだった（`src/usecase/score-company.ts` の `CompanyScoring`、
@@ -544,10 +552,9 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 
 ## GET /api/companies/:code/dividends
 
-> 🟡 **設計のみ・未実装（2026-08-17 設計追加, T-077）。** [analysis-dialog.md §5.1・§5.2](../ui/pages/analysis-dialog.md)
-> の指標詳細（①配当推移の折れ線グラフ、②連続非減配年数のリスト）が使う想定。
-> **T-093（検索API）のスコープには含まれない**（Manager確認済み。BE計画 §0・§6-1）。
-> 実装タスクは別途起票が必要（`app.ts` に該当ルートは無い）。
+> 🟢 **実装済み（T-097, 2026-08-20）。** [analysis-dialog.md §5.1・§5.2](../ui/pages/analysis-dialog.md)
+> の指標詳細（①配当推移の折れ線グラフ、②連続非減配年数のリスト）が使う。
+> `src/handler/app.ts` に `GET /api/companies/:code` の直後のルートとして実装（無認証）。
 
 保存済みの配当履歴を**年度昇順**（古い年→新しい年）で返す。グラフ・リストの描画順に合わせるため、
 他の一覧エンドポイント（降順が既定）とは向きが逆であることに注意。
@@ -574,12 +581,16 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 | `amountSen`  | 年間配当合計（銭）。`null`＝データなし。`0`＝無配（別物） |
 | `isForecast` | `true` なら予想（年ラベルに「（予想）」を付ける）         |
 
+`amountSen: null` の年度も除外せず`dividends[]`に含める（データ欠損を「行が無い」ではなく
+`null`で表現する。0（無配）と`null`（欠損）を混同しない §データ全般の方針と同じ）。
+
 **同一年度に複数区分（`forecast`/`revised`/`actual`）の行がある場合、
 `actual` > `revised` > `forecast` の優先順位で1件だけ選ぶ**
 （1年度につき1点でグラフ・リストを描くため。⑩配当利回りの採用ルール
 （`dividend-yield-scoring.md`「最新年度に予想があれば採用」）とは**別の規則**であることに注意。
 あちらは「今年何を採点に使うか」、こちらは「過去の年度をどう1点に集約するか」という
-異なる目的の優先順位）。
+異なる目的の優先順位）。この優先順位は`amountSen`の値の有無では分岐しない
+（`actual`が`amountSen: null`でも`revised`/`forecast`より`actual`を採用する）。
 
 - 404: 該当コードなし
 - 400: 銘柄コードの形式不正

@@ -1,8 +1,9 @@
 # 解析ダイアログ（F-51・F-52・F-53）
 
 > ステータス: 🟢 枠組み・概要モード（§2〜§4・§8）は実装済み（2026-08-20、T-096）。
-> 🔴 指標詳細モードの中身（§5.1線グラフ・§5.2連続年数・§5.3汎用8指標）は未実装
-> （プレースホルダーのみ。T-097・T-098 待ち）
+> 🟢 §5.1 線グラフ（F-52）は実装済み（2026-08-20、T-097。
+> `frontend/components/DividendLineChart.tsx`）。
+> 🔴 §5.2連続年数・§5.3汎用8指標は未実装（プレースホルダーのみ。T-098 待ち）
 > **独立した URL を持つ「画面」ではない。** [`/`](./search-page.md) と
 > [`/portfolio`](./portfolio-page.md)（T-081）の両方から開けるモーダル状態
 > （[ADR-0014](../../../adr/0014-analysis-dialog-url-state.md) が URL の正）
@@ -33,6 +34,13 @@
   ボタンへ。CR-8）。CR-6（フォーカスリング幅 `3px` を design-tokens.md §6 の直値禁止の
   対象外とする根拠コメントを追加）・CR-7（`App.tsx` のダイアログ開閉ハンドラを
   `useCallback`/`useMemo` 化）も同時に是正済み
+- **2026-08-20**（T-097）: §5.1 線グラフの中身を実装。`frontend/components/DividendLineChart.tsx`
+  を新規作成し、Recharts の折れ線グラフ＋年度別表（年度／1株配当／前年比）を表示する。
+  前年比の色は中立色（`--color-text-secondary`）を採用し、`--color-positive`/
+  `--color-negative` は使用していない（design-tokens.md §2.2 の禁止事項との整合）。
+  `role="img"` は `<ResponsiveContainer>` を包むグラフ本体の要素のみに限定し、年度別配当表
+  （`<table>`）はその外側に配置した（fe-reviewer レビュー1巡目の指摘 CR-1 の是正。
+  グラフの子孫としてプレゼンテーション扱いになり表データが支援技術から読めなくなる問題を解消）
 
 ---
 
