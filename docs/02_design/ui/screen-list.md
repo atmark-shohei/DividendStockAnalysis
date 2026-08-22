@@ -18,11 +18,15 @@
 > Escape・`aria-modal`・背景クリック・フォーカス復帰・概要モード（総合スコア・
 > ヒーロー行の株価/PER/PBR・レーダー・指標比較表）まで実装。
 > 🟢 **指標詳細モードのうち F-52（配当推移の線グラフ）は実装済み**（2026-08-20、T-097。
-> `frontend/components/DividendLineChart.tsx`）。**F-53（連続非減配年数のリスト）は
-> 引き続き枠組み（「← 指標一覧へ戻る」＋現在値・スコア）のみ**で、中身は T-098 未着手のまま
-> （プレースホルダー表示）。`?metric=` の実在検証（`resolveActiveMetric`。
-> [ADR-0014](../../adr/0014-analysis-dialog-url-state.md) §決定3）はダイアログ側
-> （`pages/ListPage.tsx`）で実装済み。
+> `frontend/components/DividendLineChart.tsx`）。
+> 🟢 **F-53（連続非減配年数のリスト）も実装済み**（2026-08-22、T-098。
+> `frontend/components/ConsecutiveYearsList.tsx`）。`?metric=` の実在検証
+> （`resolveActiveMetric`。[ADR-0014](../../adr/0014-analysis-dialog-url-state.md) §決定3）
+> はダイアログ側（`pages/ListPage.tsx`）で実装済み。
+>
+> 🟢 **`/criteria`（評価基準タブ、F-31）は実装済み**（2026-08-22、T-099。
+> `frontend/pages/CriteriaPage.tsx`）。`GET /api/scoring/bands` から取得したデータで
+> 10カードを動的に描画する。詳細は [criteria-tab.md](./pages/criteria-tab.md) の変更履歴を参照。
 >
 > ⚠️ **2026-08-16 に 2画面 → 6画面へ全面改訂した。**
 > [design_mock](../../design_mock/README.md) の反映（[design-mock-alignment.md](../../03_tasks/design-mock-alignment.md) T-071）と、
@@ -61,6 +65,17 @@
   （折れ線グラフ＋年度別表）を実装。F-52 を 🔴 → 🟢 に更新。F-53（連続非減配年数の
   リスト）は引き続き未実装のまま（プレースホルダー表示。T-098 に委ねる）
   （詳細は [analysis-dialog.md](./pages/analysis-dialog.md) の変更履歴を参照）
+- **2026-08-22**（T-098）: `frontend/components/ConsecutiveYearsList.tsx` を新規実装し、
+  解析ダイアログの指標詳細モードのうち F-53（連続非減配年数のリスト）の中身を実装。
+  増配/据置/減配の判定・前年差の算出は BE domain（`describeConsecutiveYearRows()`）で
+  完了済みで、FE は判定ロジックを持たない。F-53 を 🔴 → 🟢 に更新
+  （詳細は [analysis-dialog.md](./pages/analysis-dialog.md) の変更履歴を参照）
+- **2026-08-22**（T-099）: `/criteria`（評価基準タブ、F-31）を実装
+  （`frontend/pages/CriteriaPage.tsx`・`frontend/pages/criteria-content.ts`・
+  `frontend/components/MetricCriteriaCard.tsx`・`frontend/components/ImplementationBadge.tsx`）。
+  `GET /api/scoring/bands`（T-099で新規実装したBE API）から取得したデータで10カードを
+  動的に描画し、区分表のリテラルは画面側に持たない。F-31 を 🔴 → 🟢 に更新
+  （詳細は [criteria-tab.md](./pages/criteria-tab.md) の変更履歴を参照）
 
 ---
 
@@ -71,8 +86,8 @@
 
 | URL           | 画面             | ロール      | 実装                                                                             | 詳細設計                                                     |
 | :------------ | :--------------- | :---------- | :------------------------------------------------------------------------------- | :----------------------------------------------------------- |
-| `/`           | 検索             | 全員        | 🟢 `pages/ListPage`（T-094・T-096・T-097。指標詳細モードの中身=F-53のみ未実装）  | [search-page.md](./pages/search-page.md)（T-072）            |
-| `/criteria`   | 評価基準         | 全員        | 🔴 未実装                                                                        | [criteria-tab.md](./pages/criteria-tab.md)                   |
+| `/`           | 検索             | 全員        | 🟢 `pages/ListPage`（T-094・T-096・T-097・T-098）                                | [search-page.md](./pages/search-page.md)（T-072）            |
+| `/criteria`   | 評価基準         | 全員        | 🟢 `pages/CriteriaPage`（T-099）                                                 | [criteria-tab.md](./pages/criteria-tab.md)                   |
 | `/portfolio`  | ポートフォリオ   | user, admin | 🔴 未実装                                                                        | [portfolio-page.md](./pages/portfolio-page.md)（T-081）      |
 | `/indicators` | 指標カスタマイズ | user, admin | 🔴 未実装                                                                        | [indicator-custom-page.md](./pages/indicator-custom-page.md) |
 | `/input`      | 銘柄登録         | **admin**   | 🟢 `pages/InputPage`（FE ガード・BE制限・ラベルとも実装済み。T-091/T-092/T-104） | [market-data-import.md](./pages/market-data-import.md)       |
@@ -215,14 +230,14 @@
 | 機能ID | 内容                                 | 状態 | 対応する画面                   |
 | :----- | :----------------------------------- | :--- | :----------------------------- |
 | F-30   | データ入力・解析（→ 銘柄登録）       | 🟢   | `/input`                       |
-| F-31   | 評価基準タブ                         | 🔴   | `/criteria`                    |
+| F-31   | 評価基準タブ                         | 🟢   | `/criteria`                    |
 | F-32   | 保存済み銘柄タブ（→ 検索へ発展）     | 🟢   | `/`                            |
 | F-33   | 銘柄間の横並び比較                   | 🔴   | 未着手（P2 へ降格。D-6）       |
 | F-34   | 免責文言の常時表示                   | 🟢   | footer（全画面）               |
 | F-50   | 銘柄検索（検索・ソート・ページング） | 🟢   | `/`                            |
 | F-51   | 解析ダイアログ（モーダル化）         | 🟢   | `/?code=` / `/portfolio?code=` |
 | F-52   | 指標詳細（配当推移の線グラフ）       | 🟢   | `?metric=dividendGrowthRate`   |
-| F-53   | 指標詳細（連続非減配年数のリスト）   | 🔴   | `?metric=consecutiveYears`     |
+| F-53   | 指標詳細（連続非減配年数のリスト）   | 🟢   | `?metric=consecutiveYears`     |
 | F-54   | 認証（サインアップ・ログイン）       | 🟡   | `/login` / `/signup`           |
 | F-55   | ロールによる画面の出し分け           | 🔴   | nav（§2）                      |
 | F-56   | ポートフォリオ管理                   | 🔴   | `/portfolio`                   |

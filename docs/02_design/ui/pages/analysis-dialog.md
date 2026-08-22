@@ -3,7 +3,9 @@
 > ステータス: 🟢 枠組み・概要モード（§2〜§4・§8）は実装済み（2026-08-20、T-096）。
 > 🟢 §5.1 線グラフ（F-52）は実装済み（2026-08-20、T-097。
 > `frontend/components/DividendLineChart.tsx`）。
-> 🔴 §5.2連続年数・§5.3汎用8指標は未実装（プレースホルダーのみ。T-098 待ち）
+> 🟢 §5.2 連続年数リスト（F-53）は実装済み（2026-08-22、T-098。
+> `frontend/components/ConsecutiveYearsList.tsx`）。
+> 🔴 §5.3 汎用8指標は未実装（プレースホルダーのみ）
 > **独立した URL を持つ「画面」ではない。** [`/`](./search-page.md) と
 > [`/portfolio`](./portfolio-page.md)（T-081）の両方から開けるモーダル状態
 > （[ADR-0014](../../../adr/0014-analysis-dialog-url-state.md) が URL の正）
@@ -41,6 +43,19 @@
   `role="img"` は `<ResponsiveContainer>` を包むグラフ本体の要素のみに限定し、年度別配当表
   （`<table>`）はその外側に配置した（fe-reviewer レビュー1巡目の指摘 CR-1 の是正。
   グラフの子孫としてプレゼンテーション扱いになり表データが支援技術から読めなくなる問題を解消）
+- **2026-08-22**（T-098）: §5.2 連続年数リスト（F-53）の中身を実装。BE側で
+  `describeConsecutiveYearRows()`（`src/domain/scoring/consecutive-years.ts`）が
+  増配／据置／減配の判定と前年差を確定し、`GET /api/companies/:code/dividends` の
+  `consecutiveYearRows[]` として返す。判定に使うデータソースは、要約行の元になる
+  `consecutiveYears`（スコア算出）と**同一**（実績限定の配当系列。ギャップは `null` で
+  フレーム化）で、要約行「◯年継続中」とリストの増配/減配表示が矛盾しない設計にした。
+  FE側は `frontend/components/ConsecutiveYearsList.tsx` を新規作成し、`consecutiveYearRows`
+  を `<table>`（①と統一。年度／状態／1株配当／前年差の4列＋末尾の要約行）にそのまま
+  描画するのみで、判定ロジックは持たない。**予想年度（`kind: 'forecast' | 'revised'`）は
+  リストに含まれない**（実績限定のデータソースのため。①の線グラフは予想年度を含むため、
+  ①と②で対象年度の範囲が異なる非対称な仕様。詳細は §5.2 本文参照）。前年比の色は
+  中立色（`--color-text-secondary`）を採用し、`--color-positive`/`--color-negative` は
+  不使用（design-tokens.md §2.2 との整合。T-097と同じ方針）
 
 ---
 
@@ -187,6 +202,13 @@ design_mock の比較表には「評価」列があり、各行に短い判定�
   （増配／据置／減配）・金額・前年差
 - 末尾に要約行:「減配のない状態が **`consecutiveYears`年** 継続中です。」
 - 対象年度は最大18年遡及（`consecutive-years-scoring.md` の定義に合わせる）
+- **予想年度（`kind: 'forecast' | 'revised'`）は対象に含まない。** ①の線グラフとは
+  異なり、リストには実績（`kind: 'actual'`）年度のみが並ぶ。データソースは
+  スコア算出（`consecutiveYears`）と同一の実績限定系列で、要約行とリストの
+  増配/減配表示が矛盾しないようにするための仕様（T-098。2026-08-22）
+- 実装は `<table>`（①と統一。年度／状態／1株配当／前年差の4列）＋末尾の要約行
+  （`frontend/components/ConsecutiveYearsList.tsx`）。増配／据置／減配の判定・前年差の
+  算出は BE domain（`describeConsecutiveYearRows()`）で完了済みで、FE は再計算しない
 
 ### 5.3 汎用（残り8指標。③④⑤⑥⑦⑧⑨⑩）
 

@@ -16,6 +16,15 @@
   具体化（2列グリッド・カードの構成・配色）。**ガラスモーフィズム／緑バッジの記述を撤回**
   （§2.2 の理由）。試作の数値・計算式は**採用しない**ことを §2.4 に明記。
   経緯は [design-mock-alignment.md](../../../03_tasks/design-mock-alignment.md) §3 D-8
+- **2026-08-22**（T-099）: `/criteria` 画面を実装（`frontend/pages/CriteriaPage.tsx`・
+  `frontend/pages/criteria-content.ts`・`frontend/components/MetricCriteriaCard.tsx`・
+  `frontend/components/ImplementationBadge.tsx`）。`GET /api/scoring/bands`（T-099で新規
+  実装したBE API）から取得したデータで10カードを動的に描画し、区分表のリテラルは
+  画面側に存在しない。バッジの実装状態は常に「自動計算済」固定
+  （2026-08-22時点で10指標すべて実装済みのため。§3 の記載どおり）。
+  ⑩カードの「予想/実績併記」「判定不能表示」要件は、個社データ取得ではなく
+  静的な説明文（採用ルールの文章での説明）で対応した（Manager承認済み解釈）。
+  F-31 を 🔴 → 🟢 に更新（[screen-list.md](../screen-list.md) 参照）
 
 ---
 
@@ -61,8 +70,8 @@
 | ⑩   | **配当利回り**      | 🟢 自動計算済                                                                                                     | [dividend-yield-scoring.md](../../logic/dividend-yield-scoring.md)                   |
 
 > ⚠️ 「実装（エンジン）」列は `src/domain/scoring/` の計算ロジックの状態。
-> **この評価基準タブ自体（バッジ描画・カードUI）はまだ実装されていない。**
-> エンジンが実装済みでも画面が無ければユーザーには見えない。
+> この評価基準タブ自体（バッジ描画・カードUI）は **2026-08-22（T-099）に実装済み**
+> （`frontend/pages/CriteriaPage.tsx` ほか。上記「変更履歴」参照）。
 
 **⑩ のカードに固有の表示要件:**
 

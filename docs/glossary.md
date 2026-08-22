@@ -30,6 +30,7 @@
 | 実績配当の選択   | `selectLatestActualDividend` | ドメインサービス | 配当履歴（`DividendRecord[]`）から実績（`kind: 'actual'`）のうち最新年度のものを選ぶ。`selectLatestForecastDividend` の対                                                                                        |
 | 年度別配当履歴   | `DividendHistoryYear`        | 値オブジェクト   | `GET /api/companies/:code/dividends` が返す1年度ぶんの配当（`fiscalYear` / `amountSen` / `isForecast`）。①配当推移の折れ線グラフ・②連続非減配年数のリストが使う（2026-08-20 追加、T-097）                       |
 | 年度別配当履歴の集約 | `dividendHistoryByYear`  | ドメインサービス | 配当履歴（`DividendRecord[]`）を年度ごとに1件へ集約し、年度昇順で返す。同一年度に複数区分があれば `actual > revised > forecast` の優先順位で選ぶ（値の有無では分岐しない）。`selectLatestActualDividend` 等（最新年度だけ選ぶ）とは異なり全年度を対象にする（2026-08-20 追加、T-097） |
+| 実績配当の年度付き系列 | `actualDividendSeriesWithYear` | ドメインサービス | `actualDividendSeries`（年度なし版。実績限定・欠落年を `null` でフレーム化）の年度付き版。年度降順で `{ fiscalYear, amountSen }` を返す。`actualDividendSeries()` はこの関数の薄いラッパー。② 連続非減配年数の年次リスト（`describeConsecutiveYearRows`）が年度ラベル込みで必要とするため切り出した（2026-08-22 追加、T-098） |
 
 ## 会社一覧検索（T-093。2026-08-18 追加）
 
@@ -115,6 +116,9 @@
 | ③ 実績側の内訳       | `payoutRatioActual`        | 値オブジェクト   | ③ 実績側の判定結果。同上                                                                                                                                                                                        |
 | ③ 内訳の画面向け型   | `PayoutRatioSideView`      | DTO              | `ScoringResponse` の `payoutRatioForecast` / `payoutRatioActual` に使う画面向け型。`MetricScore` の内訳（`score` / `value` / `unavailableReason`）を DTO 形に落としたもの（`src/handler/dto/company-input.ts`） |
 | 実績優先フラグ       | `useActualForScoring`      | 値オブジェクト   | ③ の採点に実績を強制採用するか。`true` なら実績が判定不能でも予想へフォールバックしない。既定 `false`。**リクエスト単位の一時指定で永続化しない**（`UserScoringPolicy` 未導入のため。設計書 §7 決定5）          |
+| ② 年次リストの状態   | `ConsecutiveYearState`     | 値オブジェクト   | ②連続非減配年数の年次リスト1行分の前年比較結果。`'increase'`（増配）/ `'flat'`（据置）/ `'decrease'`（減配）/ `null`（判定不能。先頭行、または当年・前年のどちらかが欠損）。**`null` は 0 に丸めない**（2026-08-22 追加、T-098） |
+| ② 年次リストの1行     | `ConsecutiveYearRow`       | 値オブジェクト   | ②連続非減配年数の年次リスト（指標詳細ダイアログ）の1行分。`fiscalYear` / `amountSen`（銭。null=データなし、0=無配） / `diffSen`（前年差。銭。判定不能なら null） / `state`（`ConsecutiveYearState`）の組（2026-08-22 追加、T-098） |
+| ② 年次リストの構築   | `describeConsecutiveYearRows` | ドメインサービス | 配当履歴（`DividendRecord[]`）から②の年次リスト（`ConsecutiveYearRow[]`）を構築する。**`calculateConsecutiveYears` と同一のデータソース**（`actualDividendSeriesWithYear`。実績限定・欠落年を `null` でフレーム化）を使うことで、要約行の連続年数とリストの増配/減配表示の矛盾を防ぐ。最大 `CONSECUTIVE_LOOKBACK_YEARS + 1`（19）年分を年度昇順で返す。予想年度は含まない（`GET /api/companies/:code/dividends` の `consecutiveYearRows`。2026-08-22 追加、T-098） |
 
 ## 認証（T-091。2026-08-18 追加）
 

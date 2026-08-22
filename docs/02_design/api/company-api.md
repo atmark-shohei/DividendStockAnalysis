@@ -2,7 +2,8 @@
 
 > ステータス: 🟢 既存部分は実装済み（2026-07-28）／🟢 `GET /api/companies` の検索・ソート・
 > サーバサイドページングは実装済み（T-093, 2026-08-18）／🟢 `GET /api/companies/:code/dividends`
-> （配当年次履歴）は実装済み（T-097, 2026-08-20）
+> （配当年次履歴）は実装済み（T-097, 2026-08-20）／🟢 同エンドポイントの `consecutiveYearRows`
+> （②連続非減配年数の年次リスト）は実装済み（T-098, 2026-08-22）
 > 実装: `src/handler/app.ts` / DTO: `src/handler/dto/company-input.ts`, `src/handler/dto/price-input.ts`,
 > `src/handler/dto/irbank-import.ts`, `src/handler/dto/market-data-import.ts`,
 > `src/handler/dto/edinet-import.ts`, `src/handler/dto/company-list-query.ts`
@@ -12,6 +13,17 @@
 
 ## 変更履歴
 
+- **2026-08-22**（T-099）: 新規エンドポイント `GET /api/scoring/bands` を追加。
+  10指標の区分表を `src/domain/scoring/bands.ts` からそのまま返す（評価基準タブ・
+  T-099が区分表をハードコードしないために使う）。認証不要・クエリパラメータ無し・
+  常に200（エラー分岐なし）。DBスキーマ変更・マイグレーションは無し。
+- **2026-08-22**（T-098）: `GET /api/companies/:code/dividends` のレスポンスに
+  `consecutiveYearRows[]`（②連続非減配年数の年次リスト）を追加した（`dividends[]` は無変更・
+  後方互換）。増配/据置/減配の判定は BE domain（`describeConsecutiveYearRows`）で確定させ、
+  ⑩スコア算出（`calculateConsecutiveYears`）と**同一のデータソース**（実績限定・欠落年を
+  `null` でフレーム化）を使う。この帰結として、予想年度は `consecutiveYearRows[]` に
+  出現しない（`dividends[]` には出現する非対称な仕様。詳細は下記
+  「GET /api/companies/:code/dividends」節）。
 - **2026-08-20**（T-097）: `GET /api/companies/:code/dividends`（配当年次履歴）を実装。
   `src/handler/app.ts` に `GET /api/companies/:code` の直後のルートとして追加した（無認証）。
   `dividends[]` は年度昇順で返り、`amountSen: null` の年度も除外せず含める
@@ -552,9 +564,11 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 
 ## GET /api/companies/:code/dividends
 
-> 🟢 **実装済み（T-097, 2026-08-20）。** [analysis-dialog.md §5.1・§5.2](../ui/pages/analysis-dialog.md)
+> 🟢 **実装済み（T-097, 2026-08-20 / T-098, 2026-08-22）。**
+> [analysis-dialog.md §5.1・§5.2](../ui/pages/analysis-dialog.md)
 > の指標詳細（①配当推移の折れ線グラフ、②連続非減配年数のリスト）が使う。
 > `src/handler/app.ts` に `GET /api/companies/:code` の直後のルートとして実装（無認証）。
+> T-098 で `consecutiveYearRows` を追加（`dividends[]` は無変更・後方互換）。
 
 保存済みの配当履歴を**年度昇順**（古い年→新しい年）で返す。グラフ・リストの描画順に合わせるため、
 他の一覧エンドポイント（降順が既定）とは向きが逆であることに注意。
@@ -571,9 +585,15 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
   "dividends": [
     { "fiscalYear": 2019, "amountSen": 5000, "isForecast": false },
     { "fiscalYear": 2026, "amountSen": 10000, "isForecast": true }
+  ],
+  "consecutiveYearRows": [
+    { "fiscalYear": 2019, "amountSen": 5000, "diffSen": null, "state": null },
+    { "fiscalYear": 2020, "amountSen": 5200, "diffSen": 200, "state": "increase" }
   ]
 }
 ```
+
+### `dividends[]`（①配当推移の折れ線グラフ用）
 
 | フィールド   | 意味                                                      |
 | :----------- | :-------------------------------------------------------- |
@@ -592,6 +612,26 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 異なる目的の優先順位）。この優先順位は`amountSen`の値の有無では分岐しない
 （`actual`が`amountSen: null`でも`revised`/`forecast`より`actual`を採用する）。
 
+### `consecutiveYearRows[]`（②連続非減配年数の年次リスト用。T-098 で追加）
+
+| フィールド   | 意味                                                                                             |
+| :----------- | :----------------------------------------------------------------------------------------------- |
+| `fiscalYear` | 決算年度                                                                                         |
+| `amountSen`  | 年間配当合計（銭）。`null`＝データなし。`0`＝無配（別物）                                        |
+| `diffSen`    | 前年からの差分（銭）。判定不能なら `null`（0 に丸めない）                                        |
+| `state`      | 前年比較の結果。`"increase"`（増配）/ `"flat"`（据置）/ `"decrease"`（減配）/ `null`（判定不能） |
+
+**`dividends[]` とはデータソースが異なる。** `consecutiveYearRows[]` は⑩スコア算出
+（`consecutiveYears` の `value`）と**同一のデータソース**（実績（`kind: 'actual'`）限定・
+欠落年を `null` でフレーム化）を使う。これにより要約行「◯年継続中」とリストの増配/減配表示が
+矛盾しないことを保証している。**この帰結として、予想年度（`kind: 'forecast' | 'revised'`）は
+`consecutiveYearRows[]` に出現しない**（`dividends[]` には出現する非対称な仕様。実装計画
+T-098 §1 参照）。
+
+最大18年遡及（`CONSECUTIVE_LOOKBACK_YEARS`。⑩スコア算出と同じ定数）に合わせ、
+最大19件（先頭行1件＋前年比較18件）まで、年度昇順で返す。先頭行（ウィンドウ内で最も古い年）は
+前年比較ができないため常に `diffSen: null` / `state: null`。
+
 - 404: 該当コードなし
 - 400: 銘柄コードの形式不正
 
@@ -603,6 +643,62 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 - 400: 銘柄コードの形式不正
 
 削除の冪等性（未登録コードに対する挙動）は未確認。次に触るときに検証すること。
+
+---
+
+## GET /api/scoring/bands
+
+> 🟢 **実装済み（T-099, 2026-08-22）。** [criteria-tab.md](../ui/pages/criteria-tab.md)
+> （評価基準タブ）が区分表をハードコードしないために使う。company集約に依存しない
+> 独立エンドポイントのため、company系ルート群の外に配置している
+> （`src/handler/app.ts` の `GET /api/health` 直後）。
+
+10指標の区分表を `src/domain/scoring/bands.ts` からそのまま返す。値の書き写し・
+別定数化はしていない（`src/usecase/get-scoring-bands.ts` が `bands.ts` の定数を
+`MetricKey` に対応付けて読むだけで、`bands.ts` 自体は変更していない）。**`bands.ts`
+を変更すれば本APIの応答も追従して変わる**（区分表の二重管理ではない）。
+
+**認証不要。** [criteria-tab.md §1](../ui/pages/criteria-tab.md)「ログイン不要で閲覧できる
+公開画面。採点根拠を隠さないことが『推奨をしない分析ツール』という立場の裏付けになるため、
+認証の背後に置かない」と同じ理由。
+
+クエリ・パスパラメータ: なし。zod スキーマも無い（`GET /api/companies/:code/dividends` と
+同じ前例）。
+
+レスポンス（200固定。入力が無いため 400/404 などのエラー分岐は無い）—
+`ScoringBandsResponse`（`src/handler/dto/scoring-bands.ts`）:
+
+```json
+{
+  "metrics": [
+    {
+      "key": "dividendGrowthRate",
+      "number": 1,
+      "label": "増配率（5年CAGR）",
+      "unit": "%",
+      "bands": [
+        { "minInclusive": 30, "maxExclusive": null, "points": 10 },
+        { "minInclusive": 0, "maxExclusive": 2, "points": 1 }
+      ]
+    }
+  ]
+}
+```
+
+| フィールド             | 意味                                                                                                         |
+| :--------------------- | :----------------------------------------------------------------------------------------------------------- |
+| `metrics`              | `METRIC_KEYS`（`src/domain/shared/metric-key.ts`）の順（①〜⑩）で固定10件                                     |
+| `metrics[].key`        | `MetricKey`（10種の文字列リテラル）                                                                          |
+| `metrics[].number`     | 原典の通し番号（①〜⑩＝1〜10）                                                                                |
+| `metrics[].label`      | 画面見出し（`METRIC_LABEL` 準拠）                                                                            |
+| `metrics[].unit`       | `'%'` \| `'倍'` \| `'年'`（`MetricUnit`）                                                                    |
+| `metrics[].bands`      | 対応する `*_BANDS` 定数をそのままコピーしたもの。段数は指標ごとに異なる（③=10段・1点行なし、②=4段、他=11段） |
+| `bands[].minInclusive` | 下限。この値を含む。`null`＝下限なし                                                                         |
+| `bands[].maxExclusive` | 上限。この値を含まない。`null`＝上限なし（最上位区分）                                                       |
+| `bands[].points`       | 0〜10                                                                                                        |
+
+境界値の解釈（下限以上・上限未満）を表す文言はレスポンスに含めない
+（[criteria-tab.md](../ui/pages/criteria-tab.md) §2.3 の固定文言としてFE側が持つ想定）。
 
 ---
 
