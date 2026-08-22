@@ -9,6 +9,8 @@
 ## 変更履歴
 
 - **2026-08-16**: 新規作成（T-082）
+- **2026-08-22**: `currentPriceSen`/`dividendYieldBp` の非null不正値ガードを追記（T-102
+  実装時の追加仕様。§9）
 
 ---
 
@@ -199,3 +201,27 @@ design_mock の footnote は式を文章で示すのみで、`null`/`0` の扱�
 - [ADR-0012](../../adr/0012-indicator-customization-scaling-and-denominator.md) — 総合点の分母が
   可変になる将来変更（§2.1 の注記）
 - [dividend-yield-scoring.md](./dividend-yield-scoring.md) — `dividendYieldBp` の出所（⑩）
+
+## 9. 実装時に追加した防御的ガード（2026-08-22 追記、T-102）
+
+> ✅ この節は実装（`src/domain/portfolio/portfolio-metrics.ts`）完了後に追記した。
+> §2.1・§4 は元々「`null` かどうか」でのみ場合分けしていたが、実装時に
+> 「未検証の入力を信用しない」原則（`.claude/rules/backend.md`）を適用し、以下の
+> 防御的ガードを追加した。
+
+`currentPriceSen`・`dividendYieldBp` は非nullでも以下のいずれかに該当する場合、
+**`null` と同じ扱い**（該当銘柄をその集計から除外する）にする。例外は投げない。
+
+| フィールド        | 不正値の条件                                                    |
+| :---------------- | :-------------------------------------------------------------- |
+| `currentPriceSen` | 安全整数でない（`Number.isSafeInteger` が `false`）、または負値 |
+| `dividendYieldBp` | 安全整数でない、または負値                                      |
+
+- `currentPriceSen` が不正値の銘柄は、§3.1（評価額合計・有効件数）・§3.2（評価損益）・
+  §3.3/§3.4（対象集合）から除外される（`currentPriceSen = null` と同じ経路をたどる）
+- `dividendYieldBp` が不正値の銘柄は、§3.3/§3.4 の対象集合から除外される
+  （`dividendYieldBp = null` と同じ経路）。§3.1・§3.2 には影響しない
+- §3.5（スコア平均）には影響しない（`totalScore` は本ガードの対象外。§2.1のとおり
+  常に確定値の前提で検証しない）
+- 実装は `src/domain/portfolio/portfolio-metrics.ts` の `normalizeCurrentPriceSen`/
+  `normalizeDividendYieldBp`
