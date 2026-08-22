@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   getCompany,
+  getCompanyDividends,
   getCurrentUser,
   importFromEdinet,
   listCompanies,
@@ -227,6 +228,53 @@ describe('importFromEdinet', () => {
     await importFromEdinet('130A');
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/edinet/130A');
+  });
+});
+
+/**
+ * `getCompanyDividends`（T-097。`docs/02_design/ui/pages/analysis-dialog.md` §7）。
+ * ①増配率（5年CAGR）の指標詳細を開いたときだけ追加取得する配当の年次履歴。
+ * **実 API は叩かない**（`getCompany` と同じ方針）。
+ */
+describe('getCompanyDividends', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('/api/companies/:code/dividends へ GET する', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() =>
+      Promise.resolve(jsonResponse({ dividends: [] })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getCompanyDividends('7203');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/companies/7203/dividends');
+  });
+
+  it('銘柄コードは URL エンコードする', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() =>
+      Promise.resolve(jsonResponse({ dividends: [] })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getCompanyDividends('130A');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/companies/130A/dividends');
+  });
+
+  it('レスポンスの dividends 配列をそのまま透過する', async () => {
+    const body = {
+      dividends: [
+        { fiscalYear: 2024, amountSen: 10_000, isForecast: false },
+        { fiscalYear: 2025, amountSen: null, isForecast: false },
+        { fiscalYear: 2026, amountSen: 12_000, isForecast: true },
+      ],
+    };
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(jsonResponse(body)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getCompanyDividends('7203')).resolves.toEqual(body);
   });
 });
 

@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { CompanySummary } from '@/domain/company/company-repository';
 
-import type { ScoringResponse } from '../api';
+import type { DividendHistoryResponse, ScoringResponse } from '../api';
 import { Dialog } from '../components/Dialog';
+import { DividendLineChart } from '../components/DividendLineChart';
 import { EmptyState } from '../components/EmptyState';
 import { MetricTable } from '../components/MetricTable';
 import { computePageCount, Pagination } from '../components/Pagination';
@@ -50,6 +51,16 @@ export interface DialogHandlers {
 interface Selection {
   readonly code: string | null;
   readonly scoring: ScoringResponse | null;
+  readonly loading: boolean;
+}
+
+/**
+ * ①増配率（5年CAGR）の指標詳細（線グラフ）用データ（T-097）。`Selection` とは別オブジェクトに
+ * する（`selected` の形を変えると既存の `resolveActiveMetric`/`ScoringBody` 呼び出し箇所を
+ * 広く変更することになるため独立させる。fe-plan.md §3-1）。
+ */
+export interface DividendHistoryState {
+  readonly data: DividendHistoryResponse | null;
   readonly loading: boolean;
 }
 
@@ -162,6 +173,7 @@ export function ListPage({
   rowActions,
   activeMetricParam,
   dialogHandlers,
+  dividendHistory,
 }: {
   readonly companies: readonly CompanySummary[];
   readonly selected: Selection;
@@ -172,6 +184,8 @@ export function ListPage({
   /** `route.metric` の生値（形式チェック済み・実在未検証）。`resolveActiveMetric` に通す */
   readonly activeMetricParam: string | null;
   readonly dialogHandlers: DialogHandlers;
+  /** ①増配率（5年CAGR）の指標詳細用（T-097） */
+  readonly dividendHistory: DividendHistoryState;
 }) {
   const selectedName =
     companies.find((company) => company.code === selected.code)?.name ?? selected.code;
@@ -339,6 +353,7 @@ export function ListPage({
           selectedName={selectedName}
           payoutRatioSourceControl={payoutRatioSourceControl}
           activeMetric={activeMetric}
+          dividendHistory={dividendHistory}
           onOpenMetric={dialogHandlers.onOpenMetric}
           onBackToOverview={dialogHandlers.onBackToOverview}
           onClose={dialogHandlers.onClose}
@@ -367,6 +382,7 @@ function ScoringBody({
   selectedName,
   payoutRatioSourceControl,
   activeMetric,
+  dividendHistory,
   onOpenMetric,
   onBackToOverview,
   onClose,
@@ -375,6 +391,7 @@ function ScoringBody({
   readonly selectedName: string | null;
   readonly payoutRatioSourceControl: PayoutRatioSourceControl;
   readonly activeMetric: ScoringResponse['metrics'][number] | null;
+  readonly dividendHistory: DividendHistoryState;
   readonly onOpenMetric: (key: string) => void;
   readonly onBackToOverview: () => void;
   readonly onClose: () => void;
@@ -467,11 +484,27 @@ function ScoringBody({
             ／ スコア {activeMetric.score === null ? NO_DATA : `${String(activeMetric.score)} 点`}
           </span>
         </p>
-        {/* TODO(T-097/T-098): 指標詳細の中身（①線グラフ・②連続年数リスト・③〜⑩汎用の
-            条件／点数表、`bands.ts` 由来）は未実装。fe-plan.md §0 確認事項A、
-            Manager確認済み: T-096のスコープは枠組み（本ヘッダー・戻る導線）のみ。
-            中身はT-097/T-098に委ねる（`analysis-dialog.md` §5） */}
-        <p className="meta">詳細表示は準備中です。</p>
+        {/* T-097: ①増配率（5年CAGR）だけ線グラフ＋表を実装した（`analysis-dialog.md` §5.1）。
+            ②連続年数リスト・③〜⑩汎用の条件／点数表（`bands.ts` 由来）は T-098 以降のスコープ
+            （fe-plan.md §3-2） */}
+        {activeMetric.key === 'dividendGrowthRate' ? (
+          dividendHistory.loading ? (
+            <Skeleton rows={4} />
+          ) : dividendHistory.data === null ? (
+            <p className="meta" role="alert">
+              配当推移を表示できませんでした。もう一度お試しください。
+            </p>
+          ) : dividendHistory.data.dividends.length === 0 ? (
+            // TODO(T-097): 配当データが0件の場合の挙動は company-api.md に明記が無い推測実装。
+            // 銘柄は存在するが dividend_records が1件も無いケースへの防御（fe-plan.md §1
+            // 確認事項C）。設計書に記載が無いため、Manager確認が必要な場合は本コメントを参照
+            <p className="meta">配当データがありません。</p>
+          ) : (
+            <DividendLineChart dividends={dividendHistory.data.dividends} />
+          )
+        ) : (
+          <p className="meta">詳細表示は準備中です。</p>
+        )}
       </>
     );
   }

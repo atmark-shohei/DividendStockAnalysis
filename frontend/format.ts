@@ -191,6 +191,24 @@ export function senToEditableText(sen: number | null): string {
 }
 
 /**
+ * ①線グラフ下の表・前年比（`docs/02_design/ui/pages/analysis-dialog.md` §5.1）。
+ * `▲ +N円` / `▼ -N円` / `－ 据置` / `NO_DATA`（前年データが無い・当年データが無い）。
+ * **`±0円` にしない**（データ欠損と「変化なし」を区別する。§9受入基準）。
+ * 色は中立トークンのみ（Manager決定。`design-tokens.md` §2.2「スコア・増配率・成長率には
+ * `--color-positive`/`--color-negative` を使わない」）。glyph＋文言で意味を示す。
+ */
+export function dividendYoyChangeText(
+  currentSen: number | null,
+  previousSen: number | null | undefined,
+): string {
+  if (currentSen === null || previousSen === null || previousSen === undefined) return NO_DATA;
+  const diff = currentSen - previousSen;
+  if (diff === 0) return '－ 据置';
+  const sign = diff > 0 ? '▲ +' : '▼ -';
+  return `${sign}${grouped(Math.abs(diff) / 100, 2)}円`;
+}
+
+/**
  * 比率（%・倍）を編集可能なテキスト入力の初期値にする。
  *
  * ROE・配当性向のようにソースが元々2桁程度の比率はそのまま返るが、

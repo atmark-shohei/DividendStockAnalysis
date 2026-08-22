@@ -4,6 +4,7 @@ import type {
   AnalyzeCompanyRequest,
   AuthUser,
   CompanyListResponse,
+  DividendHistoryResponse,
   LoginRequest,
   ScoringResponse,
   SignupRequest,
@@ -44,6 +45,10 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadingScoring, setLoadingScoring] = useState(false);
+  // ①増配率（5年CAGR）の指標詳細（線グラフ）用。`?metric=dividendGrowthRate` のときだけ
+  // 追加取得する（`analysis-dialog.md` §7。T-097）
+  const [dividendHistory, setDividendHistory] = useState<DividendHistoryResponse | null>(null);
+  const [loadingDividendHistory, setLoadingDividendHistory] = useState(false);
   // 初回は必ず reload() が走る前提のため true から始める（CR-6。`false` だと
   // マウント直後の1フレームで EmptyState が一瞬見える）
   const [loadingCompanies, setLoadingCompanies] = useState(true);
@@ -67,6 +72,10 @@ export function App() {
   const q = route.kind === 'list' ? route.q : '';
   const sort: CompanySortKey = route.kind === 'list' ? route.sort : 'created_desc';
   const page = route.kind === 'list' ? route.page : 1;
+  // ①増配率（5年CAGR）の指標詳細を開いているか（`analysis-dialog.md` §5.1 は①のみ対象）。
+  // `route.metric` は形式チェック済みだが実在未検証の生値（`ListPage.resolveActiveMetric` が
+  // 実在検証を担う）。ここでは「取得すべきか」の判定だけなので生値の突き合わせで十分
+  const isDividendMetricOpen = route.kind === 'list' && route.metric === 'dividendGrowthRate';
 
   /**
    * 依存配列は q/sort/page だけに絞る。`selectedCode`/`useActualForScoring` の変化
@@ -168,6 +177,42 @@ export function App() {
       cancelled = true;
     };
   }, [selectedCode, useActualForScoring]);
+
+  /**
+   * ①増配率（5年CAGR）の指標詳細（線グラフ）用データ取得（T-097。fe-plan.md §3-1）。
+   * `?metric=dividendGrowthRate` を開いたときだけ取得する（概要のペイロードを重くしない。
+   * `analysis-dialog.md` §7）。
+   *
+   * 概要モードへ戻る・他の指標を開く・銘柄を切り替えたときは**都度クリアする**
+   * （キャッシュを持たない。`scoring` の既存挙動と一貫させ、状態を単純に保つ判断。
+   * fe-plan.md §3-1）。
+   */
+  useEffect(() => {
+    if (selectedCode === null || !isDividendMetricOpen) {
+      setDividendHistory(null);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingDividendHistory(true);
+    api
+      .getCompanyDividends(selectedCode)
+      .then((result) => {
+        if (!cancelled) setDividendHistory(result);
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setDividendHistory(null);
+        setError(cause instanceof Error ? cause.message : '配当推移の取得に失敗しました');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDividendHistory(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCode, isDividendMetricOpen]);
 
   const handleSubmit = (payload: AnalyzeCompanyRequest) => {
     setBusy(true);
@@ -392,6 +437,7 @@ export function App() {
           rowActions={{ onSelect: handleSelect, onDelete: handleDelete }}
           activeMetricParam={route.kind === 'list' ? route.metric : null}
           dialogHandlers={dialogHandlers}
+          dividendHistory={{ data: dividendHistory, loading: loadingDividendHistory }}
         />
       )}
 

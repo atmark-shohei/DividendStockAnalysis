@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   NO_DATA,
+  dividendYoyChangeText,
   fiscalPeriodLabel,
   formatMetricValue,
   formatPriceAsOf,
@@ -252,6 +253,55 @@ describe('formatMetricValue（解析ダイアログの PER/PBR 表示。単位�
 
   it('⑩配当利回りが null なら — データなし', () => {
     expect(formatMetricValue(null, '%', true)).toBe(NO_DATA);
+  });
+});
+
+/**
+ * ①線グラフ下の表・前年比（`docs/02_design/ui/pages/analysis-dialog.md` §5.1、§9受入基準）。
+ *
+ * **`±0円` にしない**。前年データが無い（1年分しか無い）場合と「金額が変わらない」場合を
+ * 区別する（データ欠損と「変化なし」の区別。§9「①の線グラフで、配当が1年分しかない年度の
+ * 前年比が `—` になり `±0円` にならない」）。色は中立トークンのみ（Manager決定。
+ * `--color-positive`/`--color-negative` は使わない）。
+ */
+describe('dividendYoyChangeText', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly currentSen: number | null;
+    readonly previousSen: number | null | undefined;
+    readonly expected: string;
+  }[] = [
+    { name: '増配', currentSen: 15_000, previousSen: 10_000, expected: '▲ +50.00円' },
+    { name: '減配', currentSen: 10_000, previousSen: 15_000, expected: '▼ -50.00円' },
+    { name: '据置（同額・非ゼロ）', currentSen: 10_000, previousSen: 10_000, expected: '－ 据置' },
+    {
+      name: '無配継続（0→0）は「変化なし」と判定可能。±0円にしない',
+      currentSen: 0,
+      previousSen: 0,
+      expected: '－ 据置',
+    },
+    {
+      name: '前年データなし（1年分のみ。§9受入基準の直接対象）。±0円にならない',
+      currentSen: 10_000,
+      previousSen: undefined,
+      expected: NO_DATA,
+    },
+    { name: '前年が判定不能（null）', currentSen: 10_000, previousSen: null, expected: NO_DATA },
+    { name: '当年が判定不能（null）', currentSen: null, previousSen: 10_000, expected: NO_DATA },
+  ];
+
+  for (const { name, currentSen, previousSen, expected } of cases) {
+    it(name, () => {
+      expect(dividendYoyChangeText(currentSen, previousSen)).toBe(expected);
+    });
+  }
+
+  it('前年データなしのケースは ±0円 を含まない（§9受入基準を明示的にassert）', () => {
+    expect(dividendYoyChangeText(10_000, undefined)).not.toContain('円');
+  });
+
+  it('金額の丸め境界値: 1銭差でも 0.01円 を正しく返す', () => {
+    expect(dividendYoyChangeText(101, 100)).toBe('▲ +0.01円');
   });
 });
 

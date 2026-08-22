@@ -6,6 +6,7 @@
  */
 
 import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/company-input';
+import type { DividendHistoryResponse } from '@/handler/dto/company-dividends';
 import type { EdinetImportResponse } from '@/handler/dto/edinet-import';
 import type { IrBankImportResponse } from '@/handler/dto/irbank-import';
 import type { MarketDataImportResponse } from '@/handler/dto/market-data-import';
@@ -20,6 +21,7 @@ export type {
   IrBankImportResponse,
   MarketDataImportResponse,
   EdinetImportResponse,
+  DividendHistoryResponse,
 };
 
 export type { LoginRequest, SignupRequest };
@@ -118,6 +120,14 @@ export function listCompanies(params?: CompanyListParams): Promise<CompanyListRe
 export function getCompany(code: string, useActualForScoring?: boolean): Promise<ScoringResponse> {
   const query = useActualForScoring === true ? '?useActualForScoring=true' : '';
   return request<ScoringResponse>(`/api/companies/${encodeURIComponent(code)}${query}`);
+}
+
+/**
+ * 配当の年次履歴（①線グラフ・②連続年数リストで共用）。指標詳細モードを開いたときだけ
+ * 追加取得する（`analysis-dialog.md` §7。概要のペイロードを重くしないための別エンドポイント）。
+ */
+export function getCompanyDividends(code: string): Promise<DividendHistoryResponse> {
+  return request<DividendHistoryResponse>(`/api/companies/${encodeURIComponent(code)}/dividends`);
 }
 
 /** IRバンクから財務データを取り込む。**保存はしない**（結果はフォームの初期値にするだけ） */
