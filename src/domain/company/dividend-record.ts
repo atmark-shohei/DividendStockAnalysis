@@ -136,19 +136,31 @@ export function selectAnnualDividend(records: readonly DividendRecord[]): Select
   return null;
 }
 
+/** `actualDividendSeriesWithYear` の1要素。年度と、その年度にフレーム化された金額の組 */
+export interface ActualDividendSeriesYear {
+  /** 決算年度。2024年3月期なら 2024 */
+  readonly fiscalYear: number;
+  /** 年間配当の合計（銭）。null=データなし（枠はあるがその年度の実績が無い） */
+  readonly amountSen: number | null;
+}
+
 /**
- * 実績配当（`kind === 'actual'`）を**年度に揃えて**年度降順で取り出す。①② が使う。
+ * 実績配当（`kind === 'actual'`）を**年度に揃えて**年度降順で取り出す。①②⑩ が使う。
  *
  * 規則は `company.ts` の `seriesOf` と同じ（最新の実績年度から1年刻みで枠を作り、
  * 無い年は `null`。データが尽きた先までは埋めない）。
  * **単に `map()` すると欠損年で添字が詰まり、① の「5年前」が実際には7年前になる。**
  *
+ * `actualDividendSeries()`（年度なし版）はこの関数の薄いラッパー（`amountSen` だけを
+ * 写す）。② 連続非減配年数の年次リスト（`describeConsecutiveYearRows`）が年度ラベル
+ * 込みで必要とするため切り出した（T-098）。
+ *
  * @param years 枠の長さ。指標が必要とする年数より短くしない
  */
-export function actualDividendSeries(
+export function actualDividendSeriesWithYear(
   dividends: readonly DividendRecord[],
   years: number,
-): (number | null)[] {
+): readonly ActualDividendSeriesYear[] {
   const actuals = dividends.filter((record) => record.kind === 'actual');
   if (actuals.length === 0) return [];
 
@@ -170,9 +182,21 @@ export function actualDividendSeries(
 
   const length = Math.min(years, latestYear - oldestYear + 1);
   return Array.from({ length }, (_, offset) => {
-    const record = byYear.get(latestYear - offset);
-    return record === undefined ? null : record.annualAmountSen;
+    const fiscalYear = latestYear - offset;
+    const record = byYear.get(fiscalYear);
+    return { fiscalYear, amountSen: record === undefined ? null : record.annualAmountSen };
   });
+}
+
+/**
+ * `actualDividendSeriesWithYear()` の年度なし版。既存呼び出し元（`score-company.ts`
+ * の指標①⑩ 計算等）との後方互換のため、外部シグネチャ・戻り値は変更しない。
+ */
+export function actualDividendSeries(
+  dividends: readonly DividendRecord[],
+  years: number,
+): (number | null)[] {
+  return actualDividendSeriesWithYear(dividends, years).map((year) => year.amountSen);
 }
 
 /**

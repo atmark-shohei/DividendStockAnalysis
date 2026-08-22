@@ -118,11 +118,24 @@ describe('GET /api/companies/:code/dividends', () => {
 
     const body = (await response.json()) as {
       dividends: { fiscalYear: number; amountSen: number | null; isForecast: boolean }[];
+      consecutiveYearRows: {
+        fiscalYear: number;
+        amountSen: number | null;
+        diffSen: number | null;
+        state: 'increase' | 'flat' | 'decrease' | null;
+      }[];
     };
     expect(body.dividends).toEqual([
       { fiscalYear: 2024, amountSen: 5_600, isForecast: false },
       { fiscalYear: 2025, amountSen: 5_800, isForecast: false },
       { fiscalYear: 2026, amountSen: 6_000, isForecast: true },
+    ]);
+    // ②連続非減配年数のリストは実績限定（`kind: 'actual'`）データのみを対象にするため、
+    // 2026年（予想のみ）は含まれない（`describeConsecutiveYearRows` のドキュメント参照）。
+    // 2024年は先頭行（前年比較不能）、2025年は 5,600銭→5,800銭で増配。
+    expect(body.consecutiveYearRows).toEqual([
+      { fiscalYear: 2024, amountSen: 5_600, diffSen: null, state: null },
+      { fiscalYear: 2025, amountSen: 5_800, diffSen: 200, state: 'increase' },
     ]);
     expect(repository.calls).toEqual(['9433']);
   });

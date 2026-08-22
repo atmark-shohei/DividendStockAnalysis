@@ -24,6 +24,7 @@ import { type EdinetHistorySource } from '../domain/company/edinet-history-sourc
 import { type FinancialSource } from '../domain/company/financial-source';
 import { type MarketDataSource } from '../domain/company/market-data-source';
 import { analyzeCompany } from '../usecase/analyze-company';
+import { getScoringBands } from '../usecase/get-scoring-bands';
 import { importEdinetHistory } from '../usecase/import-edinet-history';
 import { importFromIrBank } from '../usecase/import-from-irbank';
 import { importMarketData } from '../usecase/import-market-data';
@@ -37,6 +38,7 @@ import { refreshEdinetDocumentIndex } from '../usecase/refresh-edinet-document-i
 import { registerAuthRoutes } from './auth-routes';
 import { companyListQuery } from './dto/company-list-query';
 import { toDividendHistoryResponse } from './dto/company-dividends';
+import { toScoringBandsResponse } from './dto/scoring-bands';
 import {
   analyzeCompanyRequest,
   toCompany,
@@ -157,6 +159,17 @@ export function createApp(dependencies: AppDependencies): Hono {
   );
 
   app.get('/api/health', (context) => context.json({ status: 'ok' }));
+
+  /**
+   * 10指標の区分表（`docs/02_design/ui/pages/criteria-tab.md`。T-099 評価基準画面）。
+   *
+   * クエリ・パスパラメータ無し、DB非経由、常に200（エラー分岐なし）。
+   * 認証不要（`criteria-tab.md` §1「ログイン不要で閲覧できる公開画面」）。
+   * company集約に依存しない独立エンドポイントのため、company系ルート群の外に置く。
+   */
+  app.get('/api/scoring/bands', (context) => {
+    return context.json(toScoringBandsResponse(getScoringBands()));
+  });
 
   /** 株価入力の検証だけを行う。画面が入力中に呼ぶ */
   app.post('/api/price/parse', async (context) => {

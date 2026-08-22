@@ -49,8 +49,11 @@ export const METRIC_LABEL: Readonly<Record<MetricKey, string>> = {
   dividendYield: '配当利回り',
 };
 
+/** 指標の表示単位。`%` / `倍` / `年` の3種。usecase・handler で個別に定義しない */
+export type MetricUnit = '%' | '倍' | '年';
+
 /** 表示の単位。`%` / `倍` / `年` の3種 */
-export const METRIC_UNIT: Readonly<Record<MetricKey, '%' | '倍' | '年'>> = {
+export const METRIC_UNIT: Readonly<Record<MetricKey, MetricUnit>> = {
   dividendGrowthRate: '%',
   consecutiveYears: '年',
   payoutRatio: '%',

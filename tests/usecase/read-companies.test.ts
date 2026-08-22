@@ -92,9 +92,11 @@ const SAMPLE_COMPANY: Company = {
 };
 
 /**
- * `getCompanyDividendHistory` は薄い委譲（ドメイン計算は `dividendHistoryByYear` に任せる）。
- * ここで見たいのは「`findByCode` の結果に domain 関数を適用して返すか」「null の伝播」だけ。
- * 集約ロジックそのもの（優先順位・境界値）は `tests/domain/company/dividend-record.test.ts` で尽くす。
+ * `getCompanyDividendHistory` は薄い委譲（ドメイン計算は `dividendHistoryByYear` /
+ * `describeConsecutiveYearRows` に任せる）。ここで見たいのは「`findByCode` の結果に
+ * domain 関数を適用して返すか」「null の伝播」だけ。集約・判定ロジックそのもの
+ * （優先順位・境界値）は `tests/domain/company/dividend-record.test.ts` /
+ * `tests/domain/scoring/consecutive-years.test.ts` で尽くす。
  */
 describe('getCompanyDividendHistory', () => {
   function fakeCompanyRepository(company: Company | null): CompanyRepository {
@@ -109,13 +111,22 @@ describe('getCompanyDividendHistory', () => {
     };
   }
 
-  it('findByCode が Company を返す → dividendHistoryByYear を適用した結果が返る', async () => {
+  it('findByCode が Company を返す → dividends は dividendHistoryByYear を適用した結果が返る', async () => {
     const result = await getCompanyDividendHistory(fakeCompanyRepository(SAMPLE_COMPANY), '9433');
 
-    expect(result).toEqual([
+    expect(result?.dividends).toEqual([
       { fiscalYear: 2024, amountSen: 5_600, isForecast: false },
       { fiscalYear: 2025, amountSen: 5_800, isForecast: false },
       { fiscalYear: 2026, amountSen: 6_000, isForecast: true },
+    ]);
+  });
+
+  it('findByCode が Company を返す → consecutiveYearRows は describeConsecutiveYearRows を適用した結果が返る（予想年度は含まない）', async () => {
+    const result = await getCompanyDividendHistory(fakeCompanyRepository(SAMPLE_COMPANY), '9433');
+
+    expect(result?.consecutiveYearRows).toEqual([
+      { fiscalYear: 2024, amountSen: 5_600, diffSen: null, state: null },
+      { fiscalYear: 2025, amountSen: 5_800, diffSen: 200, state: 'increase' },
     ]);
   });
 

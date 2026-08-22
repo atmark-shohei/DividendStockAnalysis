@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type DividendRecord,
   actualDividendSeries,
+  actualDividendSeriesWithYear,
   dividendHistoryByYear,
   selectLatestActualDividend,
   selectLatestForecastDividend,
@@ -63,6 +64,78 @@ describe('actualDividendSeries — 実績配当を年度に揃える（添字＝
   it('金額が null の年は null のまま返す（0 に丸めない）', () => {
     const records = [actual(2025, 5_000), actual(2024, null)];
     expect(actualDividendSeries(records, 2)).toEqual([5_000, null]);
+  });
+});
+
+/**
+ * `actualDividendSeries` の年度付き版（T-098）。ロジックは同一で、`fiscalYear` を
+ * 併せて返すだけ。② 連続非減配年数の年次リスト（`describeConsecutiveYearRows`）が使う。
+ *
+ * `actualDividendSeries()` はこの関数の薄いラッパーになった（非破壊リファクタリング）。
+ * 上のテスト群がそのまま全パスすることが非破壊性の担保。
+ */
+describe('actualDividendSeriesWithYear — 年度付きで実績配当を年度に揃える', () => {
+  it('年度が連続していれば年度降順でそのまま返す', () => {
+    const records = [actual(2025, 5_000), actual(2024, 4_000), actual(2023, 3_000)];
+    expect(actualDividendSeriesWithYear(records, 3)).toEqual([
+      { fiscalYear: 2025, amountSen: 5_000 },
+      { fiscalYear: 2024, amountSen: 4_000 },
+      { fiscalYear: 2023, amountSen: 3_000 },
+    ]);
+  });
+
+  it('途中の年度が欠けていたら、その年度の枠を amountSen: null で埋める', () => {
+    const records = [actual(2025, 5_000), actual(2024, 4_000), actual(2022, 2_000)];
+    expect(actualDividendSeriesWithYear(records, 4)).toEqual([
+      { fiscalYear: 2025, amountSen: 5_000 },
+      { fiscalYear: 2024, amountSen: 4_000 },
+      { fiscalYear: 2023, amountSen: null },
+      { fiscalYear: 2022, amountSen: 2_000 },
+    ]);
+  });
+
+  it('予想・修正は混ぜない。実績だけを使う', () => {
+    const records: DividendRecord[] = [
+      { fiscalYear: 2026, kind: 'forecast', annualAmountSen: 999_999 },
+      { fiscalYear: 2025, kind: 'revised', annualAmountSen: 888_888 },
+      actual(2025, 5_000),
+      actual(2024, 4_000),
+    ];
+    expect(actualDividendSeriesWithYear(records, 2)).toEqual([
+      { fiscalYear: 2025, amountSen: 5_000 },
+      { fiscalYear: 2024, amountSen: 4_000 },
+    ]);
+  });
+
+  it('実績が1件も無ければ空', () => {
+    const records: DividendRecord[] = [
+      { fiscalYear: 2026, kind: 'forecast', annualAmountSen: 8_400 },
+    ];
+    expect(actualDividendSeriesWithYear(records, 5)).toEqual([]);
+  });
+
+  it('データが尽きた先まで null で埋めない', () => {
+    const records = [actual(2025, 5_000), actual(2024, 4_000)];
+    expect(actualDividendSeriesWithYear(records, 10)).toEqual([
+      { fiscalYear: 2025, amountSen: 5_000 },
+      { fiscalYear: 2024, amountSen: 4_000 },
+    ]);
+  });
+
+  it('無配（0円）は欠損にしない', () => {
+    const records = [actual(2025, 0), actual(2024, 4_000)];
+    expect(actualDividendSeriesWithYear(records, 2)).toEqual([
+      { fiscalYear: 2025, amountSen: 0 },
+      { fiscalYear: 2024, amountSen: 4_000 },
+    ]);
+  });
+
+  it('金額が null の年は amountSen: null のまま返す（0 に丸めない）', () => {
+    const records = [actual(2025, 5_000), actual(2024, null)];
+    expect(actualDividendSeriesWithYear(records, 2)).toEqual([
+      { fiscalYear: 2025, amountSen: 5_000 },
+      { fiscalYear: 2024, amountSen: null },
+    ]);
   });
 });
 
