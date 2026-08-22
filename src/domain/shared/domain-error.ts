@@ -21,7 +21,11 @@ export type DomainError =
       readonly upperMin: number | null;
     }
   /** 最上位区分に上限がある（「下限以上」で開いている必要がある） */
-  | { readonly kind: 'ThresholdTopBounded'; readonly maxExclusive: number };
+  | { readonly kind: 'ThresholdTopBounded'; readonly maxExclusive: number }
+  /** 「満点となる基準値」が0以下（ADR-0012 D-2 制約1） */
+  | { readonly kind: 'BaselineNotPositive'; readonly value: number }
+  /** 区分表からデフォルト満点境界を判定できない（理論上発生しないはずの防御的分岐） */
+  | { readonly kind: 'BaselineUndeterminable' };
 
 /**
  * ログ・テスト向けの短い説明。**画面には出さない**。
@@ -41,5 +45,9 @@ export function describeDomainError(error: DomainError): string {
       return `gap or overlap between ${error.lowerPoints}pt (max=${String(error.lowerMax)}) and ${error.upperPoints}pt (min=${String(error.upperMin)})`;
     case 'ThresholdTopBounded':
       return `top band must be open-ended but has maxExclusive=${error.maxExclusive}`;
+    case 'BaselineNotPositive':
+      return `baseline value must be positive: ${error.value}`;
+    case 'BaselineUndeterminable':
+      return 'cannot determine default baseline from band table';
   }
 }

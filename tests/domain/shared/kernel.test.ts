@@ -132,4 +132,12 @@ describe('DomainError', () => {
     expect(describeDomainError({ kind: 'ThresholdEmpty' })).toContain('empty');
     expect(describeDomainError({ kind: 'ScoreOutOfRange', value: 42 })).toContain('42');
   });
+
+  it('BaselineNotPositive（T-100: 基準値が0以下）の説明を返す', () => {
+    expect(describeDomainError({ kind: 'BaselineNotPositive', value: -10 })).toContain('-10');
+  });
+
+  it('BaselineUndeterminable（T-100: 区分表から満点境界を判定できない防御的分岐）の説明を返す', () => {
+    expect(describeDomainError({ kind: 'BaselineUndeterminable' })).toContain('baseline');
+  });
 });
