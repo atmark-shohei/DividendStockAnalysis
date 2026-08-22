@@ -59,6 +59,9 @@ export function NavBar({
       <NavLink to={createListRoute()} active={current.kind === 'list'} onNavigate={onNavigate}>
         検索
       </NavLink>
+      <NavLink to={{ kind: 'criteria' }} active={current.kind === 'criteria'} onNavigate={onNavigate}>
+        評価基準
+      </NavLink>
       {shouldShowInputTab(user) && (
         <NavLink to={{ kind: 'input' }} active={current.kind === 'input'} onNavigate={onNavigate}>
           銘柄登録

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CompanySummary } from '@/domain/company/company-repository';
 
 import type { DividendHistoryResponse, ScoringResponse } from '../api';
+import { ConsecutiveYearsList } from '../components/ConsecutiveYearsList';
 import { Dialog } from '../components/Dialog';
 import { DividendLineChart } from '../components/DividendLineChart';
 import { EmptyState } from '../components/EmptyState';
@@ -55,9 +56,10 @@ interface Selection {
 }
 
 /**
- * ①増配率（5年CAGR）の指標詳細（線グラフ）用データ（T-097）。`Selection` とは別オブジェクトに
- * する（`selected` の形を変えると既存の `resolveActiveMetric`/`ScoringBody` 呼び出し箇所を
- * 広く変更することになるため独立させる。fe-plan.md §3-1）。
+ * ①増配率（5年CAGR）の線グラフ（T-097）・②連続非減配年数の年次リスト（T-098）が
+ * 共用するデータ。`Selection` とは別オブジェクトにする（`selected` の形を変えると既存の
+ * `resolveActiveMetric`/`ScoringBody` 呼び出し箇所を広く変更することになるため独立させる。
+ * fe-plan.md §3-1）。
  */
 export interface DividendHistoryState {
   readonly data: DividendHistoryResponse | null;
@@ -184,7 +186,7 @@ export function ListPage({
   /** `route.metric` の生値（形式チェック済み・実在未検証）。`resolveActiveMetric` に通す */
   readonly activeMetricParam: string | null;
   readonly dialogHandlers: DialogHandlers;
-  /** ①増配率（5年CAGR）の指標詳細用（T-097） */
+  /** ①増配率（5年CAGR。T-097）・②連続非減配年数（T-098）の指標詳細用 */
   readonly dividendHistory: DividendHistoryState;
 }) {
   const selectedName =
@@ -484,9 +486,10 @@ function ScoringBody({
             ／ スコア {activeMetric.score === null ? NO_DATA : `${String(activeMetric.score)} 点`}
           </span>
         </p>
-        {/* T-097: ①増配率（5年CAGR）だけ線グラフ＋表を実装した（`analysis-dialog.md` §5.1）。
-            ②連続年数リスト・③〜⑩汎用の条件／点数表（`bands.ts` 由来）は T-098 以降のスコープ
-            （fe-plan.md §3-2） */}
+        {/* T-097: ①増配率（5年CAGR）の線グラフ＋表（`analysis-dialog.md` §5.1）。
+            T-098: ②連続非減配年数の年次リスト（同 §5.2）。①②は同じ
+            `GET /api/companies/:code/dividends` を共用する（`dividendHistory` state）。
+            ③〜⑩汎用の条件／点数表（`bands.ts` 由来）は T-098 以降のスコープ（fe-plan.md §3-2） */}
         {activeMetric.key === 'dividendGrowthRate' ? (
           dividendHistory.loading ? (
             <Skeleton rows={4} />
@@ -501,6 +504,24 @@ function ScoringBody({
             <p className="meta">配当データがありません。</p>
           ) : (
             <DividendLineChart dividends={dividendHistory.data.dividends} />
+          )
+        ) : activeMetric.key === 'consecutiveYears' ? (
+          dividendHistory.loading ? (
+            <Skeleton rows={4} />
+          ) : dividendHistory.data === null ? (
+            <p className="meta" role="alert">
+              配当推移を表示できませんでした。もう一度お試しください。
+            </p>
+          ) : dividendHistory.data.consecutiveYearRows.length === 0 ? (
+            // TODO(T-098): 連続非減配年数の年次リストが0件の場合の挙動は company-api.md に
+            // 明記が無い推測実装。①と同じ理由（fe-plan.md §1 確認事項C）で、実績の
+            // dividend_records が1件も無い銘柄への防御。文言も①に揃えた
+            <p className="meta">配当データがありません。</p>
+          ) : (
+            <ConsecutiveYearsList
+              rows={dividendHistory.data.consecutiveYearRows}
+              consecutiveYears={activeMetric.value}
+            />
           )
         ) : (
           <p className="meta">詳細表示は準備中です。</p>

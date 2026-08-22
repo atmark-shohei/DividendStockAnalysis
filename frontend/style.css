@@ -598,6 +598,74 @@ footer {
   box-shadow: inset 3px 0 0 var(--color-action);
 }
 
+/*
+ * 評価基準タブ（`/criteria`、T-099）。`docs/02_design/ui/pages/criteria-tab.md` §2.0。
+ * カード外観は「影は使わない。面の分離はフラットな面＋ヘアライン枠線」（design-tokens.md §4）。
+ */
+.criteria-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-5);
+}
+
+.criteria-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+.criteria-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.criteria-card-header h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+
+.criteria-description {
+  font-size: var(--font-size-sm);
+}
+
+.criteria-formula {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-inset);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  white-space: pre-wrap;
+}
+
+/* §2.3: 境界値の解釈（下限以上・上限未満）を毎カードに明記する */
+.criteria-note {
+  margin-top: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* 「自動計算済」＝ --color-text-secondary の枠線バッジ、「未実装」＝ --color-caution（§2.2） */
+.implementation-badge {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+}
+
+.implementation-badge[data-status='pending'] {
+  border-color: var(--color-caution);
+  color: var(--color-caution);
+}
+
 /* 視覚上隠すが SR には読ませる（標準的な visually-hidden パターン）。
  * ここの px 値はデザイントークン（色・余白・フォントサイズ）ではなく、
  * 要素を1pxに縮めて隠すための技術的な固定値なので design-tokens.md §6 の

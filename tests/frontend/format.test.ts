@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   NO_DATA,
+  consecutiveYearsSummaryText,
   dividendYoyChangeText,
+  dividendYoyDiffText,
+  dividendYoyGlyph,
+  dividendYoyStateLabel,
   fiscalPeriodLabel,
+  formatBandRange,
   formatMetricValue,
   formatPriceAsOf,
   formatSen,
@@ -305,6 +310,108 @@ describe('dividendYoyChangeText', () => {
   });
 });
 
+/**
+ * ②連続非減配年数の年次リスト（`docs/02_design/ui/pages/analysis-dialog.md` §5.2、T-098）。
+ *
+ * **増配／据置／減配の判定はBE domain側で確定済み**（`GET /api/companies/:code/dividends`
+ * の `consecutiveYearRows[].state`）。ここでは `dividendYoyGlyph`/`dividendYoyStateLabel`が
+ * 既に確定した `state` を glyph・文言へ変換するだけであることを検証する
+ * （FE側で `current - previous` の符号判定を行わない）。
+ */
+describe('dividendYoyGlyph', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly state: 'increase' | 'flat' | 'decrease' | null;
+    readonly expected: string;
+  }[] = [
+    { name: '増配は ▲', state: 'increase', expected: '▲' },
+    { name: '据置は －', state: 'flat', expected: '－' },
+    { name: '減配は ▼', state: 'decrease', expected: '▼' },
+    { name: '判定不能（先頭行・データ欠損）は NO_DATA', state: null, expected: NO_DATA },
+  ];
+
+  for (const { name, state, expected } of cases) {
+    it(name, () => {
+      expect(dividendYoyGlyph(state)).toBe(expected);
+    });
+  }
+});
+
+describe('dividendYoyStateLabel', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly state: 'increase' | 'flat' | 'decrease' | null;
+    readonly expected: string;
+  }[] = [
+    { name: '増配', state: 'increase', expected: '増配' },
+    { name: '据置', state: 'flat', expected: '据置' },
+    { name: '減配', state: 'decrease', expected: '減配' },
+    { name: '判定不能は NO_DATA', state: null, expected: NO_DATA },
+  ];
+
+  for (const { name, state, expected } of cases) {
+    it(name, () => {
+      expect(dividendYoyStateLabel(state)).toBe(expected);
+    });
+  }
+});
+
+/**
+ * ②年次リストの前年差（`diffSen` はBEが算出済み。FEは金額整形のみ担う）。
+ * `±0円` にしない（データ欠損と「変化なし」を区別する。①の `dividendYoyChangeText` と
+ * 同じ判断）。
+ */
+describe('dividendYoyDiffText', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly diffSen: number | null;
+    readonly expected: string;
+  }[] = [
+    { name: '増配（正の差額）', diffSen: 5_000, expected: '+50.00円' },
+    { name: '減配（負の差額）', diffSen: -5_000, expected: '-50.00円' },
+    {
+      name: '据置（差0）は「0円」。データ欠損の NO_DATA と区別する',
+      diffSen: 0,
+      expected: '0円',
+    },
+    { name: '判定不能（前年比較ができない先頭行等）は NO_DATA', diffSen: null, expected: NO_DATA },
+    { name: '金額境界値: 1銭差でも 0.01円 を正しく返す', diffSen: 1, expected: '+0.01円' },
+  ];
+
+  for (const { name, diffSen, expected } of cases) {
+    it(name, () => {
+      expect(dividendYoyDiffText(diffSen)).toBe(expected);
+    });
+  }
+
+  it('据置のケースは ±0円 を含まない（0円 と ±0円 を混同しない）', () => {
+    expect(dividendYoyDiffText(0)).not.toContain('±');
+  });
+});
+
+/**
+ * ②年次リスト末尾の要約行。`consecutiveYears` はBEのスコアリング結果値
+ * （`activeMetric.value`）そのもの。**`0`年は判定可能な結果であり NO_DATA にしない**
+ * （`null`→0表示の禁止事項とは逆方向の境界値。`consecutive-years-scoring.md` §6.3）。
+ */
+describe('consecutiveYearsSummaryText', () => {
+  it('0年（直近が減配。判定可能な結果） → NO_DATA にしない', () => {
+    const text = consecutiveYearsSummaryText(0);
+    expect(text).toBe('減配のない状態が0年継続中です。');
+    expect(text).not.toBe(NO_DATA);
+  });
+
+  it('18年（全期間非減配の上限ケース）', () => {
+    expect(consecutiveYearsSummaryText(18)).toBe('減配のない状態が18年継続中です。');
+  });
+
+  it('null（判定不能） → NO_DATA。「0年継続中」を出さない', () => {
+    const text = consecutiveYearsSummaryText(null);
+    expect(text).toBe(NO_DATA);
+    expect(text).not.toContain('0年');
+  });
+});
+
 describe('ratioToEditableText', () => {
   it('null は空文字', () => {
     expect(ratioToEditableText(null)).toBe('');
@@ -323,5 +430,54 @@ describe('ratioToEditableText', () => {
 
   it('0は "0"', () => {
     expect(ratioToEditableText(0)).toBe('0');
+  });
+});
+
+/**
+ * 評価基準タブ（T-099）の区分表1行の整形。**計算・判定はしない**（BEが返した
+ * `minInclusive`/`maxExclusive` をそのまま整形するだけ）。テスト用のband値は
+ * `bands.ts` の実値をコピーしない合成値を使う（表示ロジックのテストであり、
+ * 採点区分値の二重管理を避けるため）。
+ */
+describe('formatBandRange', () => {
+  it('上限無し（最上位区分）は「◯以上」', () => {
+    expect(formatBandRange({ minInclusive: 30, maxExclusive: null }, '%', false)).toBe('30.00%以上');
+  });
+
+  it('下限無し（⑤ROE最下段相当）は「◯未満」', () => {
+    expect(formatBandRange({ minInclusive: null, maxExclusive: 20 }, '%', false)).toBe('20.00%未満');
+  });
+
+  it('通常区間は「◯以上 ◯未満」', () => {
+    expect(formatBandRange({ minInclusive: 10, maxExclusive: 20 }, '%', false)).toBe(
+      '10.00%以上 20.00%未満',
+    );
+  });
+
+  it('⑩相当の1/100%スケーリング（550 → 5.50%）', () => {
+    expect(formatBandRange({ minInclusive: 550, maxExclusive: null }, '%', true)).toBe('5.50%以上');
+    expect(formatBandRange({ minInclusive: null, maxExclusive: 550 }, '%', true)).toBe('5.50%未満');
+  });
+
+  it('倍単位', () => {
+    expect(formatBandRange({ minInclusive: 10, maxExclusive: 12 }, '倍', false)).toBe(
+      '10.00 倍以上 12.00 倍未満',
+    );
+  });
+
+  it('年単位・整数年は小数を出さない', () => {
+    expect(formatBandRange({ minInclusive: 17, maxExclusive: null }, '年', false)).toBe(
+      '17 年以上',
+    );
+  });
+
+  it('年単位・端数年は小数第2位まで出す', () => {
+    expect(formatBandRange({ minInclusive: 2.5, maxExclusive: 5 }, '年', false)).toBe(
+      '2.50 年以上 5 年未満',
+    );
+  });
+
+  it('下限・上限とも null（区分表として不正な行）は NO_DATA', () => {
+    expect(formatBandRange({ minInclusive: null, maxExclusive: null }, '%', false)).toBe(NO_DATA);
   });
 });

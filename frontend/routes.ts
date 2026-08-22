@@ -74,6 +74,7 @@ export type Route =
       readonly page: number;
     }
   | { readonly kind: 'input' }
+  | { readonly kind: 'criteria' }
   | {
       readonly kind: 'login';
       /** 成功後に戻る画面のパス。`sanitizeRedirect` を通した後の値（常に安全な相対パス） */
@@ -86,6 +87,7 @@ export type Route =
 
 export const LIST_PATH = '/';
 export const INPUT_PATH = '/input';
+export const CRITERIA_PATH = '/criteria';
 export const LOGIN_PATH = '/login';
 export const SIGNUP_PATH = '/signup';
 
@@ -138,6 +140,9 @@ export function parseRoute(href: string): Route {
   const params = new URLSearchParams(search);
 
   if (pathname === INPUT_PATH) return { kind: 'input' };
+  // 会社非依存の公開画面（ログイン不要）。クエリパラメータは持たない
+  // （`/indicators` と同じ「静的画面はURLに付随状態を持たない」方針。screen-list.md:80）
+  if (pathname === CRITERIA_PATH) return { kind: 'criteria' };
   if (pathname === LOGIN_PATH)
     return { kind: 'login', redirect: sanitizeRedirect(params.get('redirect')) };
   if (pathname === SIGNUP_PATH) {
@@ -203,6 +208,7 @@ export function createListRoute(
 
 export function routeToPath(route: Route): string {
   if (route.kind === 'input') return INPUT_PATH;
+  if (route.kind === 'criteria') return CRITERIA_PATH;
 
   if (route.kind === 'login' || route.kind === 'signup') {
     const base = route.kind === 'login' ? LOGIN_PATH : SIGNUP_PATH;

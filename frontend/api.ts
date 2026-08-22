@@ -6,10 +6,14 @@
  */
 
 import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/company-input';
-import type { DividendHistoryResponse } from '@/handler/dto/company-dividends';
+import type {
+  ConsecutiveYearRowResponse,
+  DividendHistoryResponse,
+} from '@/handler/dto/company-dividends';
 import type { EdinetImportResponse } from '@/handler/dto/edinet-import';
 import type { IrBankImportResponse } from '@/handler/dto/irbank-import';
 import type { MarketDataImportResponse } from '@/handler/dto/market-data-import';
+import type { ScoringBandsResponse } from '@/handler/dto/scoring-bands';
 import type { CompanySummary } from '@/domain/company/company-repository';
 import type { LoginRequest, SignupRequest, UserView } from '@/handler/dto/auth-input';
 
@@ -22,6 +26,8 @@ export type {
   MarketDataImportResponse,
   EdinetImportResponse,
   DividendHistoryResponse,
+  ConsecutiveYearRowResponse,
+  ScoringBandsResponse,
 };
 
 export type { LoginRequest, SignupRequest };
@@ -128,6 +134,15 @@ export function getCompany(code: string, useActualForScoring?: boolean): Promise
  */
 export function getCompanyDividends(code: string): Promise<DividendHistoryResponse> {
   return request<DividendHistoryResponse>(`/api/companies/${encodeURIComponent(code)}/dividends`);
+}
+
+/**
+ * 評価基準タブ（T-099）の10指標ぶんの区分表。会社に依存しない静的データのため
+ * パス・クエリパラメータを持たない（`getCurrentUser` と同じ最単純な GET の形）。
+ * 認証不要（`docs/02_design/ui/pages/criteria-tab.md` §1）。
+ */
+export function getScoringBands(): Promise<ScoringBandsResponse> {
+  return request<ScoringBandsResponse>('/api/scoring/bands');
 }
 
 /** IRバンクから財務データを取り込む。**保存はしない**（結果はフォームの初期値にするだけ） */

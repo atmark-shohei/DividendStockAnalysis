@@ -5,7 +5,7 @@
  * 混同すると利回り計算が壊れる。
  */
 
-import type { ScoringResponse } from './api';
+import type { ConsecutiveYearRowResponse, ScoringResponse } from './api';
 
 /** データなしの表示。`0` と区別する */
 export const NO_DATA = '—';
@@ -206,6 +206,103 @@ export function dividendYoyChangeText(
   if (diff === 0) return '－ 据置';
   const sign = diff > 0 ? '▲ +' : '▼ -';
   return `${sign}${grouped(Math.abs(diff) / 100, 2)}円`;
+}
+
+/**
+ * ②連続非減配年数の年次リストが使う型（`docs/02_design/ui/pages/analysis-dialog.md` §5.2）。
+ * BE `src/domain/scoring/consecutive-years.ts` の `ConsecutiveYearState` そのもの
+ * （`ConsecutiveYearRowResponse['state']` として type alias。二重定義しない）。
+ *
+ * **増配／据置／減配の判定はBE domain側で確定済み**（`GET /api/companies/:code/dividends`
+ * の `consecutiveYearRows[].state`）。①の `dividendYoyChangeText` と異なり、
+ * FEは差分の符号を再計算しない。glyph・状態語への変換のみを担う
+ * （`.claude/rules/frontend.md`「計算・判定をしない」）。
+ */
+type ConsecutiveYearState = ConsecutiveYearRowResponse['state'];
+
+/**
+ * ②年次リストの glyph（`▲`/`－`/`▼`）。`state` が `null`（先頭行・判定不能）は NO_DATA。
+ * 色は中立トークンのみ（design-tokens.md §2.2「スコア・増配率・成長率には
+ * `--color-positive`/`--color-negative` を使わない」。①と同じ方針）。
+ */
+export function dividendYoyGlyph(state: ConsecutiveYearState): string {
+  if (state === 'increase') return '▲';
+  if (state === 'decrease') return '▼';
+  if (state === 'flat') return '－';
+  return NO_DATA;
+}
+
+/** ②年次リストの状態語（増配／据置／減配）。`state` が `null` は NO_DATA */
+export function dividendYoyStateLabel(state: ConsecutiveYearState): string {
+  if (state === 'increase') return '増配';
+  if (state === 'decrease') return '減配';
+  if (state === 'flat') return '据置';
+  return NO_DATA;
+}
+
+/**
+ * ②年次リストの前年差（金額のみ。glyphは含まない。§5.2 は glyph・状態語・金額・前年差を
+ * 別要素として要求するため、①の `dividendYoyChangeText`（glyph+符号+金額を1文字列に
+ * 結合）とは別関数にする）。
+ *
+ * `diffSen` はBEが算出済みの値（`ConsecutiveYearRowResponse.diffSen`）をそのまま整形する。
+ * **FEでは current - previous を再計算しない。**
+ * "+100.00円" / "-100.00円" / "0円"（本当に差が0）/ NO_DATA（前年比較ができない）。
+ * **`±0円` にしない**（データ欠損と「変化なし」を区別する。①と同じ判断）。
+ */
+export function dividendYoyDiffText(diffSen: number | null): string {
+  if (diffSen === null) return NO_DATA;
+  if (diffSen === 0) return '0円';
+  const sign = diffSen > 0 ? '+' : '-';
+  return `${sign}${grouped(Math.abs(diffSen) / 100, 2)}円`;
+}
+
+/**
+ * ②年次リスト末尾の要約行（`analysis-dialog.md` §5.2「減配のない状態が
+ * `consecutiveYears`年 継続中です。」）。`consecutiveYears` は `activeMetric.value`
+ * （BEのスコアリング結果。`consecutive-years-scoring.md`）をそのまま使う。
+ *
+ * **`0`年は判定可能な結果であり NO_DATA にしない**（直近が減配でも0年という
+ * 確定した答え。`consecutive-years-scoring.md` §6.3）。`null`（判定不能。配当履歴が
+ * 空、または判定範囲内に欠損）のときだけ NO_DATA を返す。
+ */
+export function consecutiveYearsSummaryText(consecutiveYears: number | null): string {
+  if (consecutiveYears === null) return NO_DATA;
+  return `減配のない状態が${String(consecutiveYears)}年継続中です。`;
+}
+
+/**
+ * 評価基準タブ（T-099）の区分表1行を「◯以上 ◯未満」の文言にする。
+ *
+ * **計算・判定はしない。** BE（`GET /api/scoring/bands`）が返した
+ * `minInclusive`/`maxExclusive` をそのまま整形するだけ（`.claude/rules/frontend.md`）。
+ * 丸め・単位付与は既存の `formatMetricValue` を再利用する（⑩の1/100%スケーリングも
+ * そちらに内包済みのため、ここで二重実装しない）。
+ *
+ * `minInclusive === null` は下限なし（⑤ROEの最下段のみ。`bands.ts` の不変条件）、
+ * `maxExclusive === null` は上限なし（最上位区分）。**両方が `null` の行は
+ * 区分表として不正**（`bands.ts` の不変条件を BE が破った場合）なので、
+ * non-null assertion で無言クラッシュさせず `NO_DATA` を返す。
+ */
+export function formatBandRange(
+  band: { readonly minInclusive: number | null; readonly maxExclusive: number | null },
+  unit: string,
+  isHundredthsPercent: boolean,
+): string {
+  const bound = (value: number): string => formatMetricValue(value, unit, isHundredthsPercent);
+  const { minInclusive, maxExclusive } = band;
+
+  // ネストした if で分岐する（型アサーションを使わないため。`minInclusive === null &&
+  // maxExclusive === null` のような && 条件をトップレベルの早期 return にすると、
+  // TypeScript の制御フロー解析は「少なくとも一方は非 null」までしか推論できず、
+  // 後続の分岐で他方が非 null であることを narrowing できない。ネストにすることで
+  // 各分岐内で該当プロパティが number であることをそのまま narrowing させる）
+  if (minInclusive === null) {
+    if (maxExclusive === null) return NO_DATA;
+    return `${bound(maxExclusive)}未満`;
+  }
+  if (maxExclusive === null) return `${bound(minInclusive)}以上`;
+  return `${bound(minInclusive)}以上 ${bound(maxExclusive)}未満`;
 }
 
 /**

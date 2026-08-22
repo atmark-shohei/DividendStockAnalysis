@@ -6,6 +6,7 @@ import type {
   CompanyListResponse,
   DividendHistoryResponse,
   LoginRequest,
+  ScoringBandsResponse,
   ScoringResponse,
   SignupRequest,
 } from './api';
@@ -13,6 +14,7 @@ import * as api from './api';
 import { AuthStatus } from './components/AuthStatus';
 import { NavBar } from './components/NavBar';
 import { AuthPage } from './pages/AuthPage';
+import { CriteriaPage } from './pages/CriteriaPage';
 import { InputPage } from './pages/InputPage';
 import { ListPage } from './pages/ListPage';
 import {
@@ -49,6 +51,9 @@ export function App() {
   // 追加取得する（`analysis-dialog.md` §7。T-097）
   const [dividendHistory, setDividendHistory] = useState<DividendHistoryResponse | null>(null);
   const [loadingDividendHistory, setLoadingDividendHistory] = useState(false);
+  // 評価基準タブ（T-099）。会社非依存の静的データなので、セッション中1回だけ取得しキャッシュする
+  const [criteriaBands, setCriteriaBands] = useState<ScoringBandsResponse | null>(null);
+  const [loadingCriteria, setLoadingCriteria] = useState(false);
   // 初回は必ず reload() が走る前提のため true から始める（CR-6。`false` だと
   // マウント直後の1フレームで EmptyState が一瞬見える）
   const [loadingCompanies, setLoadingCompanies] = useState(true);
@@ -72,10 +77,13 @@ export function App() {
   const q = route.kind === 'list' ? route.q : '';
   const sort: CompanySortKey = route.kind === 'list' ? route.sort : 'created_desc';
   const page = route.kind === 'list' ? route.page : 1;
-  // ①増配率（5年CAGR）の指標詳細を開いているか（`analysis-dialog.md` §5.1 は①のみ対象）。
+  // ①増配率（5年CAGR。`analysis-dialog.md` §5.1）・②連続非減配年数（同 §5.2）のいずれかの
+  // 指標詳細を開いているか。①②は同じ `GET /api/companies/:code/dividends` を共用する（T-098）。
   // `route.metric` は形式チェック済みだが実在未検証の生値（`ListPage.resolveActiveMetric` が
   // 実在検証を担う）。ここでは「取得すべきか」の判定だけなので生値の突き合わせで十分
-  const isDividendMetricOpen = route.kind === 'list' && route.metric === 'dividendGrowthRate';
+  const isDividendHistoryMetricOpen =
+    route.kind === 'list' &&
+    (route.metric === 'dividendGrowthRate' || route.metric === 'consecutiveYears');
 
   /**
    * 依存配列は q/sort/page だけに絞る。`selectedCode`/`useActualForScoring` の変化
@@ -179,8 +187,9 @@ export function App() {
   }, [selectedCode, useActualForScoring]);
 
   /**
-   * ①増配率（5年CAGR）の指標詳細（線グラフ）用データ取得（T-097。fe-plan.md §3-1）。
-   * `?metric=dividendGrowthRate` を開いたときだけ取得する（概要のペイロードを重くしない。
+   * ①増配率（5年CAGR）の線グラフ（T-097）・②連続非減配年数の年次リスト（T-098）が
+   * 共用するデータ取得（fe-plan.md §3-1）。`?metric=dividendGrowthRate` または
+   * `?metric=consecutiveYears` を開いたときだけ取得する（概要のペイロードを重くしない。
    * `analysis-dialog.md` §7）。
    *
    * 概要モードへ戻る・他の指標を開く・銘柄を切り替えたときは**都度クリアする**
@@ -188,7 +197,7 @@ export function App() {
    * fe-plan.md §3-1）。
    */
   useEffect(() => {
-    if (selectedCode === null || !isDividendMetricOpen) {
+    if (selectedCode === null || !isDividendHistoryMetricOpen) {
       setDividendHistory(null);
       return;
     }
@@ -212,7 +221,37 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedCode, isDividendMetricOpen]);
+  }, [selectedCode, isDividendHistoryMetricOpen]);
+
+  /**
+   * 評価基準タブ（T-099）。会社非依存の静的データなので、`/criteria` を開いたときだけ
+   * 一度取得し、以後はキャッシュを使い回す（`criteriaBands !== null` で再取得をスキップ。
+   * 一覧の `reload()` のように毎回取り直す必要が無い。fe-plan.md §3.8）。
+   */
+  useEffect(() => {
+    if (route.kind !== 'criteria' || criteriaBands !== null) return;
+
+    let cancelled = false;
+    setLoadingCriteria(true);
+    api
+      .getScoringBands()
+      .then((result) => {
+        if (!cancelled) setCriteriaBands(result);
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setError(cause instanceof Error ? cause.message : '評価基準の取得に失敗しました');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCriteria(false);
+      });
+
+    return () => {
+      // 別画面へ素早く遷移した場合、古い応答で state を上書きさせない（CR-3。
+      // `dividendHistory` 取得 useEffect と同じキャンセルガードパターン）
+      cancelled = true;
+    };
+  }, [route.kind, criteriaBands]);
 
   const handleSubmit = (payload: AnalyzeCompanyRequest) => {
     setBusy(true);
@@ -401,6 +440,8 @@ export function App() {
 
       {route.kind === 'input' ? (
         <InputPage onSubmit={handleSubmit} disabled={busy} />
+      ) : route.kind === 'criteria' ? (
+        <CriteriaPage bands={criteriaBands} loading={loadingCriteria} />
       ) : route.kind === 'login' || route.kind === 'signup' ? (
         <AuthPage
           mode={route.kind}

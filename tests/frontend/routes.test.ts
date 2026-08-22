@@ -32,6 +32,9 @@ describe('parseRoute', () => {
     ['入力画面', '/input', { kind: 'input' }],
     ['入力画面の末尾スラッシュは同じ画面', '/input/', { kind: 'input' }],
     ['入力画面のクエリは無視する', '/input?code=7203', { kind: 'input' }],
+    ['評価基準画面', '/criteria', { kind: 'criteria' }],
+    ['評価基準画面の末尾スラッシュは同じ画面', '/criteria/', { kind: 'criteria' }],
+    ['評価基準画面のクエリは無視する', '/criteria?foo=bar', { kind: 'criteria' }],
     ['未知のパスは一覧へ倒す', '/no-such-page', createListRoute()],
     ['他のクエリ（未知のパラメータ）は選択に影響しない', '/?foo=bar', createListRoute()],
   ];
@@ -194,6 +197,7 @@ describe('routeToPath', () => {
     ['一覧・選択なし', createListRoute(), '/'],
     ['一覧・選択あり', createListRoute({ selectedCode: '7203' }), '/?code=7203'],
     ['入力画面', { kind: 'input' }, '/input'],
+    ['評価基準画面', { kind: 'criteria' }, '/criteria'],
     [
       'metric 付きは code の後ろに並ぶ',
       createListRoute({ selectedCode: '7203', metric: 'roeAverage' }),
@@ -399,6 +403,7 @@ describe('resolveRouteGuardRedirect', () => {
 
   const listRoute: Route = createListRoute();
   const inputRoute: Route = { kind: 'input' };
+  const criteriaRoute: Route = { kind: 'criteria' };
   const loginRoute: Route = { kind: 'login', redirect: '/' };
   const signupRoute: Route = { kind: 'signup', redirect: '/' };
 
@@ -419,6 +424,10 @@ describe('resolveRouteGuardRedirect', () => {
     ['adminが/signupを開く -> /へ', signupRoute, asAdmin, listRoute],
     ['guestが/を開く -> ガード不要', listRoute, null, null],
     ['adminが/を開く -> ガード対象外', listRoute, asAdmin, null],
+    // 評価基準タブ（T-099）はログイン不要・全員閲覧可（screen-list.md §5.2の表に無い＝ガード対象外）
+    ['guestが/criteriaを開く -> ガード不要', criteriaRoute, null, null],
+    ['userが/criteriaを開く -> ガード不要', criteriaRoute, asUser, null],
+    ['adminが/criteriaを開く -> ガード不要', criteriaRoute, asAdmin, null],
   ];
 
   it.each(cases)('%s', (_name, route, user, expected) => {

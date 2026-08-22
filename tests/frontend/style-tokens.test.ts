@@ -195,6 +195,9 @@ describe('frontend/**/*.tsx に色・rgba直値が無い（design-tokens.md §6 
     '../../frontend/components/EmptyState.tsx',
     '../../frontend/components/Skeleton.tsx',
     '../../frontend/components/Dialog.tsx',
+    '../../frontend/pages/CriteriaPage.tsx',
+    '../../frontend/components/MetricCriteriaCard.tsx',
+    '../../frontend/components/ImplementationBadge.tsx',
   ];
 
   it.each(tsxFiles)('%s に #RRGGBB / rgba( の直値が無い', (relativePath) => {
