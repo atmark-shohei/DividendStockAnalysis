@@ -147,8 +147,16 @@ export interface PayoutRatioSideView {
 
 export interface ScoringResponse {
   readonly totalScore: number;
+  /**
+   * 満点。**常に100とは限らない**（T-101 指標カスタマイズ）。
+   * `GET /api/companies/:code` はログイン中ユーザーが指標を5〜10個に絞っていれば
+   * 「選択指標数 × 10」になる（ADR-0012 D-3）。ゲスト・未設定ユーザー・
+   * `POST /api/companies`（登録時プレビュー。ユーザー設定は反映しない。BE計画 §7-4）は
+   * 常に 100 のまま
+   */
   readonly maxTotalScore: number;
   readonly effectiveMetricCount: number;
+  /** 集計対象にした指標の数。`maxTotalScore` と同じ理由で常に10とは限らない */
   readonly totalMetricCount: number;
   readonly dividendSource: 'forecast' | 'actual' | null;
   /** ③ が採点に採用した出所。画面に「予想」「実績」を併記するため（設計書 §7） */

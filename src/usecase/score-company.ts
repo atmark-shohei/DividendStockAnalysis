@@ -35,7 +35,9 @@ import { calculatePayoutRatio, payoutRatioToMetricScore } from '../domain/scorin
 import { calculateRevenueCagr } from '../domain/scoring/revenue-cagr';
 import { calculateRoeAverage } from '../domain/scoring/roe-average';
 import { type ScoreCard, buildScoreCard } from '../domain/scoring/scoring-service';
+import { type MetricKey } from '../domain/shared/metric-key';
 import { type MetricScore } from '../domain/shared/metric-score';
+import { type ResolvedScoringBands } from './resolve-scoring-bands';
 
 /**
  * ①⑦ が比較する「5年前」の添字。`seriesOf` が年度に揃えた系列を返すので、
@@ -52,6 +54,18 @@ const SERIES_YEARS = 19;
 /** 系列から添字の値を取り出す。範囲外は `null`（欠損と同じ扱い） */
 function at(series: readonly (number | null)[], index: number): number | null {
   return series[index] ?? null;
+}
+
+/**
+ * 指標ごとの有効な区分表。`resolvedBands` 省略時は全指標 `undefined` を返し、
+ * 各 `calculate*` 関数の既定引数（`bands.ts` のデフォルト定数）に委ねる。
+ * 明示的に `undefined` を渡してもデフォルト引数は働く（JS の仕様どおり）。
+ */
+function bandsFor(
+  resolvedBands: ResolvedScoringBands | undefined,
+  key: MetricKey,
+): ResolvedScoringBands['bandsByMetric'][MetricKey] | undefined {
+  return resolvedBands?.bandsByMetric[key];
 }
 
 /**
@@ -88,8 +102,17 @@ export interface CompanyScoring {
  *
  * @param useActualForScoring ③ 予想配当性向で実績を強制採用するか（設計書 §5.1・§7）。
  *   既定 `false`（予想優先。予想が判定不能なら実績にフォールバック）
+ * @param resolvedBands 指標カスタマイズ（T-101）で解決した「選択指標・有効な区分表」。
+ *   **省略時は現行どおり**（全10指標選択・`bands.ts` のデフォルト区分表）。
+ *   `score_cards`／一覧・ポートフォリオの総合点は常にこの引数を省略して呼び出し続ける
+ *   （BE計画 §2.1・§7-5。この関数の呼び出し元は `read-companies.ts` の
+ *   `getCompanyScoring`（省略可能）と `analyze-company.ts`（常に省略）の2箇所のみ）
  */
-export function scoreCompany(company: Company, useActualForScoring = false): CompanyScoring {
+export function scoreCompany(
+  company: Company,
+  useActualForScoring = false,
+  resolvedBands?: ResolvedScoringBands,
+): CompanyScoring {
   // 年度に揃えた系列を作る。添字がそのまま「何年前か」になる（欠損年は null）
   // ①② の配当は `DividendRecord` から取る（ADR-0009）
   const dividendSeries = actualDividendSeries(company.dividends, SERIES_YEARS);
@@ -116,54 +139,85 @@ export function scoreCompany(company: Company, useActualForScoring = false): Com
   const actualYearsMatch =
     actual !== null && actualDividend !== null && actual.fiscalYear === actualDividend.fiscalYear;
 
-  const payoutRatioResult = calculatePayoutRatio({
-    forecast: {
-      dividendSen: forecastYearsMatch ? forecastDividend.amountSen : null,
-      epsSen: forecastYearsMatch ? forecast.epsSen : null,
+  const payoutRatioResult = calculatePayoutRatio(
+    {
+      forecast: {
+        dividendSen: forecastYearsMatch ? forecastDividend.amountSen : null,
+        epsSen: forecastYearsMatch ? forecast.epsSen : null,
+      },
+      actual: {
+        dividendSen: actualYearsMatch ? actualDividend.amountSen : null,
+        epsSen: actualYearsMatch ? actual.epsSen : null,
+      },
+      useActualForScoring,
     },
-    actual: {
-      dividendSen: actualYearsMatch ? actualDividend.amountSen : null,
-      epsSen: actualYearsMatch ? actual.epsSen : null,
+    bandsFor(resolvedBands, 'payoutRatio'),
+  );
+
+  const yieldResult = calculateDividendYield(
+    {
+      priceSen: company.priceSen,
+      dividend: selectedDividend,
     },
-    useActualForScoring,
-  });
+    bandsFor(resolvedBands, 'dividendYield'),
+  );
 
-  const yieldResult = calculateDividendYield({
-    priceSen: company.priceSen,
-    dividend: selectedDividend,
-  });
-
-  const card = buildScoreCard({
-    // ① 昨年 = 直近の実績（添字0）、5年前 = 添字5
-    dividendGrowthRate: calculateDividendGrowthRate({
-      dividendLastYear: at(dividendSeries, 0),
-      dividendFiveYearsAgo: at(dividendSeries, FIVE_YEARS_AGO_INDEX),
-    }),
-    consecutiveYears: calculateConsecutiveYears({ dividendHistory: dividendSeries }),
-    payoutRatio: payoutRatioToMetricScore(payoutRatioResult),
-    epsCagr: calculateEpsCagr({
-      epsHistory: epsSeries,
-      historyRestated: company.epsHistoryRestated,
-    }),
-    roeAverage: calculateRoeAverage({ roeHistory: roeSeries }),
-    dividendSustainability: calculateDividendSustainability({
-      currentAssets: company.balanceSheet.currentAssetsSen,
-      investmentSecurities: company.balanceSheet.investmentSecuritiesSen,
-      totalLiabilities: company.balanceSheet.totalLiabilitiesSen,
-      previousDividendTotal: company.balanceSheet.previousDividendTotalSen,
-    }),
-    revenueCagr: calculateRevenueCagr({
-      revenueCurrent: at(revenueSeries, 0),
-      revenueFiveYearsAgo: at(revenueSeries, FIVE_YEARS_AGO_INDEX),
-      historyRestated: company.revenueHistoryRestated,
-    }),
-    operatingMargin: calculateOperatingMargin({ operatingMarginHistory: marginSeries }),
-    mixCoefficient: calculateMixCoefficient({
-      per: company.multiples.per,
-      pbr: company.multiples.pbr,
-    }),
-    dividendYield: dividendYieldToMetricScore(yieldResult),
-  });
+  const card = buildScoreCard(
+    {
+      // ① 昨年 = 直近の実績（添字0）、5年前 = 添字5
+      dividendGrowthRate: calculateDividendGrowthRate(
+        {
+          dividendLastYear: at(dividendSeries, 0),
+          dividendFiveYearsAgo: at(dividendSeries, FIVE_YEARS_AGO_INDEX),
+        },
+        bandsFor(resolvedBands, 'dividendGrowthRate'),
+      ),
+      consecutiveYears: calculateConsecutiveYears(
+        { dividendHistory: dividendSeries },
+        bandsFor(resolvedBands, 'consecutiveYears'),
+      ),
+      payoutRatio: payoutRatioToMetricScore(payoutRatioResult),
+      epsCagr: calculateEpsCagr(
+        {
+          epsHistory: epsSeries,
+          historyRestated: company.epsHistoryRestated,
+        },
+        bandsFor(resolvedBands, 'epsCagr'),
+      ),
+      roeAverage: calculateRoeAverage(
+        { roeHistory: roeSeries },
+        bandsFor(resolvedBands, 'roeAverage'),
+      ),
+      dividendSustainability: calculateDividendSustainability(
+        {
+          currentAssets: company.balanceSheet.currentAssetsSen,
+          investmentSecurities: company.balanceSheet.investmentSecuritiesSen,
+          totalLiabilities: company.balanceSheet.totalLiabilitiesSen,
+          previousDividendTotal: company.balanceSheet.previousDividendTotalSen,
+        },
+        bandsFor(resolvedBands, 'dividendSustainability'),
+      ),
+      revenueCagr: calculateRevenueCagr(
+        {
+          revenueCurrent: at(revenueSeries, 0),
+          revenueFiveYearsAgo: at(revenueSeries, FIVE_YEARS_AGO_INDEX),
+          historyRestated: company.revenueHistoryRestated,
+        },
+        bandsFor(resolvedBands, 'revenueCagr'),
+      ),
+      operatingMargin: calculateOperatingMargin(
+        { operatingMarginHistory: marginSeries },
+        bandsFor(resolvedBands, 'operatingMargin'),
+      ),
+      // ⑨ MIX係数はユーザー設定不可（ADR-0012 D-2）。常にデフォルト定数で判定する
+      mixCoefficient: calculateMixCoefficient({
+        per: company.multiples.per,
+        pbr: company.multiples.pbr,
+      }),
+      dividendYield: dividendYieldToMetricScore(yieldResult),
+    },
+    resolvedBands?.selectedKeys,
+  );
 
   return {
     card,

@@ -23,6 +23,7 @@ import {
 import { type EdinetHistorySource } from '../domain/company/edinet-history-source';
 import { type FinancialSource } from '../domain/company/financial-source';
 import { type MarketDataSource } from '../domain/company/market-data-source';
+import { type UserIndicatorSettingsRepository } from '../domain/scoring/user-indicator-settings-repository';
 import { analyzeCompany } from '../usecase/analyze-company';
 import { getScoringBands } from '../usecase/get-scoring-bands';
 import { importEdinetHistory } from '../usecase/import-edinet-history';
@@ -36,6 +37,7 @@ import {
 } from '../usecase/read-companies';
 import { refreshEdinetDocumentIndex } from '../usecase/refresh-edinet-document-index';
 import { registerAuthRoutes } from './auth-routes';
+import { registerIndicatorSettingsRoutes } from './indicator-settings-routes';
 import { companyListQuery } from './dto/company-list-query';
 import { toDividendHistoryResponse } from './dto/company-dividends';
 import { toScoringBandsResponse } from './dto/scoring-bands';
@@ -68,10 +70,16 @@ import {
 } from './dto/market-data-import';
 import { parsePriceInput } from './dto/price-input';
 import { requireRole } from './require-role';
+import { resolveOptionalUser } from './optional-user';
 
 export interface AppDependencies {
   /** リポジトリは**インターフェースで**受け取る。D1 を直接は知らない */
   readonly repository: CompanyRepository;
+  /**
+   * 指標カスタマイズ設定（T-101）。**インターフェースで**受け取る
+   * （`src/infra/d1/user-indicator-settings-repository.ts`）
+   */
+  readonly userIndicatorSettingsRepository: UserIndicatorSettingsRepository;
   /** ユーザー認証。**インターフェースで**受け取る（`src/infra/d1/user-repository.ts`） */
   readonly userRepository: UserRepository;
   /** セッション。**インターフェースで**受け取る */
@@ -156,6 +164,31 @@ export function createApp(dependencies: AppDependencies): Hono {
       now: dependencies.now,
     },
     ['admin'],
+  );
+
+  /**
+   * 指標カスタマイズ設定（T-101）の保護。**user・admin どちらでもよい**
+   * （`indicator-custom-page.md` §1「ログイン必須（user・admin ロール）」）。
+   * `adminOnly` とは許可ロールの集合が異なるため、別のミドルウェアとして分ける。
+   */
+  const userOrAdmin = requireRole(
+    {
+      userRepository: dependencies.userRepository,
+      sessionRepository: dependencies.sessionRepository,
+      now: dependencies.now,
+    },
+    ['user', 'admin'],
+  );
+
+  registerIndicatorSettingsRoutes(
+    app,
+    {
+      userRepository: dependencies.userRepository,
+      sessionRepository: dependencies.sessionRepository,
+      userIndicatorSettingsRepository: dependencies.userIndicatorSettingsRepository,
+      now: dependencies.now,
+    },
+    userOrAdmin,
   );
 
   app.get('/api/health', (context) => context.json({ status: 'ok' }));
@@ -396,6 +429,10 @@ export function createApp(dependencies: AppDependencies): Hono {
    * `useActualForScoring` は③ 予想配当性向で実績を強制採用するか（設計書 §5.1・§7）。
    * 未指定なら既定 `false`（予想優先）。`fiscalYearEndMonth` と同じ
    * 「クエリパラメータは zod で検証する」方式（BE 計画 §0.1・§4.2）。
+   *
+   * **無認証でも閲覧できる既存仕様は変えない**（BE計画 §5）。Cookie にセッションが
+   * あればそのユーザーの指標カスタマイズ設定を反映し、無ければ（ゲスト）全10指標・
+   * デフォルト区分表で採点する。
    */
   app.get('/api/companies/:code', async (context) => {
     const code = context.req.param('code');
@@ -413,7 +450,22 @@ export function createApp(dependencies: AppDependencies): Hono {
       useActualForScoring = parsed.data;
     }
 
-    const scoring = await getCompanyScoring(dependencies.repository, code, useActualForScoring);
+    const user = await resolveOptionalUser(
+      {
+        userRepository: dependencies.userRepository,
+        sessionRepository: dependencies.sessionRepository,
+        now: dependencies.now,
+      },
+      context,
+    );
+
+    const scoring = await getCompanyScoring(
+      dependencies.repository,
+      dependencies.userIndicatorSettingsRepository,
+      code,
+      user?.id ?? null,
+      useActualForScoring,
+    );
     if (scoring === null) {
       return context.json({ error: '指定された銘柄は保存されていません' }, 404);
     }

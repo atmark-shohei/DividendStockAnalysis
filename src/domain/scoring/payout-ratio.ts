@@ -17,6 +17,7 @@ import { type Score, scoreFromValidatedBand } from '../shared/score';
 import { isSen } from '../shared/sen';
 import { PAYOUT_RATIO_BANDS } from './bands';
 import { scoreByBands } from './metric-lookup';
+import { type ScoreBand } from './score-band';
 
 /** 予想・実績どちらの組にも使う片側の入力 */
 export interface PayoutRatioSideInput {
@@ -69,8 +70,13 @@ export type PayoutRatioResult =
  *   高配当銘柄を探す目的に反する
  *
  * EPS が 0 はゼロ除算で**判定不能**。0点と混同しないこと。
+ *
+ * @param bands 判定に使う区分表。省略時は `bands.ts` のデフォルト定数（T-101で追加）
  */
-function calculateSidePayoutRatio(input: PayoutRatioSideInput): MetricScore {
+function calculateSidePayoutRatio(
+  input: PayoutRatioSideInput,
+  bands: readonly ScoreBand[] = PAYOUT_RATIO_BANDS,
+): MetricScore {
   const { dividendSen, epsSen } = input;
 
   if (dividendSen === null || epsSen === null) return unavailable('input-missing');
@@ -90,16 +96,22 @@ function calculateSidePayoutRatio(input: PayoutRatioSideInput): MetricScore {
   // 「性向が 0%」ではなく「配当額が 0」で分岐する
   if (dividendSen === 0) return scored(scoreFromValidatedBand(0), 0);
 
-  return scoreByBands(PAYOUT_RATIO_BANDS, ratioPercent);
+  return scoreByBands(bands, ratioPercent);
 }
 
 /**
  * 予想・実績それぞれの配当性向を判定し、`useActualForScoring` に従って
  * 採点へ採用する側を選ぶ（設計書 §5.1 のソース選択規則）。
+ *
+ * @param bands 判定に使う区分表。省略時は `bands.ts` のデフォルト定数（T-101で追加）。
+ *   予想・実績の両側に**同じ区分表**を渡す（異なる区分表を使う理由が無いため）
  */
-export function calculatePayoutRatio(input: PayoutRatioInput): PayoutRatioResult {
-  const forecastResult = calculateSidePayoutRatio(input.forecast);
-  const actualResult = calculateSidePayoutRatio(input.actual);
+export function calculatePayoutRatio(
+  input: PayoutRatioInput,
+  bands: readonly ScoreBand[] = PAYOUT_RATIO_BANDS,
+): PayoutRatioResult {
+  const forecastResult = calculateSidePayoutRatio(input.forecast, bands);
+  const actualResult = calculateSidePayoutRatio(input.actual, bands);
 
   if (input.useActualForScoring) {
     // 決定1: 実績を明示指定したら強制採用する。実績が判定不能でも

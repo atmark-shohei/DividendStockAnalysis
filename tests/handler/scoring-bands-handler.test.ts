@@ -91,6 +91,7 @@ describe('GET /api/scoring/bands', () => {
         label: string;
         unit: string;
         bands: { minInclusive: number | null; maxExclusive: number | null; points: number }[];
+        defaultBasisValue: number | null;
       }[];
     };
     expect(body.metrics).toHaveLength(10);
@@ -99,6 +100,25 @@ describe('GET /api/scoring/bands', () => {
     expect(body.metrics[0]?.number).toBe(1);
     expect(body.metrics[0]?.label).toBe('増配率（5年CAGR）');
     expect(body.metrics[0]?.unit).toBe('%');
+    expect(body.metrics[0]?.defaultBasisValue).toBe(30);
+  });
+
+  it('⑨MIX係数は defaultBasisValue が null（設定不可）', async () => {
+    const response = await app().request('/api/scoring/bands');
+    const body = (await response.json()) as {
+      metrics: { key: string; defaultBasisValue: number | null }[];
+    };
+    const mixCoefficient = body.metrics.find((metric) => metric.key === 'mixCoefficient');
+    expect(mixCoefficient?.defaultBasisValue).toBeNull();
+  });
+
+  it('⑩配当利回りは defaultBasisValue が `%` 小数（5.5）で返る', async () => {
+    const response = await app().request('/api/scoring/bands');
+    const body = (await response.json()) as {
+      metrics: { key: string; defaultBasisValue: number | null }[];
+    };
+    const dividendYield = body.metrics.find((metric) => metric.key === 'dividendYield');
+    expect(dividendYield?.defaultBasisValue).toBe(5.5);
   });
 
   it('③予想配当性向は10段のまま返る（段数を揃えない）', async () => {

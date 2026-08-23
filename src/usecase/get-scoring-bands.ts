@@ -7,8 +7,14 @@
  *
  * `bands.ts` の定数を1つ変えれば、この関数の戻り値も追従して変わる（値を書き写さない。
  * `docs/02_design/ui/pages/criteria-tab.md` §4 が求める「二重管理でない」ことの担保）。
+ *
+ * **`defaultBasisValue`（T-101で追加）**: 指標カスタマイズ画面（`indicator-custom-page.md`）の
+ * 「初期設定に戻す」が表示するデフォルト満点境界。`band-scaling.ts` の
+ * `deriveDefaultBaseline()` を1回だけ呼び、⑩配当利回りだけ `%` 小数へ変換する
+ * （API契約・DB保存の単位を他9指標と揃える。BE計画 §4）。⑨MIX係数は設定不可のため常に `null`。
  */
 
+import { deriveDefaultBaseline } from '../domain/scoring/band-scaling';
 import {
   CONSECUTIVE_YEARS_BANDS,
   DIVIDEND_GROWTH_RATE_BANDS,
@@ -31,8 +37,15 @@ import {
   type MetricUnit,
 } from '../domain/shared/metric-key';
 
-/** `MetricKey` → 区分表定数の対応表。`bands.ts` 自体には `MetricKey` との対応が無いためここで1回だけ定義する */
-const BANDS_BY_METRIC: Readonly<Record<MetricKey, readonly ScoreBand[]>> = {
+/**
+ * `MetricKey` → 区分表定数の対応表。`bands.ts` 自体には `MetricKey` との対応が無いため
+ * ここで1回だけ定義する。
+ *
+ * **export する**（T-101）。`resolve-scoring-bands.ts` / `get-indicator-settings.ts` /
+ * `save-indicator-settings.ts` がこの対応表を再利用し、値を書き写さない
+ * （`bands.ts` 冒頭のコメントと同じ方針）。
+ */
+export const BANDS_BY_METRIC: Readonly<Record<MetricKey, readonly ScoreBand[]>> = {
   dividendGrowthRate: DIVIDEND_GROWTH_RATE_BANDS,
   consecutiveYears: CONSECUTIVE_YEARS_BANDS,
   payoutRatio: PAYOUT_RATIO_BANDS,
@@ -53,6 +66,28 @@ export interface MetricBands {
   readonly label: string;
   readonly unit: MetricUnit;
   readonly bands: readonly ScoreBand[];
+  /**
+   * 「満点となる基準値」のデフォルト値（T-101）。⑨MIX係数は設定不可のため常に `null`。
+   * それ以外は `deriveDefaultBaseline()` の防御的分岐（理論上どの既存指標にも発生しない）
+   * に限り `null` になる。
+   */
+  readonly defaultBasisValue: number | null;
+}
+
+/** ⑩配当利回りの基準値単位変換。1/100%整数 → `%` 小数（`resolve-scoring-bands.ts` と同じ変換） */
+function fromDividendYieldBaselineHundredths(hundredths: number): number {
+  return hundredths / 100;
+}
+
+/** 1指標分のデフォルト基準値。⑨は常に `null`（BE計画 §4・§7-1） */
+function defaultBasisValueOf(key: MetricKey): number | null {
+  if (key === 'mixCoefficient') return null;
+
+  const baseline = deriveDefaultBaseline(BANDS_BY_METRIC[key]);
+  if (!baseline.ok) return null;
+  return key === 'dividendYield'
+    ? fromDividendYieldBaselineHundredths(baseline.value)
+    : baseline.value;
 }
 
 /**
@@ -68,5 +103,6 @@ export function getScoringBands(): readonly MetricBands[] {
     label: METRIC_LABEL[key],
     unit: METRIC_UNIT[key],
     bands: BANDS_BY_METRIC[key],
+    defaultBasisValue: defaultBasisValueOf(key),
   }));
 }

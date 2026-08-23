@@ -65,6 +65,33 @@ describe('getScoringBands', () => {
     },
   );
 
+  describe('defaultBasisValue（T-101。指標カスタマイズ「初期設定に戻す」用）', () => {
+    it('⑨MIX係数は常に null（設定不可）', () => {
+      const mixCoefficient = getScoringBands().find((metric) => metric.key === 'mixCoefficient');
+      expect(mixCoefficient?.defaultBasisValue).toBeNull();
+    });
+
+    it('昇順9指標はデフォルト区分表の最上位区分の下限がそのまま入る', () => {
+      const dividendGrowthRate = getScoringBands().find(
+        (metric) => metric.key === 'dividendGrowthRate',
+      );
+      expect(dividendGrowthRate?.defaultBasisValue).toBe(30);
+
+      const roeAverage = getScoringBands().find((metric) => metric.key === 'roeAverage');
+      expect(roeAverage?.defaultBasisValue).toBe(15);
+    });
+
+    it('③予想配当性向（降順）は最上位区分の上限が入る', () => {
+      const payoutRatio = getScoringBands().find((metric) => metric.key === 'payoutRatio');
+      expect(payoutRatio?.defaultBasisValue).toBe(25);
+    });
+
+    it('⑩配当利回りは 1/100%整数（550）を `%` 小数（5.5）に変換して返す。DBと同じ単位系にするため', () => {
+      const dividendYield = getScoringBands().find((metric) => metric.key === 'dividendYield');
+      expect(dividendYield?.defaultBasisValue).toBe(5.5);
+    });
+  });
+
   describe('境界値（bands.ts の特殊値がそのまま渡ること）', () => {
     it('③予想配当性向は10段。1点を返す経路が無い（bands.ts の意図的な仕様）', () => {
       const payoutRatio = getScoringBands().find((metric) => metric.key === 'payoutRatio');

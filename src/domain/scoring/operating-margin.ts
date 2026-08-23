@@ -12,6 +12,7 @@
 import { type MetricScore, unavailable } from '../shared/metric-score';
 import { OPERATING_MARGIN_BANDS } from './bands';
 import { scoreByBands, zeroOrBelowScoresZero } from './metric-lookup';
+import { type ScoreBand } from './score-band';
 import { mean, takeCompleteYears } from './series';
 
 export const OPERATING_MARGIN_YEARS = 5;
@@ -27,13 +28,18 @@ export interface OperatingMarginInput {
  * 平均が **0% 以下（営業赤字）なら 0点**（設計書 §5）。区分表の最下段は
  * `[0%, 2%) → 1点` なので、0 ちょうどを表に渡すと 1点になってしまう。
  * 表を引く前に `zeroOrBelowScoresZero` で落とす。
+ *
+ * @param bands 判定に使う区分表。省略時は `bands.ts` のデフォルト定数（T-101で追加）
  */
-export function calculateOperatingMargin(input: OperatingMarginInput): MetricScore {
+export function calculateOperatingMargin(
+  input: OperatingMarginInput,
+  bands: readonly ScoreBand[] = OPERATING_MARGIN_BANDS,
+): MetricScore {
   const window = takeCompleteYears(input.operatingMarginHistory, OPERATING_MARGIN_YEARS);
   if (window === null) return unavailable('insufficient-history');
 
   const average = mean(window);
   if (average === null) return unavailable('input-invalid');
 
-  return zeroOrBelowScoresZero(average) ?? scoreByBands(OPERATING_MARGIN_BANDS, average);
+  return zeroOrBelowScoresZero(average) ?? scoreByBands(bands, average);
 }

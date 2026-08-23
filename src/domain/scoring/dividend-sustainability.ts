@@ -10,6 +10,7 @@ import { scoreFromValidatedBand } from '../shared/score';
 import { isSen } from '../shared/sen';
 import { DIVIDEND_SUSTAINABILITY_BANDS } from './bands';
 import { scoreByBands } from './metric-lookup';
+import { type ScoreBand } from './score-band';
 
 /**
  * 投資有価証券の算入率。売却時の税を考慮した**独自定義**（設計書 §3）。
@@ -48,8 +49,13 @@ export function netCashSen(
  *
  * ネットキャッシュちょうど 0 は **1点**（負ではないため）。区分表の最下段
  * `[0年, 2年) → 1点` が自然にこれを拾う。
+ *
+ * @param bands 判定に使う区分表。省略時は `bands.ts` のデフォルト定数（T-101で追加）
  */
-export function calculateDividendSustainability(input: DividendSustainabilityInput): MetricScore {
+export function calculateDividendSustainability(
+  input: DividendSustainabilityInput,
+  bands: readonly ScoreBand[] = DIVIDEND_SUSTAINABILITY_BANDS,
+): MetricScore {
   const { currentAssets, investmentSecurities, totalLiabilities, previousDividendTotal } = input;
 
   if (
@@ -81,5 +87,5 @@ export function calculateDividendSustainability(input: DividendSustainabilityInp
   // 債務超過。区分表の外なので、表を引く前に落とす
   if (netCash < 0) return scored(scoreFromValidatedBand(0), years);
 
-  return scoreByBands(DIVIDEND_SUSTAINABILITY_BANDS, years);
+  return scoreByBands(bands, years);
 }

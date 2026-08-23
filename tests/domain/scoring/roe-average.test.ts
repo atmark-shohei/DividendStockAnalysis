@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { calculateRoeAverage } from '@/domain/scoring/roe-average';
+import { type ScoreBand } from '@/domain/scoring/score-band';
 
 /**
  * 指標⑤ ROE の5年平均。
@@ -88,5 +89,18 @@ describe('⑤ ROE 5年平均 — 6.4 データ欠損', () => {
     // NaN は < も >= も false なので、素朴に書くと最高点に落ちる
     const result = calculateRoeAverage({ roeHistory: [value, 15, 15, 15, 15] });
     expect(result.score).toBeNull();
+  });
+});
+
+describe('⑤ ROE 5年平均 — カスタム bands（T-101 指標カスタマイズ）', () => {
+  const ALWAYS_SEVEN: readonly ScoreBand[] = [{ minInclusive: null, maxExclusive: null, points: 7 }];
+
+  it('省略時はデフォルト定数で判定する（15%ちょうどは10点）', () => {
+    expect(scoreOf(flat(15))).toBe(10);
+  });
+
+  it('カスタム bands を渡すと、デフォルトなら10点になる入力でも渡した bands の点数になる', () => {
+    const result = calculateRoeAverage({ roeHistory: flat(15) }, ALWAYS_SEVEN);
+    expect(result.score).toBe(7);
   });
 });

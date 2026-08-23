@@ -10,6 +10,7 @@ import { WebCryptoPasswordHasher } from '@/infra/auth/webcrypto-password-hasher'
 import { WebCryptoSessionTokenGenerator } from '@/infra/auth/webcrypto-session-token-generator';
 import { D1CompanyRepository } from '@/infra/d1/company-repository';
 import { D1SessionRepository } from '@/infra/d1/session-repository';
+import { D1UserIndicatorSettingsRepository } from '@/infra/d1/user-indicator-settings-repository';
 import { D1UserRepository } from '@/infra/d1/user-repository';
 
 /**
@@ -55,6 +56,7 @@ const unusedEdinetDocumentIndexLookup: EdinetDocumentIndexLookup = {
 function app() {
   return createApp({
     repository: new D1CompanyRepository(env.DB),
+    userIndicatorSettingsRepository: new D1UserIndicatorSettingsRepository(env.DB),
     financialSource: unusedFinancialSource,
     marketDataSource: unusedMarketDataSource,
     edinetHistorySource: unusedEdinetHistorySource,

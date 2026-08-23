@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest';
 import type { Company, FinancialRecord } from '@/domain/company/company';
 import { seriesOf } from '@/domain/company/company';
 import type { DividendRecord } from '@/domain/company/dividend-record';
+import { type ResolvedScoringBands } from '@/usecase/resolve-scoring-bands';
 import { scoreCompany } from '@/usecase/score-company';
+import { BANDS_BY_METRIC } from '@/usecase/get-scoring-bands';
+import { type ScoreBand } from '@/domain/scoring/score-band';
+import { METRIC_KEYS, type MetricKey } from '@/domain/shared/metric-key';
 
 /**
  * ユースケース層。**計算そのものは domain 側のテストで尽くしてある。**
@@ -459,5 +463,71 @@ describe('EDINET遡及修正フラグの配線（company.epsHistoryRestated / re
     const scoring = scoreCompany(target);
     expect(scoring.card.metrics.epsCagr.unavailableReason).toBeNull();
     expect(scoring.card.metrics.revenueCagr.unavailableReason).toBeNull();
+  });
+});
+
+/**
+ * `resolvedBands`（T-101 指標カスタマイズ）の配線確認。
+ * 各 `calculate*` への `bands` の伝播・`buildScoreCard` への `selectedKeys` の伝播は
+ * domain 側のテストで尽くしてある。ここで見たいのは「usecase層がこの引数を
+ * 素通りさせているか」だけ。
+ */
+describe('resolvedBands（T-101 指標カスタマイズ）', () => {
+  const doubling = (years: readonly number[]) =>
+    company(
+      years.map((year) => record(year)),
+      years.map((year) => actualDividend(year, 6_400 / 2 ** (2025 - year))),
+    );
+
+  /** 6年ぶん連続、配当は毎年 2倍に増える会社。① は既定 bands なら 100%CAGR → 10点 */
+  const contiguous = doubling([2025, 2024, 2023, 2022, 2021, 2020]);
+
+  const ALWAYS_SEVEN: readonly ScoreBand[] = [{ minInclusive: null, maxExclusive: null, points: 7 }];
+
+  function resolvedBandsFor(
+    selectedKeys: readonly MetricKey[],
+    overrides: Partial<Record<MetricKey, readonly ScoreBand[]>> = {},
+  ): ResolvedScoringBands {
+    const bandsByMetric = {} as Record<MetricKey, readonly ScoreBand[]>;
+    for (const key of METRIC_KEYS) bandsByMetric[key] = overrides[key] ?? BANDS_BY_METRIC[key];
+    return { selectedKeys, bandsByMetric };
+  }
+
+  it('省略時は現行どおり（全10指標・デフォルト bands）', () => {
+    const scoring = scoreCompany(contiguous);
+    expect(scoring.card.maxTotalScore).toBe(100);
+    expect(scoring.card.totalMetricCount).toBe(10);
+    expect(scoring.card.metrics.dividendGrowthRate.score).toBe(10);
+  });
+
+  it('カスタム bands を渡すと① の判定が変わる', () => {
+    const resolvedBands = resolvedBandsFor(METRIC_KEYS, { dividendGrowthRate: ALWAYS_SEVEN });
+    const scoring = scoreCompany(contiguous, false, resolvedBands);
+    expect(scoring.card.metrics.dividendGrowthRate.score).toBe(7);
+  });
+
+  it('選択指標を5個に絞ると分母が50になり、選択外の指標は総合点に関与しない', () => {
+    const selected: readonly MetricKey[] = [
+      'dividendGrowthRate',
+      'consecutiveYears',
+      'roeAverage',
+      'operatingMargin',
+      'dividendYield',
+    ];
+    const resolvedBands = resolvedBandsFor(selected);
+    const scoring = scoreCompany(contiguous, false, resolvedBands);
+    expect(scoring.card.maxTotalScore).toBe(50);
+    expect(scoring.card.totalMetricCount).toBe(5);
+    // ①（選択に含む）は判定結果を持つが、⑦（選択に含まない）は合算に関与しない
+    expect(scoring.card.metrics.dividendGrowthRate.score).toBe(10);
+  });
+
+  it('⑨MIX係数はカスタム bands を渡してもデフォルト定数で判定する（設定不可。ADR-0012 D-2）', () => {
+    const resolvedBands = resolvedBandsFor(METRIC_KEYS, { mixCoefficient: ALWAYS_SEVEN });
+    const withoutOverride = scoreCompany(contiguous);
+    const withOverrideAttempt = scoreCompany(contiguous, false, resolvedBands);
+    expect(withOverrideAttempt.card.metrics.mixCoefficient.score).toBe(
+      withoutOverride.card.metrics.mixCoefficient.score,
+    );
   });
 });

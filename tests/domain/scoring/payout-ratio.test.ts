@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { calculatePayoutRatio, payoutRatioToMetricScore } from '@/domain/scoring/payout-ratio';
+import { type ScoreBand } from '@/domain/scoring/score-band';
 import { sen } from '../../helpers/sen';
 
 /**
@@ -316,4 +317,26 @@ describe('③ payoutRatioToMetricScore — 採点集計用の変換', () => {
       expect(metric.unavailableReason).toBe('division-by-zero');
     },
   );
+});
+
+describe('③ 予想配当性向 — カスタム bands（T-101 指標カスタマイズ）', () => {
+  const ALWAYS_SEVEN: readonly ScoreBand[] = [{ minInclusive: null, maxExclusive: null, points: 7 }];
+
+  it('省略時はデフォルト定数で判定する（25%ちょうどは9点）', () => {
+    expect(scoreAt(2_500)).toBe(9);
+  });
+
+  it('カスタム bands は予想・実績の両側に同じ表を渡す（デフォルトなら9点になる入力が7点になる）', () => {
+    const result = calculatePayoutRatio(
+      {
+        forecast: { dividendSen: sen(2_500), epsSen: sen(EPS_SEN) },
+        actual: { dividendSen: sen(2_500), epsSen: sen(EPS_SEN) },
+        useActualForScoring: false,
+      },
+      ALWAYS_SEVEN,
+    );
+    expect(result.forecast.score).toBe(7);
+    expect(result.actual.score).toBe(7);
+    expect(result.score).toBe(7);
+  });
 });

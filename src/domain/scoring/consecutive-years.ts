@@ -12,6 +12,7 @@ import { type DividendRecord, actualDividendSeriesWithYear } from '../company/di
 import { type MetricScore, unavailable } from '../shared/metric-score';
 import { CONSECUTIVE_YEARS_BANDS } from './bands';
 import { scoreByBands } from './metric-lookup';
+import { type ScoreBand } from './score-band';
 
 /**
  * 遡る年数。設計書 §1「直近から過去18年前まで遡り」。
@@ -37,8 +38,13 @@ export interface ConsecutiveYearsInput {
  * 誤判定して年数が不当に短くなる。ただし「連続性の判定範囲内」に限る（§6.4）ので、
  * **減配で打ち切られた後ろにある `null` は結果に影響しない**。
  * 走査は打ち切り時点で止まるため、この区別は自然に満たされる。
+ *
+ * @param bands 判定に使う区分表。省略時は `bands.ts` のデフォルト定数（T-101で追加）
  */
-export function calculateConsecutiveYears(input: ConsecutiveYearsInput): MetricScore {
+export function calculateConsecutiveYears(
+  input: ConsecutiveYearsInput,
+  bands: readonly ScoreBand[] = CONSECUTIVE_YEARS_BANDS,
+): MetricScore {
   // 「18年前まで遡る」= 当年を含めて19年分の値を比較対象にする
   const history = input.dividendHistory.slice(0, CONSECUTIVE_LOOKBACK_YEARS + 1);
   if (history.length === 0) return unavailable('input-missing');
@@ -58,7 +64,7 @@ export function calculateConsecutiveYears(input: ConsecutiveYearsInput): MetricS
     years++;
   }
 
-  return scoreByBands(CONSECUTIVE_YEARS_BANDS, years);
+  return scoreByBands(bands, years);
 }
 
 /** 年次リスト1行の状態。`null` は前年比較ができない（先頭行、または前年・当年のどちらかが欠損） */

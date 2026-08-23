@@ -12,6 +12,7 @@ import { D1CompanyRepository } from './infra/d1/company-repository';
 import { D1EdinetDocumentIndexRepository } from './infra/d1/edinet-document-index-repository';
 import { D1EdinetDocumentSummaryCacheRepository } from './infra/d1/edinet-document-summary-cache-repository';
 import { D1SessionRepository } from './infra/d1/session-repository';
+import { D1UserIndicatorSettingsRepository } from './infra/d1/user-indicator-settings-repository';
 import { D1UserRepository } from './infra/d1/user-repository';
 import { EdinetClient } from './infra/edinet/edinet-client';
 import { IrBankFinancialSource } from './infra/irbank/fy-data-client';
@@ -75,6 +76,7 @@ export default {
     const signup = signupConfigOf(env);
     const app = createApp({
       repository: new D1CompanyRepository(env.DB),
+      userIndicatorSettingsRepository: new D1UserIndicatorSettingsRepository(env.DB),
       financialSource: new IrBankFinancialSource(),
       marketDataSource: new YahooChartMarketDataSource(),
       edinetHistorySource: new EdinetClient({

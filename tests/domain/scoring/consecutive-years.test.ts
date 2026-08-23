@@ -6,6 +6,7 @@ import {
   calculateConsecutiveYears,
   describeConsecutiveYearRows,
 } from '@/domain/scoring/consecutive-years';
+import { type ScoreBand } from '@/domain/scoring/score-band';
 import { senOrNull } from '../../helpers/sen';
 
 /**
@@ -65,6 +66,22 @@ describe('② 連続非減配年数 — 数え方', () => {
     // 19年分すべて非減配なら 18年で頭打ち
     const long = Array.from({ length: 40 }, (_, i) => 1_000 - i);
     expect(scoreOf(long).value).toBe(CONSECUTIVE_LOOKBACK_YEARS);
+  });
+});
+
+describe('② 連続非減配年数 — カスタム bands（T-101 指標カスタマイズ）', () => {
+  const ALWAYS_SEVEN: readonly ScoreBand[] = [{ minInclusive: null, maxExclusive: null, points: 7 }];
+
+  it('省略時はデフォルト定数で判定する（17年は10点）', () => {
+    expect(scoreOf(streak(17)).score).toBe(10);
+  });
+
+  it('カスタム bands を渡すと、デフォルトなら10点になる入力でも渡した bands の点数になる', () => {
+    const result = calculateConsecutiveYears(
+      { dividendHistory: streak(17).map(senOrNull) },
+      ALWAYS_SEVEN,
+    );
+    expect(result.score).toBe(7);
   });
 });
 

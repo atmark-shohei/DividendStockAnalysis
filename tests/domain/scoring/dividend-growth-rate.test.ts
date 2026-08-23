@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { type ScoreBand } from '@/domain/scoring/score-band';
 import { calculateDividendGrowthRate } from '@/domain/scoring/dividend-growth-rate';
 import { CAGR_BASE_SEN, atLeastGrowth, justUnderGrowth } from '../../helpers/cagr';
 import { sen } from '../../helpers/sen';
@@ -105,6 +106,23 @@ describe('① 増配率 — 6.3 無配・0', () => {
     });
     expect(zeroBase.score).toBeNull();
     expect(zeroNow.score).toBe(0);
+  });
+});
+
+describe('① 増配率 — カスタム bands（T-101 指標カスタマイズ）', () => {
+  /** 下限・上限とも null（=常に該当）の単一区分。「bands を渡すと判定が切り替わる」ことだけを見る */
+  const ALWAYS_SEVEN: readonly ScoreBand[] = [{ minInclusive: null, maxExclusive: null, points: 7 }];
+
+  it('省略時はデフォルト定数で判定する（20%ちょうどは9点）', () => {
+    expect(scoreAt(atLeastGrowth(20))).toBe(9);
+  });
+
+  it('カスタム bands を渡すと、デフォルトなら9点になる入力でも渡した bands の点数になる', () => {
+    const result = calculateDividendGrowthRate(
+      { dividendLastYear: sen(atLeastGrowth(20)), dividendFiveYearsAgo: sen(CAGR_BASE_SEN) },
+      ALWAYS_SEVEN,
+    );
+    expect(result.score).toBe(7);
   });
 });
 

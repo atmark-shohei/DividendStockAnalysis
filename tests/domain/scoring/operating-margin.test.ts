@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { calculateOperatingMargin } from '@/domain/scoring/operating-margin';
+import { type ScoreBand } from '@/domain/scoring/score-band';
 
 /**
  * 指標⑧ 営業利益率の5年平均。
@@ -72,5 +73,18 @@ describe('⑧ 営業利益率 5年平均 — 6.4 データ欠損', () => {
     // 🟡 §7 で保留中。§0.5 により総合点では 0点として合算され、
     // 金融株は自動的に 10点分不利になる
     expect(scoreOf([])).toBeNull();
+  });
+});
+
+describe('⑧ 営業利益率 5年平均 — カスタム bands（T-101 指標カスタマイズ）', () => {
+  const ALWAYS_SEVEN: readonly ScoreBand[] = [{ minInclusive: null, maxExclusive: null, points: 7 }];
+
+  it('省略時はデフォルト定数で判定する（20%ちょうどは10点）', () => {
+    expect(scoreOf(flat(20))).toBe(10);
+  });
+
+  it('カスタム bands を渡すと、デフォルトなら10点になる入力でも渡した bands の点数になる', () => {
+    const result = calculateOperatingMargin({ operatingMarginHistory: flat(20) }, ALWAYS_SEVEN);
+    expect(result.score).toBe(7);
   });
 });

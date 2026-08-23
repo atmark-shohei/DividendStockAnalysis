@@ -15,6 +15,8 @@ import {
   type ConsecutiveYearRow,
   describeConsecutiveYearRows,
 } from '../domain/scoring/consecutive-years';
+import { type UserIndicatorSettingsRepository } from '../domain/scoring/user-indicator-settings-repository';
+import { resolveScoringBands } from './resolve-scoring-bands';
 import { type CompanyScoring, scoreCompany } from './score-company';
 
 /**
@@ -37,15 +39,27 @@ export async function listCompanies(
  * 整形データも保存してあるが、詳細表示では再計算する。ロジックを直したあとに
  * 古い整形データを表示すると、画面と現在の実装が食い違う。保存済みの整形データは
  * 再監査（いつどのバージョンでいくつだったか）のために残してある。
+ *
+ * @param userIndicatorSettingsRepository 指標カスタマイズ（T-101）の設定を読む窓口。
+ *   `userId` の解決に必要な区分表を `resolveScoringBands` 経由で組み立てる
+ * @param userId ログイン中ユーザーのID。**未ログイン（guest）は `null`**。
+ *   `null` は「全10指標選択・`bands.ts` のデフォルト区分表」という既定応答になる
+ *   （BE計画 §5。`GET /api/companies/:code` は無認証でも閲覧できる既存仕様を変えない）
  */
 export async function getCompanyScoring(
   repository: CompanyRepository,
+  userIndicatorSettingsRepository: UserIndicatorSettingsRepository,
   code: string,
+  userId: number | null,
   useActualForScoring = false,
 ): Promise<CompanyScoring | null> {
   const company = await repository.findByCode(code);
   if (company === null) return null;
-  return scoreCompany(company, useActualForScoring);
+  const resolvedBands = await resolveScoringBands(
+    { userIndicatorSettingsRepository },
+    userId,
+  );
+  return scoreCompany(company, useActualForScoring, resolvedBands);
 }
 
 /**

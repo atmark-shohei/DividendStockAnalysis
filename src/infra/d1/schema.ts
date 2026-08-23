@@ -219,3 +219,23 @@ export const sessions = sqliteTable('sessions', {
   expiresAt: text('expires_at').notNull(),
   createdAt: text('created_at').notNull(),
 });
+
+/**
+ * 指標カスタマイズ設定（T-101。`docs/02_design/database/schema.md` §user_indicator_settings）。
+ *
+ * 「選択している」は行の存在で表す（選択していない指標の行は無い。
+ * `transformed_metrics` が判定できた指標だけ行を持つのと同じ設計）。
+ * `basisValue` は満点となる基準値。⑨MIX係数の行は常に `NULL`（設定不可）。
+ */
+export const userIndicatorSettings = sqliteTable(
+  'user_indicator_settings',
+  {
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** `MetricKey`（①〜⑩） */
+    metricKey: text('metric_key').notNull(),
+    basisValue: real('basis_value'),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.metricKey] })],
+);

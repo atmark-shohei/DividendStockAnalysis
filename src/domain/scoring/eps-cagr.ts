@@ -12,6 +12,7 @@ import { type MetricScore, scored, unavailable } from '../shared/metric-score';
 import { scoreFromValidatedBand } from '../shared/score';
 import { EPS_CAGR_BANDS } from './bands';
 import { scoreByBands, zeroOrBelowScoresZero } from './metric-lookup';
+import { type ScoreBand } from './score-band';
 import { cagrPercent, median, takeCompleteYears } from './series';
 
 /** 中央値を取る窓の長さ */
@@ -43,8 +44,13 @@ export interface EpsCagrInput {
  * - 5年前側の中央値が 0 → **ゼロ除算で判定不能**
  * - 5年前側の中央値が負 → **成長率を定義できないので判定不能**（0点ではない）
  * - 成長率が 0% 以下 → **0点**
+ *
+ * @param bands 判定に使う区分表。省略時は `bands.ts` のデフォルト定数（T-101で追加）
  */
-export function calculateEpsCagr(input: EpsCagrInput): MetricScore {
+export function calculateEpsCagr(
+  input: EpsCagrInput,
+  bands: readonly ScoreBand[] = EPS_CAGR_BANDS,
+): MetricScore {
   const window = takeCompleteYears(input.epsHistory, EPS_REQUIRED_YEARS);
   if (window === null) return unavailable('insufficient-history');
   // 6期そろわない銘柄は insufficient-history が先に返る（設計書 §4.3・§7.2）
@@ -65,5 +71,5 @@ export function calculateEpsCagr(input: EpsCagrInput): MetricScore {
   const growth = cagrPercent(recentMedian, baseMedian, EPS_CAGR_YEARS);
   if (growth === null) return unavailable('input-invalid');
 
-  return zeroOrBelowScoresZero(growth) ?? scoreByBands(EPS_CAGR_BANDS, growth);
+  return zeroOrBelowScoresZero(growth) ?? scoreByBands(bands, growth);
 }

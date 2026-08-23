@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { calculateRevenueCagr } from '@/domain/scoring/revenue-cagr';
+import { type ScoreBand } from '@/domain/scoring/score-band';
 import { CAGR_BASE_SEN, atLeastGrowth, justUnderGrowth } from '../../helpers/cagr';
 import { sen } from '../../helpers/sen';
 
@@ -165,5 +166,25 @@ describe('⑦ 売上高 CAGR — EDINET遡及修正（historyRestated）', () =>
     });
     expect(result.score).toBe(10);
     expect(result.unavailableReason).toBeNull();
+  });
+});
+
+describe('⑦ 売上高 CAGR — カスタム bands（T-101 指標カスタマイズ）', () => {
+  const ALWAYS_SEVEN: readonly ScoreBand[] = [{ minInclusive: null, maxExclusive: null, points: 7 }];
+
+  it('省略時はデフォルト定数で判定する（20%ちょうどは10点）', () => {
+    expect(scoreAt(atLeastGrowth(20))).toBe(10);
+  });
+
+  it('カスタム bands を渡すと、デフォルトなら10点になる入力でも渡した bands の点数になる', () => {
+    const result = calculateRevenueCagr(
+      {
+        revenueCurrent: sen(atLeastGrowth(20)),
+        revenueFiveYearsAgo: sen(CAGR_BASE_SEN),
+        historyRestated: false,
+      },
+      ALWAYS_SEVEN,
+    );
+    expect(result.score).toBe(7);
   });
 });

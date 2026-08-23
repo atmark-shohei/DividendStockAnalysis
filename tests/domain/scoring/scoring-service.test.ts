@@ -95,3 +95,51 @@ describe('総合点の集計', () => {
     }
   });
 });
+
+describe('selectedKeys（T-101 指標カスタマイズ。ADR-0012 D-3）', () => {
+  it('省略時は METRIC_KEYS（全10指標）と同じ。maxTotalScore/totalMetricCount は従来どおり', () => {
+    const card = buildScoreCard(mapOf(fill(10)));
+    expect(card.maxTotalScore).toBe(100);
+    expect(card.totalMetricCount).toBe(10);
+  });
+
+  it('5指標選択（下限境界）なら分母は 50。選択に無いキーは判定結果があっても合算されない', () => {
+    const points = fill(10);
+    // 選択しない5指標（後半5つ）を判定不能にしても、選択に入っていなければ無関係
+    const selected = METRIC_KEYS.slice(0, 5);
+    const card = buildScoreCard(mapOf(points), selected);
+    expect(card.maxTotalScore).toBe(50);
+    expect(card.totalMetricCount).toBe(5);
+    expect(card.effectiveMetricCount).toBe(5);
+    expect(card.totalScore).toBe(50);
+  });
+
+  it('選択に入っていない指標が満点でも合算・有効指標数のどちらにも関与しない', () => {
+    const points = fill(10);
+    const selected = METRIC_KEYS.slice(0, 5);
+    // 選択外（後半5つ）を判定不能にしても selected 側のスコアには影響しない
+    const withUnselectedNulled = [...points];
+    for (let i = 5; i < withUnselectedNulled.length; i++) withUnselectedNulled[i] = null;
+    const cardAllTen = buildScoreCard(mapOf(points), selected);
+    const cardUnselectedNulled = buildScoreCard(mapOf(withUnselectedNulled), selected);
+    expect(cardAllTen.totalScore).toBe(cardUnselectedNulled.totalScore);
+    expect(cardAllTen.effectiveMetricCount).toBe(cardUnselectedNulled.effectiveMetricCount);
+  });
+
+  it('10指標選択（上限境界）なら省略時と同じ 100/10 になる', () => {
+    const card = buildScoreCard(mapOf(fill(10)), METRIC_KEYS);
+    expect(card.maxTotalScore).toBe(100);
+    expect(card.totalMetricCount).toBe(10);
+  });
+
+  it('選択した指標の一部が判定不能なら、選択数を分母に0点として合算する', () => {
+    const points = fill(10);
+    const selected = METRIC_KEYS.slice(0, 5);
+    const withOneNull = [...points];
+    withOneNull[0] = null; // 選択の中の1つを判定不能にする
+    const card = buildScoreCard(mapOf(withOneNull), selected);
+    expect(card.maxTotalScore).toBe(50);
+    expect(card.totalScore).toBe(40);
+    expect(card.effectiveMetricCount).toBe(4);
+  });
+});

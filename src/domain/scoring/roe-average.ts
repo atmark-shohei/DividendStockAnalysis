@@ -8,6 +8,7 @@
 import { type MetricScore, unavailable } from '../shared/metric-score';
 import { ROE_AVERAGE_BANDS } from './bands';
 import { scoreByBands } from './metric-lookup';
+import { type ScoreBand } from './score-band';
 import { mean, takeCompleteYears } from './series';
 
 /** 平均を取る年数。設計書 §3「直近5年の単純平均」 */
@@ -26,13 +27,18 @@ export interface RoeAverageInput {
  * （`bands.ts` の `ROE_AVERAGE_BANDS` のコメント参照）。
  *
  * 5年揃わない・`null` を含む場合は**判定不能**であり 0点ではない（§6.4）。
+ *
+ * @param bands 判定に使う区分表。省略時は `bands.ts` のデフォルト定数（T-101で追加）
  */
-export function calculateRoeAverage(input: RoeAverageInput): MetricScore {
+export function calculateRoeAverage(
+  input: RoeAverageInput,
+  bands: readonly ScoreBand[] = ROE_AVERAGE_BANDS,
+): MetricScore {
   const window = takeCompleteYears(input.roeHistory, ROE_AVERAGE_YEARS);
   if (window === null) return unavailable('insufficient-history');
 
   const average = mean(window);
   if (average === null) return unavailable('input-invalid');
 
-  return scoreByBands(ROE_AVERAGE_BANDS, average);
+  return scoreByBands(bands, average);
 }

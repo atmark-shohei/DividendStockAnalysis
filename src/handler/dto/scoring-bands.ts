@@ -25,6 +25,11 @@ export interface MetricBandsView {
   readonly unit: MetricUnit;
   /** `bands.ts` の対応定数をそのまま返す。段数を揃えたり補完したりしない */
   readonly bands: readonly ScoreBandView[];
+  /**
+   * 指標カスタマイズ画面（`indicator-custom-page.md`）の「初期設定に戻す」が使う
+   * デフォルトの「満点となる基準値」（T-101）。⑨MIX係数は設定不可のため常に `null`
+   */
+  readonly defaultBasisValue: number | null;
 }
 
 export interface ScoringBandsResponse {
@@ -47,6 +52,7 @@ export function toScoringBandsResponse(metrics: readonly MetricBands[]): Scoring
         maxExclusive: band.maxExclusive,
         points: band.points,
       })),
+      defaultBasisValue: metric.defaultBasisValue,
     })),
   };
 }

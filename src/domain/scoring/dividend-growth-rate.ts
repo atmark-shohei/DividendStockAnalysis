@@ -12,6 +12,7 @@ import { scoreFromValidatedBand } from '../shared/score';
 import { isSen } from '../shared/sen';
 import { DIVIDEND_GROWTH_RATE_BANDS } from './bands';
 import { scoreByBands, zeroOrBelowScoresZero } from './metric-lookup';
+import { type ScoreBand } from './score-band';
 import { cagrPercent } from './series';
 
 export const DIVIDEND_GROWTH_YEARS = 5;
@@ -34,8 +35,15 @@ export interface DividendGrowthRateInput {
  * 配当額が負になるのは制度上ありえないため、負は**データ不良として判定不能**にする。
  * ⑩ が負の配当を 0点に倒しているのは「利回り 0%」という意味が立つからで、
  * 増配率には対応する意味が無い。
+ *
+ * @param bands 判定に使う区分表。省略時は `bands.ts` のデフォルト定数（T-101で追加。
+ *   ユーザーが指標カスタマイズで基準値を設定していない場合は必ず省略された状態で
+ *   呼ばれ、既存の挙動と完全に一致する）
  */
-export function calculateDividendGrowthRate(input: DividendGrowthRateInput): MetricScore {
+export function calculateDividendGrowthRate(
+  input: DividendGrowthRateInput,
+  bands: readonly ScoreBand[] = DIVIDEND_GROWTH_RATE_BANDS,
+): MetricScore {
   const { dividendLastYear, dividendFiveYearsAgo } = input;
 
   if (dividendLastYear === null || dividendFiveYearsAgo === null) {
@@ -53,5 +61,5 @@ export function calculateDividendGrowthRate(input: DividendGrowthRateInput): Met
   const growth = cagrPercent(dividendLastYear, dividendFiveYearsAgo, DIVIDEND_GROWTH_YEARS);
   if (growth === null) return unavailable('input-invalid');
 
-  return zeroOrBelowScoresZero(growth) ?? scoreByBands(DIVIDEND_GROWTH_RATE_BANDS, growth);
+  return zeroOrBelowScoresZero(growth) ?? scoreByBands(bands, growth);
 }

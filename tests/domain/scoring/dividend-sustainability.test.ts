@@ -5,6 +5,7 @@ import {
   calculateDividendSustainability,
   netCashSen,
 } from '@/domain/scoring/dividend-sustainability';
+import { type ScoreBand } from '@/domain/scoring/score-band';
 import { sen } from '../../helpers/sen';
 
 /**
@@ -150,4 +151,26 @@ describe('⑥ 配当維持可能年数 — 6.4 データ欠損', () => {
       expect(result.unavailableReason).toBe('input-missing');
     },
   );
+});
+
+describe('⑥ 配当維持可能年数 — カスタム bands（T-101 指標カスタマイズ）', () => {
+  const ALWAYS_SEVEN: readonly ScoreBand[] = [{ minInclusive: null, maxExclusive: null, points: 7 }];
+
+  it('省略時はデフォルト定数で判定する（30年ちょうどは10点）', () => {
+    expect(scoreAtYears(30).score).toBe(10);
+  });
+
+  it('カスタム bands を渡すと、デフォルトなら10点になる入力でも渡した bands の点数になる', () => {
+    const netCash = Math.round(30 * DIVIDEND_TOTAL);
+    const result = calculateDividendSustainability(
+      {
+        currentAssets: sen(netCash),
+        investmentSecurities: sen(0),
+        totalLiabilities: sen(0),
+        previousDividendTotal: sen(DIVIDEND_TOTAL),
+      },
+      ALWAYS_SEVEN,
+    );
+    expect(result.score).toBe(7);
+  });
 });

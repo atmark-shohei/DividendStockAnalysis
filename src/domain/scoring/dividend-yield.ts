@@ -20,7 +20,7 @@ import { type MetricScore, unavailable as unavailableMetric } from '../shared/me
 import { type Score, scoreFromValidatedBand } from '../shared/score';
 import { isSen } from '../shared/sen';
 import { DIVIDEND_YIELD_BANDS } from './bands';
-import { lookupPoints } from './score-band';
+import { type ScoreBand, lookupPoints } from './score-band';
 
 export { DIVIDEND_YIELD_BANDS, MAX_PRICE_SEN };
 export type { DividendSource, SelectedDividend };
@@ -95,8 +95,18 @@ export const MAX_DIVIDEND_SEN = Math.floor(Number.MAX_SAFE_INTEGER / 10_000);
  *
  * **判定は丸めていない値で行う**（§2.2）。丸めてから判定すると境界で結果が変わる:
  * 実際の利回り 5.4951% は、丸めると 5.50% で 10点、丸めなければ 9点。
+ *
+ * @param bands 判定に使う区分表。**デフォルト区分表使用時（省略時）は整数演算で
+ *   厳密に比較できる。ユーザー定義の区分表（指標カスタマイズ、T-101）を渡した場合、
+ *   `scaleBands()` は丸めないため閾値が非整数になりうる。その場合 `compareToThreshold` の
+ *   減算はその時点で通常の浮動小数点比較になる**（`MAX_DIVIDEND_SEN` の
+ *   コメントが前提としていた「整数比較だから厳密」という保証は、デフォルト区分表
+ *   限定の話になる。動作自体は変わらない）
  */
-export function calculateDividendYield(input: DividendYieldInput): DividendYieldResult {
+export function calculateDividendYield(
+  input: DividendYieldInput,
+  bands: readonly ScoreBand[] = DIVIDEND_YIELD_BANDS,
+): DividendYieldResult {
   const { priceSen, dividend } = input;
 
   const unavailable = (reason: YieldUnavailableReason): DividendYieldResult => ({
@@ -130,7 +140,7 @@ export function calculateDividendYield(input: DividendYieldInput): DividendYield
   const compareToThreshold = (thresholdHundredths: number): number =>
     dividendSen * 10_000 - thresholdHundredths * priceSen;
 
-  const points = lookupPoints(DIVIDEND_YIELD_BANDS, compareToThreshold);
+  const points = lookupPoints(bands, compareToThreshold);
   // 区分表は 0% 以上を隙間なく覆っており、ここまでのガードで判定値は必ず 0 以上。
   // 該当なしは区分表の破損を意味するので、最低点ではなく判定不能に倒す
   if (points === null) return unavailable('dividend-invalid');

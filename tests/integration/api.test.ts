@@ -10,8 +10,14 @@ import { type EdinetHistorySource } from '@/domain/company/edinet-history-source
 import { type FinancialSource } from '@/domain/company/financial-source';
 import { type MarketDataSource } from '@/domain/company/market-data-source';
 import { createApp } from '@/handler/app';
+import { WebCryptoPasswordHasher } from '@/infra/auth/webcrypto-password-hasher';
+import { WebCryptoSessionTokenGenerator } from '@/infra/auth/webcrypto-session-token-generator';
 import { D1CompanyRepository } from '@/infra/d1/company-repository';
+import { D1SessionRepository } from '@/infra/d1/session-repository';
+import { D1UserIndicatorSettingsRepository } from '@/infra/d1/user-indicator-settings-repository';
+import { D1UserRepository } from '@/infra/d1/user-repository';
 import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/company-input';
+import type { IndicatorSettingsResponse } from '@/handler/dto/indicator-settings';
 
 import {
   TEST_ADMIN_SESSION_COOKIE,
@@ -134,6 +140,7 @@ beforeEach(async () => {
   await env.DB.exec('DELETE FROM dividend_records');
   await env.DB.exec('DELETE FROM financial_records');
   await env.DB.exec('DELETE FROM companies');
+  await env.DB.exec('DELETE FROM user_indicator_settings');
 });
 
 describe('POST /api/companies', () => {
@@ -376,6 +383,7 @@ const nonAdminSessionRepository: SessionRepository = {
 function appWithNonAdminSession() {
   return createApp({
     repository: new D1CompanyRepository(env.DB),
+    userIndicatorSettingsRepository: new D1UserIndicatorSettingsRepository(env.DB),
     financialSource: unusedFinancialSource,
     marketDataSource: unusedMarketDataSource,
     edinetHistorySource: unusedEdinetHistorySource,
@@ -693,5 +701,186 @@ describe('GET /api/market-data/:code', () => {
       count: number;
     }>();
     expect(after?.count).toBe(before?.count);
+  });
+});
+
+/**
+ * 指標カスタマイズ（T-101）の結合シナリオ。**実 D1・実セッションで通しに検証する**
+ * （`auth-flow.test.ts` と同じ「フェイクを使わない」方針）。
+ *
+ * `role: 'admin'` のユーザーで検証する。最初の signup が admin になる仕様
+ * （ADR-0013 §決定2）のため、role の違いは `tests/handler/indicator-settings-routes.test.ts`
+ * （フェイク・role='user' で 200 になることを確認）でカバーする。ここで見たいのは
+ * 「GET → PUT → GET → GET /api/companies/:code」という層をまたいだ結線が壊れないこと。
+ */
+describe('指標カスタマイズ: GET/PUT /api/indicator-settings、GET /api/companies/:code への反映', () => {
+  function appWithRealAuth() {
+    return createApp({
+      repository: new D1CompanyRepository(env.DB),
+      userIndicatorSettingsRepository: new D1UserIndicatorSettingsRepository(env.DB),
+      financialSource: unusedFinancialSource,
+      marketDataSource: unusedMarketDataSource,
+      edinetHistorySource: unusedEdinetHistorySource,
+      edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup,
+      userRepository: new D1UserRepository(env.DB),
+      sessionRepository: new D1SessionRepository(env.DB),
+      passwordHasher: new WebCryptoPasswordHasher(),
+      sessionTokenGenerator: new WebCryptoSessionTokenGenerator(),
+      signupEnabled: true,
+      maxUsers: 5,
+      cookieSecure: true,
+      now: () => FIXED_NOW,
+    });
+  }
+
+  function extractSessionCookie(response: Response): string {
+    const setCookie = response.headers.get('set-cookie');
+    expect(setCookie).toBeTruthy();
+    const match = setCookie?.match(/session_id=[^;]+/);
+    expect(match).not.toBeNull();
+    return match![0];
+  }
+
+  async function signUp(email: string): Promise<string> {
+    const response = await appWithRealAuth().request('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password: 'correct-horse-battery' }),
+    });
+    expect(response.status).toBe(201);
+    return extractSessionCookie(response);
+  }
+
+  beforeEach(async () => {
+    // このdescribe専用のテーブルは、他のdescribeのbeforeEachでは掃除していない
+    await env.DB.exec('DELETE FROM sessions');
+    await env.DB.exec('DELETE FROM users');
+  });
+
+  it('GET: 未ログイン（Cookie無し）は401', async () => {
+    const response = await appWithRealAuth().request('/api/indicator-settings');
+    expect(response.status).toBe(401);
+  });
+
+  it('GET: 未設定ユーザーは全10指標選択・デフォルト基準値相当を返す（404にしない）', async () => {
+    const cookie = await signUp('t101-get-default@example.com');
+    const response = await appWithRealAuth().request('/api/indicator-settings', {
+      headers: { cookie },
+    });
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as IndicatorSettingsResponse;
+    expect(body.selected).toHaveLength(10);
+    // ⑩配当利回りのデフォルト基準値は `%` 小数（5.5%）。DBと同じ単位系（BE計画 §4）
+    expect(body.basisValues.dividendYield).toBe(5.5);
+    // ⑨MIX係数は設定不可なので basisValues に現れない
+    expect((body.basisValues as Record<string, number | undefined>)['mixCoefficient']).toBeUndefined();
+  });
+
+  it('PUT → GET で保存内容が往復する。5指標に絞ると GET /api/companies/:code の満点も50になる', async () => {
+    const cookie = await signUp('t101-put-get@example.com');
+
+    const putResponse = await appWithRealAuth().request('/api/indicator-settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        selected: [
+          'dividendGrowthRate',
+          'consecutiveYears',
+          'roeAverage',
+          'operatingMargin',
+          'dividendYield',
+        ],
+        basisValues: {
+          dividendGrowthRate: 20,
+          consecutiveYears: 10,
+          roeAverage: 10,
+          operatingMargin: 15,
+          dividendYield: 4,
+        },
+      }),
+    });
+    expect(putResponse.status).toBe(200);
+
+    const getResponse = await appWithRealAuth().request('/api/indicator-settings', {
+      headers: { cookie },
+    });
+    const body = (await getResponse.json()) as IndicatorSettingsResponse;
+    expect([...body.selected].sort()).toEqual(
+      [
+        'dividendGrowthRate',
+        'consecutiveYears',
+        'roeAverage',
+        'operatingMargin',
+        'dividendYield',
+      ].sort(),
+    );
+    expect(body.basisValues.dividendYield).toBe(4);
+
+    // 会社を登録し、ログインユーザーの権限で採点する（admin=このセッションのユーザー）
+    const postResponse = await appWithRealAuth().request('/api/companies', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify(samplePayload()),
+    });
+    expect(postResponse.status).toBe(201);
+
+    const scoring = (await (
+      await appWithRealAuth().request('/api/companies/9433', { headers: { cookie } })
+    ).json()) as ScoringResponse;
+    expect(scoring.maxTotalScore).toBe(50);
+    expect(scoring.totalMetricCount).toBe(5);
+
+    // 同じ会社を無認証（ゲスト）で見ると、常に全10指標・満点100のまま
+    const guestScoring = (await (
+      await appWithRealAuth().request('/api/companies/9433')
+    ).json()) as ScoringResponse;
+    expect(guestScoring.maxTotalScore).toBe(100);
+    expect(guestScoring.totalMetricCount).toBe(10);
+  });
+
+  it('PUT: 選択件数が4件（5未満）は400', async () => {
+    const cookie = await signUp('t101-too-few@example.com');
+    const response = await appWithRealAuth().request('/api/indicator-settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        selected: ['dividendGrowthRate', 'consecutiveYears', 'roeAverage', 'operatingMargin'],
+        basisValues: {
+          dividendGrowthRate: 20,
+          consecutiveYears: 10,
+          roeAverage: 10,
+          operatingMargin: 15,
+        },
+      }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it('PUT: ⑨MIX係数に基準値を指定すると400（専用メッセージ）', async () => {
+    const cookie = await signUp('t101-mix-basis@example.com');
+    const response = await appWithRealAuth().request('/api/indicator-settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        selected: [
+          'dividendGrowthRate',
+          'consecutiveYears',
+          'roeAverage',
+          'operatingMargin',
+          'mixCoefficient',
+        ],
+        basisValues: {
+          dividendGrowthRate: 20,
+          consecutiveYears: 10,
+          roeAverage: 10,
+          operatingMargin: 15,
+          mixCoefficient: 1,
+        },
+      }),
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe('MIX係数の基準値は指定できません');
   });
 });

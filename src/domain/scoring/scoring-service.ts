@@ -38,12 +38,22 @@ export interface ScoreCard {
  *
  * 0 に丸めるのは**この集計の中だけ**。個別指標は `null` のまま画面へ渡し、
  * 画面は `—` を出す（`0` を出してはいけない）。
+ *
+ * @param selectedKeys 総合点の集計対象にする指標。省略時は `METRIC_KEYS`（全10指標）で、
+ *   `maxTotalScore` は常に 100・`totalMetricCount` は常に 10 になる（T-101 追加前と
+ *   完全に同じ挙動）。指標カスタマイズ（T-101 / ADR-0012 D-3）で選択指標数が
+ *   5〜10 個に絞られると、分母は「選択指標数 × 10」に変わる。
+ *   **選択されていない指標は、`metrics` に判定結果があっても合算・有効指標数の
+ *   どちらにも関与しない**（ADR-0012 D-3「選択していない指標は無関係」）。
  */
-export function buildScoreCard(metrics: MetricScoreMap): ScoreCard {
+export function buildScoreCard(
+  metrics: MetricScoreMap,
+  selectedKeys: readonly MetricKey[] = METRIC_KEYS,
+): ScoreCard {
   let totalScore = 0;
   let effectiveMetricCount = 0;
 
-  for (const key of METRIC_KEYS) {
+  for (const key of selectedKeys) {
     const metric = metrics[key];
     if (isScored(metric)) {
       totalScore += metric.score;
@@ -55,8 +65,8 @@ export function buildScoreCard(metrics: MetricScoreMap): ScoreCard {
   return {
     metrics,
     totalScore,
-    maxTotalScore: MAX_TOTAL_SCORE,
+    maxTotalScore: selectedKeys.length * 10,
     effectiveMetricCount,
-    totalMetricCount: TOTAL_METRIC_COUNT,
+    totalMetricCount: selectedKeys.length,
   };
 }

@@ -7,6 +7,7 @@
 import { type MetricScore, unavailable } from '../shared/metric-score';
 import { REVENUE_CAGR_BANDS } from './bands';
 import { scoreByBands, zeroOrBelowScoresZero } from './metric-lookup';
+import { type ScoreBand } from './score-band';
 import { cagrPercent } from './series';
 
 /** 成長率を測る期間。指標名（5年CAGR）と原典の計算式に従い固定 */
@@ -32,8 +33,13 @@ export interface RevenueCagrInput {
  * - 5年前が 0 → **ゼロ除算で判定不能**（0点ではない）
  * - 5年前が負 → **成長率を定義できないので判定不能**（0点ではない）
  * - 成長率が 0% 以下（減収）→ **0点**
+ *
+ * @param bands 判定に使う区分表。省略時は `bands.ts` のデフォルト定数（T-101で追加）
  */
-export function calculateRevenueCagr(input: RevenueCagrInput): MetricScore {
+export function calculateRevenueCagr(
+  input: RevenueCagrInput,
+  bands: readonly ScoreBand[] = REVENUE_CAGR_BANDS,
+): MetricScore {
   const { revenueCurrent, revenueFiveYearsAgo } = input;
 
   if (revenueCurrent === null || revenueFiveYearsAgo === null) {
@@ -48,5 +54,5 @@ export function calculateRevenueCagr(input: RevenueCagrInput): MetricScore {
   const growth = cagrPercent(revenueCurrent, revenueFiveYearsAgo, REVENUE_CAGR_YEARS);
   if (growth === null) return unavailable('input-invalid');
 
-  return zeroOrBelowScoresZero(growth) ?? scoreByBands(REVENUE_CAGR_BANDS, growth);
+  return zeroOrBelowScoresZero(growth) ?? scoreByBands(bands, growth);
 }
