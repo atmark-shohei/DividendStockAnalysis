@@ -6,7 +6,13 @@ import {
   type CompanyListResult,
   type CompanyRepository,
 } from '@/domain/company/company-repository';
-import { getCompanyDividendHistory, listCompanies } from '@/usecase/read-companies';
+import {
+  type PortfolioDetail,
+  type PortfolioHoldingJoinRow,
+  type PortfolioRepository,
+} from '@/domain/portfolio/portfolio-repository';
+import { type Result } from '@/domain/shared/result';
+import { deleteCompany, getCompanyDividendHistory, listCompanies } from '@/usecase/read-companies';
 
 /**
  * `listCompanies` は薄い委譲（ドメイン計算は無い）。
@@ -134,5 +140,80 @@ describe('getCompanyDividendHistory', () => {
     const result = await getCompanyDividendHistory(fakeCompanyRepository(null), '0000');
 
     expect(result).toBeNull();
+  });
+});
+
+/**
+ * `deleteCompany`（T-103。`DELETE /api/companies/:code` の409対応）。
+ *
+ * D1 の `ON DELETE RESTRICT`（`portfolio_holdings.company_code`）を信頼せず、
+ * アプリ層で `countHoldingsByCompanyCode` を明示的に確認してから `deleteByCode` を呼ぶ
+ * （実装計画 §2・§4。`company-repository.ts:405-406` の既存注記どおり、D1 は既定で
+ * 外部キー制約が有効とは限らない）。
+ */
+describe('deleteCompany', () => {
+  function unimplemented(name: string): never {
+    throw new Error(`このテストで ${name} が呼ばれるのは想定外`);
+  }
+
+  function fakeCompanyRepository(spy: { deleteCalled: boolean }): CompanyRepository {
+    return {
+      save: (): Promise<void> => unimplemented('CompanyRepository.save'),
+      findByCode: (): Promise<Company | null> => unimplemented('CompanyRepository.findByCode'),
+      listSummaries: (): Promise<CompanyListResult> =>
+        unimplemented('CompanyRepository.listSummaries'),
+      deleteByCode: (): Promise<void> => {
+        spy.deleteCalled = true;
+        return Promise.resolve();
+      },
+      listFiscalYearEndMonths: (): Promise<readonly number[]> =>
+        unimplemented('CompanyRepository.listFiscalYearEndMonths'),
+    };
+  }
+
+  function fakePortfolioRepository(heldCount: number): PortfolioRepository {
+    return {
+      countByUserId: (): Promise<number> => unimplemented('PortfolioRepository.countByUserId'),
+      listSummariesByUserId: () => unimplemented('PortfolioRepository.listSummariesByUserId'),
+      insert: (): Promise<Result<void, { readonly kind: 'id-conflict' }>> =>
+        unimplemented('PortfolioRepository.insert'),
+      findById: (): Promise<null> => unimplemented('PortfolioRepository.findById'),
+      deleteById: (): Promise<void> => unimplemented('PortfolioRepository.deleteById'),
+      getDetail: (): Promise<PortfolioDetail | null> =>
+        unimplemented('PortfolioRepository.getDetail'),
+      countHoldings: (): Promise<number> => unimplemented('PortfolioRepository.countHoldings'),
+      findHolding: (): Promise<boolean> => unimplemented('PortfolioRepository.findHolding'),
+      findHoldingRow: (): Promise<PortfolioHoldingJoinRow | null> =>
+        unimplemented('PortfolioRepository.findHoldingRow'),
+      insertHolding: (): Promise<void> => unimplemented('PortfolioRepository.insertHolding'),
+      updateHolding: (): Promise<void> => unimplemented('PortfolioRepository.updateHolding'),
+      deleteHolding: (): Promise<void> => unimplemented('PortfolioRepository.deleteHolding'),
+      countHoldingsByCompanyCode: (): Promise<number> => Promise.resolve(heldCount),
+    };
+  }
+
+  it('保有0件 → deleteByCode が実行される（成功）', async () => {
+    const spy = { deleteCalled: false };
+    const result = await deleteCompany(
+      fakeCompanyRepository(spy),
+      fakePortfolioRepository(0),
+      '9433',
+    );
+
+    expect(result.ok).toBe(true);
+    expect(spy.deleteCalled).toBe(true);
+  });
+
+  it('保有1件以上 → held-in-portfolio エラーになり、deleteByCode は呼ばれない', async () => {
+    const spy = { deleteCalled: false };
+    const result = await deleteCompany(
+      fakeCompanyRepository(spy),
+      fakePortfolioRepository(1),
+      '9433',
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe('held-in-portfolio');
+    expect(spy.deleteCalled).toBe(false);
   });
 });

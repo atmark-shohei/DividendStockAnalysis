@@ -18,6 +18,13 @@ import { type SessionRepository } from '@/domain/auth/session-repository';
 import { type SessionTokenGenerator } from '@/domain/auth/session-token-generator';
 import { type User } from '@/domain/auth/user';
 import { type UserRepository } from '@/domain/auth/user-repository';
+import { type Portfolio } from '@/domain/portfolio/portfolio';
+import { type PortfolioIdGenerator } from '@/domain/portfolio/portfolio-id-generator';
+import {
+  type PortfolioDetail,
+  type PortfolioHoldingJoinRow,
+  type PortfolioRepository,
+} from '@/domain/portfolio/portfolio-repository';
 import { type UserIndicatorSettings } from '@/domain/scoring/user-indicator-settings';
 import { type UserIndicatorSettingsRepository } from '@/domain/scoring/user-indicator-settings-repository';
 import { type Result } from '@/domain/shared/result';
@@ -124,6 +131,36 @@ export function fakeUserIndicatorSettingsRepository(): UserIndicatorSettingsRepo
   };
 }
 
+/**
+ * `portfolioRepository` のフェイク（T-103）。全メソッド `unimplemented()` の最小フェイク。
+ * 個別テストは自前でオーバーライドする（`fakeUserIndicatorSettingsRepository` と同型パターン）。
+ */
+export function fakePortfolioRepository(): PortfolioRepository {
+  return {
+    countByUserId: (): Promise<number> => unimplemented('PortfolioRepository.countByUserId'),
+    listSummariesByUserId: () => unimplemented('PortfolioRepository.listSummariesByUserId'),
+    insert: (): Promise<Result<void, { readonly kind: 'id-conflict' }>> =>
+      unimplemented('PortfolioRepository.insert'),
+    findById: (): Promise<Portfolio | null> => unimplemented('PortfolioRepository.findById'),
+    deleteById: (): Promise<void> => unimplemented('PortfolioRepository.deleteById'),
+    getDetail: (): Promise<PortfolioDetail | null> =>
+      unimplemented('PortfolioRepository.getDetail'),
+    countHoldings: (): Promise<number> => unimplemented('PortfolioRepository.countHoldings'),
+    findHolding: (): Promise<boolean> => unimplemented('PortfolioRepository.findHolding'),
+    findHoldingRow: (): Promise<PortfolioHoldingJoinRow | null> =>
+      unimplemented('PortfolioRepository.findHoldingRow'),
+    insertHolding: (): Promise<void> => unimplemented('PortfolioRepository.insertHolding'),
+    updateHolding: (): Promise<void> => unimplemented('PortfolioRepository.updateHolding'),
+    deleteHolding: (): Promise<void> => unimplemented('PortfolioRepository.deleteHolding'),
+    countHoldingsByCompanyCode: (): Promise<number> =>
+      unimplemented('PortfolioRepository.countHoldingsByCompanyCode'),
+  };
+}
+
+export function fakePortfolioIdGenerator(): PortfolioIdGenerator {
+  return { generate: () => unimplemented('PortfolioIdGenerator.generate') };
+}
+
 export function fakePasswordHasher(): PasswordHasher {
   return {
     hash: () => unimplemented('PasswordHasher.hash'),
@@ -136,8 +173,9 @@ export function fakeSessionTokenGenerator(): SessionTokenGenerator {
 }
 
 /**
- * `AppDependencies` の認証系フィールド（＋ T-101 の `userIndicatorSettingsRepository`）を
- * まとめて返す。`createApp({ ...buildAuthTestDependencies(), repository: ..., ... })` の形で使う。
+ * `AppDependencies` の認証系フィールド（＋ T-101 の `userIndicatorSettingsRepository`、
+ * T-103 の `portfolioRepository`/`portfolioIdGenerator`）をまとめて返す。
+ * `createApp({ ...buildAuthTestDependencies(), repository: ..., ... })` の形で使う。
  */
 export function buildAuthTestDependencies(): {
   readonly userRepository: UserRepository;
@@ -148,6 +186,8 @@ export function buildAuthTestDependencies(): {
   readonly maxUsers: number;
   readonly cookieSecure: boolean;
   readonly userIndicatorSettingsRepository: UserIndicatorSettingsRepository;
+  readonly portfolioRepository: PortfolioRepository;
+  readonly portfolioIdGenerator: PortfolioIdGenerator;
 } {
   return {
     userRepository: fakeUserRepository(),
@@ -158,5 +198,7 @@ export function buildAuthTestDependencies(): {
     maxUsers: 0,
     cookieSecure: true,
     userIndicatorSettingsRepository: fakeUserIndicatorSettingsRepository(),
+    portfolioRepository: fakePortfolioRepository(),
+    portfolioIdGenerator: fakePortfolioIdGenerator(),
   };
 }

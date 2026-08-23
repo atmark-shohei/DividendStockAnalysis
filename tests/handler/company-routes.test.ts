@@ -5,6 +5,7 @@ import {
   type CompanyListResult,
   type CompanyRepository,
 } from '@/domain/company/company-repository';
+import { type PortfolioRepository } from '@/domain/portfolio/portfolio-repository';
 import { type UserIndicatorSettings } from '@/domain/scoring/user-indicator-settings';
 import { type UserIndicatorSettingsRepository } from '@/domain/scoring/user-indicator-settings-repository';
 import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document-index';
@@ -15,9 +16,12 @@ import { createApp } from '@/handler/app';
 import type { ScoringResponse } from '@/handler/dto/company-input';
 
 import {
+  TEST_ADMIN_SESSION_COOKIE,
   TEST_USER_SESSION_COOKIE,
   TEST_USER_USER,
   fakePasswordHasher,
+  fakePortfolioIdGenerator,
+  fakePortfolioRepository,
   fakeSessionRepository,
   fakeSessionTokenGenerator,
   fakeUserRepository,
@@ -117,10 +121,16 @@ function fakeUserIndicatorSettingsRepository(
   };
 }
 
-function app(userIndicatorSettingsRepository: UserIndicatorSettingsRepository) {
+function app(
+  userIndicatorSettingsRepository: UserIndicatorSettingsRepository,
+  portfolioRepository: PortfolioRepository = fakePortfolioRepository(),
+  companyRepository: CompanyRepository = fakeCompanyRepository(),
+) {
   return createApp({
-    repository: fakeCompanyRepository(),
+    repository: companyRepository,
     userIndicatorSettingsRepository,
+    portfolioRepository,
+    portfolioIdGenerator: fakePortfolioIdGenerator(),
     financialSource: unusedFinancialSource(),
     marketDataSource: unusedMarketDataSource(),
     edinetHistorySource: unusedEdinetHistorySource(),
@@ -199,5 +209,57 @@ describe('GET /api/companies/:code — 指標カスタマイズの反映（T-101
     const repository = fakeUserIndicatorSettingsRepository({});
     const response = await app(repository).request('/api/companies/0000');
     expect(response.status).toBe(404);
+  });
+});
+
+/**
+ * `DELETE /api/companies/:code` の409対応（T-103。`portfolio_holdings.company_code` の
+ * `ON DELETE RESTRICT`）。D1のFK制約を信頼せず、アプリ層で
+ * `countHoldingsByCompanyCode` を明示的に確認する設計（実装計画 §4）をフェイクで結線確認する。
+ */
+describe('DELETE /api/companies/:code — 保有銘柄がある場合は409（T-103）', () => {
+  function fakeCompanyRepositoryAllowingDelete(): CompanyRepository {
+    const fail = (): never => {
+      throw new Error('このテストで CompanyRepository の想定外メソッドが呼ばれた');
+    };
+    return {
+      save: (): Promise<void> => fail(),
+      findByCode: (): Promise<Company | null> => fail(),
+      listSummaries: (): Promise<CompanyListResult> => fail(),
+      deleteByCode: (): Promise<void> => Promise.resolve(),
+      listFiscalYearEndMonths: (): Promise<readonly number[]> => fail(),
+    };
+  }
+
+  function fakePortfolioRepositoryWithHeldCount(count: number): PortfolioRepository {
+    return { ...fakePortfolioRepository(), countHoldingsByCompanyCode: () => Promise.resolve(count) };
+  }
+
+  it('保有件数0件なら204で削除できる', async () => {
+    const testApp = app(
+      fakeUserIndicatorSettingsRepository({}),
+      fakePortfolioRepositoryWithHeldCount(0),
+      fakeCompanyRepositoryAllowingDelete(),
+    );
+    const response = await testApp.request('/api/companies/9433', {
+      method: 'DELETE',
+      headers: { cookie: TEST_ADMIN_SESSION_COOKIE },
+    });
+    expect(response.status).toBe(204);
+  });
+
+  it('保有件数1件以上なら409で削除を拒否する（本文にメッセージが入る）', async () => {
+    const testApp = app(
+      fakeUserIndicatorSettingsRepository({}),
+      fakePortfolioRepositoryWithHeldCount(2),
+      fakeCompanyRepositoryAllowingDelete(),
+    );
+    const response = await testApp.request('/api/companies/9433', {
+      method: 'DELETE',
+      headers: { cookie: TEST_ADMIN_SESSION_COOKIE },
+    });
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe('この銘柄は誰かのポートフォリオに保有されているため削除できません');
   });
 });

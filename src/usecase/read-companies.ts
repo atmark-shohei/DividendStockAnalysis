@@ -11,11 +11,13 @@ import {
   type CompanyRepository,
 } from '../domain/company/company-repository';
 import { type DividendHistoryYear, dividendHistoryByYear } from '../domain/company/dividend-record';
+import { type PortfolioRepository } from '../domain/portfolio/portfolio-repository';
 import {
   type ConsecutiveYearRow,
   describeConsecutiveYearRows,
 } from '../domain/scoring/consecutive-years';
 import { type UserIndicatorSettingsRepository } from '../domain/scoring/user-indicator-settings-repository';
+import { type Result, err, ok } from '../domain/shared/result';
 import { resolveScoringBands } from './resolve-scoring-bands';
 import { type CompanyScoring, scoreCompany } from './score-company';
 
@@ -95,6 +97,22 @@ export async function getCompanyDividendHistory(
   };
 }
 
-export async function deleteCompany(repository: CompanyRepository, code: string): Promise<void> {
+export type DeleteCompanyError = { readonly kind: 'held-in-portfolio' };
+
+/**
+ * 銘柄を削除する。**D1 の `ON DELETE RESTRICT`（`portfolio_holdings.company_code`）を
+ * 信頼しない。** D1 は既定で外部キー制約が有効とは限らないため（`company-repository.ts:405-406`
+ * の既存注記）、削除前にアプリ層で明示的に保有件数を確認し、1件でもあれば409相当のドメイン
+ * エラーを返す（`schema.md` §portfolio_holdings の注記、`portfolio-api.md` の409）。
+ */
+export async function deleteCompany(
+  repository: CompanyRepository,
+  portfolioRepository: PortfolioRepository,
+  code: string,
+): Promise<Result<void, DeleteCompanyError>> {
+  const heldCount = await portfolioRepository.countHoldingsByCompanyCode(code);
+  if (heldCount > 0) return err({ kind: 'held-in-portfolio' });
+
   await repository.deleteByCode(code);
+  return ok(undefined);
 }

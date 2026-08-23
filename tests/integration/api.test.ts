@@ -13,9 +13,11 @@ import { createApp } from '@/handler/app';
 import { WebCryptoPasswordHasher } from '@/infra/auth/webcrypto-password-hasher';
 import { WebCryptoSessionTokenGenerator } from '@/infra/auth/webcrypto-session-token-generator';
 import { D1CompanyRepository } from '@/infra/d1/company-repository';
+import { D1PortfolioRepository } from '@/infra/d1/portfolio-repository';
 import { D1SessionRepository } from '@/infra/d1/session-repository';
 import { D1UserIndicatorSettingsRepository } from '@/infra/d1/user-indicator-settings-repository';
 import { D1UserRepository } from '@/infra/d1/user-repository';
+import { WebCryptoPortfolioIdGenerator } from '@/infra/portfolio/webcrypto-portfolio-id-generator';
 import type { AnalyzeCompanyRequest, ScoringResponse } from '@/handler/dto/company-input';
 import type { IndicatorSettingsResponse } from '@/handler/dto/indicator-settings';
 
@@ -74,6 +76,8 @@ function app() {
     edinetHistorySource: unusedEdinetHistorySource,
     edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup,
     ...buildAuthTestDependencies(),
+    portfolioRepository: new D1PortfolioRepository(env.DB),
+    portfolioIdGenerator: new WebCryptoPortfolioIdGenerator(),
     now: () => FIXED_NOW,
   });
 }
@@ -135,12 +139,16 @@ async function post(payload: AnalyzeCompanyRequest) {
 
 beforeEach(async () => {
   // テスト間で保存済みデータを持ち越さない
+  await env.DB.exec('DELETE FROM portfolio_holdings');
+  await env.DB.exec('DELETE FROM portfolios');
   await env.DB.exec('DELETE FROM transformed_metrics');
   await env.DB.exec('DELETE FROM score_cards');
   await env.DB.exec('DELETE FROM dividend_records');
   await env.DB.exec('DELETE FROM financial_records');
   await env.DB.exec('DELETE FROM companies');
   await env.DB.exec('DELETE FROM user_indicator_settings');
+  // portfolios.user_id のFK用に実ユーザーを作るテスト（CR-3）があるため、持ち越さない
+  await env.DB.exec('DELETE FROM users');
 });
 
 describe('POST /api/companies', () => {
@@ -384,6 +392,8 @@ function appWithNonAdminSession() {
   return createApp({
     repository: new D1CompanyRepository(env.DB),
     userIndicatorSettingsRepository: new D1UserIndicatorSettingsRepository(env.DB),
+    portfolioRepository: new D1PortfolioRepository(env.DB),
+    portfolioIdGenerator: new WebCryptoPortfolioIdGenerator(),
     financialSource: unusedFinancialSource,
     marketDataSource: unusedMarketDataSource,
     edinetHistorySource: unusedEdinetHistorySource,
@@ -623,6 +633,55 @@ describe('DELETE /api/companies/:code', () => {
     expect(remaining?.count).toBe(0);
     expect((await app().request('/api/companies/9433')).status).toBe(404);
   });
+
+  it('保有されているポートフォリオがある場合は409で削除を拒否する（CR-3: 実D1結線確認）', async () => {
+    await post(samplePayload());
+    // portfolios.user_id は users.id への外部キー。`buildAuthTestDependencies()` の
+    // ユーザーはインメモリのフェイクで D1 には無いため、FK制約を満たす実ユーザーを1件作る
+    const userRepository = new D1UserRepository(env.DB);
+    const insertedUser = await userRepository.insert({
+      email: 'portfolio-owner@example.com',
+      passwordHash: 'unused',
+      passwordSalt: 'unused',
+      passwordIterations: 10_000,
+      role: 'user',
+      createdAt: '2026-07-28T00:00:00.000Z',
+    });
+    if (!insertedUser.ok) throw new Error('setup failed: user insert');
+
+    const portfolioRepository = new D1PortfolioRepository(env.DB);
+    const inserted = await portfolioRepository.insert({
+      id: 'pf_1',
+      userId: insertedUser.value.id,
+      name: 'メインNISA',
+      createdAt: '2026-07-28T00:00:00.000Z',
+    });
+    if (!inserted.ok) throw new Error('setup failed: portfolio insert');
+    await portfolioRepository.insertHolding({
+      portfolioId: 'pf_1',
+      companyCode: '9433',
+      quantity: 100,
+      acquisitionPriceSen: 100_000,
+      createdAt: '2026-07-28T00:00:00.000Z',
+      updatedAt: '2026-07-28T00:00:00.000Z',
+    });
+
+    const response = await app().request('/api/companies/9433', {
+      method: 'DELETE',
+      headers: { cookie: TEST_ADMIN_SESSION_COOKIE },
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'この銘柄は誰かのポートフォリオに保有されているため削除できません',
+    });
+
+    const remaining = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM companies WHERE code = ?',
+    )
+      .bind('9433')
+      .first<{ count: number }>();
+    expect(remaining?.count).toBe(1);
+  });
 });
 
 describe('GET /api/health', () => {
@@ -718,6 +777,8 @@ describe('指標カスタマイズ: GET/PUT /api/indicator-settings、GET /api/c
     return createApp({
       repository: new D1CompanyRepository(env.DB),
       userIndicatorSettingsRepository: new D1UserIndicatorSettingsRepository(env.DB),
+      portfolioRepository: new D1PortfolioRepository(env.DB),
+      portfolioIdGenerator: new WebCryptoPortfolioIdGenerator(),
       financialSource: unusedFinancialSource,
       marketDataSource: unusedMarketDataSource,
       edinetHistorySource: unusedEdinetHistorySource,

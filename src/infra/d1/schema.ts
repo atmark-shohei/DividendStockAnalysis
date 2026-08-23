@@ -239,3 +239,50 @@ export const userIndicatorSettings = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.userId, table.metricKey] })],
 );
+
+/**
+ * ポートフォリオ（T-103。`docs/02_design/database/schema.md` §portfolios）。
+ * `id` はアプリ生成の不透明ID（例 `pf_xxxxxxxx`。`WebCryptoPortfolioIdGenerator`）。
+ */
+export const portfolios = sqliteTable(
+  'portfolios',
+  {
+    id: text('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [index('idx_portfolios_user_id').on(table.userId)],
+);
+
+/**
+ * 保有銘柄（T-103。`docs/02_design/database/schema.md` §portfolio_holdings）。
+ *
+ * `companyCode` は他テーブルと異なり **`ON DELETE RESTRICT`**（銘柄が誰かに保有されている間、
+ * 削除自体を拒否する）。ただし D1 は既定で外部キー制約が有効とは限らないため、実際の409判定は
+ * アプリ層の明示的な `COUNT` チェックで行う（`D1PortfolioRepository.countHoldingsByCompanyCode`
+ * ／`deleteCompany` usecase。`company-repository.ts:405-406` と同じ前提）。
+ */
+export const portfolioHoldings = sqliteTable(
+  'portfolio_holdings',
+  {
+    portfolioId: text('portfolio_id')
+      .notNull()
+      .references(() => portfolios.id, { onDelete: 'cascade' }),
+    companyCode: text('company_code')
+      .notNull()
+      .references(() => companies.code, { onDelete: 'restrict' }),
+    quantity: integer('quantity').notNull(),
+    acquisitionPriceSen: integer('acquisition_price_sen').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.portfolioId, table.companyCode] }),
+    // `countHoldingsByCompanyCode`（`DELETE /api/companies/:code` の409判定）が
+    // company_code 単独で絞り込むため、複合PK（先頭列 portfolio_id）とは別に単独索引が要る
+    index('idx_portfolio_holdings_company_code').on(table.companyCode),
+  ],
+);

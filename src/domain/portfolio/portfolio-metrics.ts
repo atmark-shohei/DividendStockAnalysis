@@ -179,3 +179,39 @@ export function calculatePortfolioMetrics(holdings: readonly Holding[]): Portfol
     scoreAverage,
   };
 }
+
+/** 保有銘柄1件ぶんの評価額・評価損益・配当利回り（%）。設計書に無い拡張（下記TODO参照） */
+export interface HoldingValuation {
+  /** 銭。`currentPriceSen` が算出不能（null・不正値）なら `null` */
+  readonly valueSen: number | null;
+  /** 銭。`valueSen` が `null` なら `null` */
+  readonly unrealizedGainLossSen: number | null;
+  /** %。`dividendYieldBp` が算出不能（null・不正値）なら `null` */
+  readonly dividendYieldPercent: number | null;
+}
+
+/**
+ * 保有銘柄1件の評価額・評価損益・配当利回り（%）を算出する。
+ *
+ * TODO(be-developer, 2026-08-23): 推測実装。`docs/02_design/logic/portfolio-metrics.md` は
+ * ポートフォリオ「集計」の5値（§2.3）しか定義しておらず、`portfolio-api.md` のレスポンス例
+ * （`GET /api/portfolios/:id` の `holdings[]`）にある保有銘柄1行ぶんの `valueSen`/
+ * `unrealizedGainLossSen`/`dividendYieldPercent` の算出式を明記した文書が無い。
+ * 推測根拠: `calculatePortfolioMetrics` の §3.1（評価額=quantity×currentPriceSen）・
+ * §3.2（評価損益=評価額−取得原価）・§3.3（bp→%は÷100）の式を、集計せず1件だけに適用した
+ * ものと解釈した。`normalizeCurrentPriceSen`/`normalizeDividendYieldBp`（同一ファイル内。
+ * 非safe-integer・負値は `null` と同じ扱い）も集計と同じガードを再利用する。
+ * `portfolio-metrics.md` への正式な追記が必要（実装計画 §6-a・Manager承認済み。完了報告で明示）。
+ */
+export function describeHoldingValuation(holding: Holding): HoldingValuation {
+  const costSen = holding.quantity * holding.acquisitionPriceSen;
+
+  const currentPriceSen = normalizeCurrentPriceSen(holding.currentPriceSen);
+  const valueSen = currentPriceSen === null ? null : holding.quantity * currentPriceSen;
+  const unrealizedGainLossSen = valueSen === null ? null : valueSen - costSen;
+
+  const dividendYieldBp = normalizeDividendYieldBp(holding.dividendYieldBp);
+  const dividendYieldPercent = dividendYieldBp === null ? null : dividendYieldBp / 100;
+
+  return { valueSen, unrealizedGainLossSen, dividendYieldPercent };
+}

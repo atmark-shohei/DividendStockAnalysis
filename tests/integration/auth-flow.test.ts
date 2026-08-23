@@ -9,9 +9,11 @@ import { createApp } from '@/handler/app';
 import { WebCryptoPasswordHasher } from '@/infra/auth/webcrypto-password-hasher';
 import { WebCryptoSessionTokenGenerator } from '@/infra/auth/webcrypto-session-token-generator';
 import { D1CompanyRepository } from '@/infra/d1/company-repository';
+import { D1PortfolioRepository } from '@/infra/d1/portfolio-repository';
 import { D1SessionRepository } from '@/infra/d1/session-repository';
 import { D1UserIndicatorSettingsRepository } from '@/infra/d1/user-indicator-settings-repository';
 import { D1UserRepository } from '@/infra/d1/user-repository';
+import { WebCryptoPortfolioIdGenerator } from '@/infra/portfolio/webcrypto-portfolio-id-generator';
 
 /**
  * `signup → me → logout → me(401)` を実 D1・実 WebCrypto 経由で通しに検証する
@@ -57,6 +59,8 @@ function app() {
   return createApp({
     repository: new D1CompanyRepository(env.DB),
     userIndicatorSettingsRepository: new D1UserIndicatorSettingsRepository(env.DB),
+    portfolioRepository: new D1PortfolioRepository(env.DB),
+    portfolioIdGenerator: new WebCryptoPortfolioIdGenerator(),
     financialSource: unusedFinancialSource,
     marketDataSource: unusedMarketDataSource,
     edinetHistorySource: unusedEdinetHistorySource,

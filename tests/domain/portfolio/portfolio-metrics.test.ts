@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { MAX_PRICE_SEN } from '@/domain/company/dividend-record';
-import { type Holding, calculatePortfolioMetrics } from '@/domain/portfolio/portfolio-metrics';
+import {
+  type Holding,
+  calculatePortfolioMetrics,
+  describeHoldingValuation,
+} from '@/domain/portfolio/portfolio-metrics';
 
 /**
  * ポートフォリオ集計（T-102 / `docs/02_design/logic/portfolio-metrics.md`）。
@@ -386,5 +390,93 @@ describe('calculatePortfolioMetrics', () => {
     const metrics = calculatePortfolioMetrics([holding]);
     // 単一銘柄なのでweightedDenominator=valueSen。dividendYieldBp/100に一致するはず
     expect(metrics.weightedYieldPercent).toBe(dividendYieldBp / 100);
+  });
+});
+
+/**
+ * `describeHoldingValuation`（T-103。設計書に無い拡張。`portfolio-metrics.ts` のTODO参照）。
+ * `GET /api/portfolios/:id` の `holdings[]` 1件ぶんの評価額・評価損益・配当利回り(%)。
+ */
+describe('describeHoldingValuation', () => {
+  it('価格未取得(currentPriceSen=null): valueSen/unrealizedGainLossSenともnull', () => {
+    const holding: Holding = {
+      quantity: 100,
+      acquisitionPriceSen: 280_000,
+      currentPriceSen: null,
+      dividendYieldBp: 300,
+      totalScore: 62,
+    };
+    const valuation = describeHoldingValuation(holding);
+    expect(valuation.valueSen).toBeNull();
+    expect(valuation.unrealizedGainLossSen).toBeNull();
+    expect(valuation.dividendYieldPercent).toBe(3);
+  });
+
+  it('利回り判定不能(dividendYieldBp=null): dividendYieldPercentのみnull。valueSenは算出される', () => {
+    const holding: Holding = {
+      quantity: 100,
+      acquisitionPriceSen: 280_000,
+      currentPriceSen: 314_200,
+      dividendYieldBp: null,
+      totalScore: 62,
+    };
+    const valuation = describeHoldingValuation(holding);
+    expect(valuation.valueSen).toBe(100 * 314_200);
+    expect(valuation.unrealizedGainLossSen).toBe(100 * 314_200 - 100 * 280_000);
+    expect(valuation.dividendYieldPercent).toBeNull();
+  });
+
+  it('無配(dividendYieldBp=0): nullにせず0%として計算に含める', () => {
+    const holding: Holding = {
+      quantity: 10,
+      acquisitionPriceSen: 100_000,
+      currentPriceSen: 100_000,
+      dividendYieldBp: 0,
+      totalScore: 50,
+    };
+    const valuation = describeHoldingValuation(holding);
+    expect(valuation.dividendYieldPercent).toBe(0);
+    expect(valuation.dividendYieldPercent).not.toBeNull();
+  });
+
+  it('評価損益が負(含み損): 符号の正規化をしない', () => {
+    const holding: Holding = {
+      quantity: 100,
+      acquisitionPriceSen: 320_000,
+      currentPriceSen: 280_000,
+      dividendYieldBp: 300,
+      totalScore: 50,
+    };
+    const valuation = describeHoldingValuation(holding);
+    expect(valuation.unrealizedGainLossSen).toBe(100 * 280_000 - 100 * 320_000);
+    expect(valuation.unrealizedGainLossSen).toBeLessThan(0);
+  });
+
+  it('価格・利回りとも不正値(負値・非安全整数)ならnullと同じ扱いになる(防御的ガード)', () => {
+    const holding: Holding = {
+      quantity: 10,
+      acquisitionPriceSen: 50_000,
+      currentPriceSen: -1,
+      dividendYieldBp: 1.5,
+      totalScore: 50,
+    };
+    const valuation = describeHoldingValuation(holding);
+    expect(valuation.valueSen).toBeNull();
+    expect(valuation.unrealizedGainLossSen).toBeNull();
+    expect(valuation.dividendYieldPercent).toBeNull();
+  });
+
+  it('portfolio-api.mdのレスポンス例(トヨタ自動車)と一致する', () => {
+    const holding: Holding = {
+      quantity: 100,
+      acquisitionPriceSen: 280_000,
+      currentPriceSen: 314_200,
+      dividendYieldBp: 318,
+      totalScore: 62,
+    };
+    const valuation = describeHoldingValuation(holding);
+    expect(valuation.valueSen).toBe(31_420_000);
+    expect(valuation.unrealizedGainLossSen).toBe(3_420_000);
+    expect(valuation.dividendYieldPercent).toBe(3.18);
   });
 });

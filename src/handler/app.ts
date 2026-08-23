@@ -23,6 +23,8 @@ import {
 import { type EdinetHistorySource } from '../domain/company/edinet-history-source';
 import { type FinancialSource } from '../domain/company/financial-source';
 import { type MarketDataSource } from '../domain/company/market-data-source';
+import { type PortfolioIdGenerator } from '../domain/portfolio/portfolio-id-generator';
+import { type PortfolioRepository } from '../domain/portfolio/portfolio-repository';
 import { type UserIndicatorSettingsRepository } from '../domain/scoring/user-indicator-settings-repository';
 import { analyzeCompany } from '../usecase/analyze-company';
 import { getScoringBands } from '../usecase/get-scoring-bands';
@@ -38,6 +40,8 @@ import {
 import { refreshEdinetDocumentIndex } from '../usecase/refresh-edinet-document-index';
 import { registerAuthRoutes } from './auth-routes';
 import { registerIndicatorSettingsRoutes } from './indicator-settings-routes';
+import { registerPortfolioRoutes } from './portfolio-routes';
+import { COMPANY_CODE_PATTERN } from './dto/company-code';
 import { companyListQuery } from './dto/company-list-query';
 import { toDividendHistoryResponse } from './dto/company-dividends';
 import { toScoringBandsResponse } from './dto/scoring-bands';
@@ -47,6 +51,7 @@ import {
   toScoringResponse,
   useActualForScoringQuery,
 } from './dto/company-input';
+import { toDeleteCompanyErrorResponse } from './dto/delete-company';
 import {
   isExternalFactor as isEdinetExternalFactor,
   toEdinetErrorResponse,
@@ -80,6 +85,13 @@ export interface AppDependencies {
    * （`src/infra/d1/user-indicator-settings-repository.ts`）
    */
   readonly userIndicatorSettingsRepository: UserIndicatorSettingsRepository;
+  /**
+   * ポートフォリオ（T-103）。**インターフェースで**受け取る
+   * （`src/infra/d1/portfolio-repository.ts`）
+   */
+  readonly portfolioRepository: PortfolioRepository;
+  /** ポートフォリオIDの生成（T-103）。**インターフェースで**受け取る */
+  readonly portfolioIdGenerator: PortfolioIdGenerator;
   /** ユーザー認証。**インターフェースで**受け取る（`src/infra/d1/user-repository.ts`） */
   readonly userRepository: UserRepository;
   /** セッション。**インターフェースで**受け取る */
@@ -134,14 +146,6 @@ export interface AppDependencies {
   };
 }
 
-/**
- * 銘柄コードの形式。パスパラメータにも同じ検証をかける。
- *
- * 4文字固定。先頭3文字は数字、末尾1文字は数字または英大文字（例: `130A`）。
- * JPX が 2024 年以降に採番している英字混じりコードに対応する。
- */
-const COMPANY_CODE_PATTERN = /^\d{3}[0-9A-Z]$/;
-
 export function createApp(dependencies: AppDependencies): Hono {
   const app = new Hono();
 
@@ -186,6 +190,23 @@ export function createApp(dependencies: AppDependencies): Hono {
       userRepository: dependencies.userRepository,
       sessionRepository: dependencies.sessionRepository,
       userIndicatorSettingsRepository: dependencies.userIndicatorSettingsRepository,
+      now: dependencies.now,
+    },
+    userOrAdmin,
+  );
+
+  /**
+   * ポートフォリオ（T-103）。**user・admin どちらも閲覧・操作可**
+   * （`screen-list.md:117-122`、ADR-0013）。`userOrAdmin` をそのまま再利用する。
+   */
+  registerPortfolioRoutes(
+    app,
+    {
+      userRepository: dependencies.userRepository,
+      sessionRepository: dependencies.sessionRepository,
+      portfolioRepository: dependencies.portfolioRepository,
+      portfolioIdGenerator: dependencies.portfolioIdGenerator,
+      companyRepository: dependencies.repository,
       now: dependencies.now,
     },
     userOrAdmin,
@@ -490,12 +511,21 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json(toDividendHistoryResponse(history));
   });
 
+  /**
+   * `portfolio_holdings.company_code` の `ON DELETE RESTRICT`（`schema.md` §portfolio_holdings）
+   * により、保有されている銘柄の削除は409に変換する。D1のFK制約は信頼せず、
+   * `deleteCompany` usecase がアプリ層で明示的に保有件数を確認する（実装計画 §2・§4）。
+   */
   app.delete('/api/companies/:code', adminOnly, async (context) => {
     const code = context.req.param('code');
     if (!COMPANY_CODE_PATTERN.test(code)) {
       return context.json({ error: '銘柄コードの形式が不正です' }, 400);
     }
-    await deleteCompany(dependencies.repository, code);
+    const result = await deleteCompany(dependencies.repository, dependencies.portfolioRepository, code);
+    if (!result.ok) {
+      const { body, status } = toDeleteCompanyErrorResponse(result.error);
+      return context.json(body, status);
+    }
     return context.body(null, 204);
   });
 
