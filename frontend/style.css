@@ -142,6 +142,13 @@ button:disabled {
   cursor: progress;
 }
 
+/* 副次ボタン（枠線）。指標カスタマイズ画面の「初期設定に戻す」（design_mock §5「枠線」） */
+.button-outline {
+  background: transparent;
+  border: 1px solid var(--color-line-strong);
+  color: var(--color-text);
+}
+
 /* ヘッダー: タイトルと認証エリアを両端に配置する */
 .app-header {
   display: flex;
@@ -680,4 +687,72 @@ footer {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/*
+ * 指標カスタマイズ画面（`/indicators`、T-101）。
+ * `docs/02_design/ui/pages/indicator-custom-page.md` §2。
+ */
+.indicator-counter {
+  font-weight: 700;
+}
+
+/* 選択数が5未満のとき amber化（§2。エラーではなく注意のため --color-caution） */
+.indicator-counter-low {
+  color: var(--color-caution);
+}
+
+.indicator-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-block: var(--space-3);
+}
+
+.indicator-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-surface-dim);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+/* トグル: 22×22px 角丸スクエア。選択時のみ --color-action で塗る（§2） */
+.indicator-toggle {
+  flex: none;
+  width: 1.375rem; /* 22px */
+  height: 1.375rem; /* 22px */
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.indicator-toggle[aria-pressed='true'] {
+  background: var(--color-action);
+  border-color: var(--color-action);
+}
+
+.indicator-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+.indicator-row-label {
+  font-weight: 700;
+}
+
+/* MIX係数（設定不可）の静的チップ */
+.chip {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-2xs);
+  white-space: nowrap;
 }

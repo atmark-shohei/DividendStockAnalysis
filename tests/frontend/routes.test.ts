@@ -35,6 +35,9 @@ describe('parseRoute', () => {
     ['評価基準画面', '/criteria', { kind: 'criteria' }],
     ['評価基準画面の末尾スラッシュは同じ画面', '/criteria/', { kind: 'criteria' }],
     ['評価基準画面のクエリは無視する', '/criteria?foo=bar', { kind: 'criteria' }],
+    ['指標カスタマイズ画面', '/indicators', { kind: 'indicators' }],
+    ['指標カスタマイズ画面の末尾スラッシュは同じ画面', '/indicators/', { kind: 'indicators' }],
+    ['指標カスタマイズ画面のクエリは無視する', '/indicators?foo=bar', { kind: 'indicators' }],
     ['未知のパスは一覧へ倒す', '/no-such-page', createListRoute()],
     ['他のクエリ（未知のパラメータ）は選択に影響しない', '/?foo=bar', createListRoute()],
   ];
@@ -198,6 +201,7 @@ describe('routeToPath', () => {
     ['一覧・選択あり', createListRoute({ selectedCode: '7203' }), '/?code=7203'],
     ['入力画面', { kind: 'input' }, '/input'],
     ['評価基準画面', { kind: 'criteria' }, '/criteria'],
+    ['指標カスタマイズ画面', { kind: 'indicators' }, '/indicators'],
     [
       'metric 付きは code の後ろに並ぶ',
       createListRoute({ selectedCode: '7203', metric: 'roeAverage' }),
@@ -404,6 +408,7 @@ describe('resolveRouteGuardRedirect', () => {
   const listRoute: Route = createListRoute();
   const inputRoute: Route = { kind: 'input' };
   const criteriaRoute: Route = { kind: 'criteria' };
+  const indicatorsRoute: Route = { kind: 'indicators' };
   const loginRoute: Route = { kind: 'login', redirect: '/' };
   const signupRoute: Route = { kind: 'signup', redirect: '/' };
 
@@ -428,6 +433,15 @@ describe('resolveRouteGuardRedirect', () => {
     ['guestが/criteriaを開く -> ガード不要', criteriaRoute, null, null],
     ['userが/criteriaを開く -> ガード不要', criteriaRoute, asUser, null],
     ['adminが/criteriaを開く -> ガード不要', criteriaRoute, asAdmin, null],
+    // 指標カスタマイズ（T-101）はログイン必須・user/admin両方許可（`/input`と異なりロール分岐なし）
+    [
+      'guestが/indicatorsを開く -> /loginへ',
+      indicatorsRoute,
+      null,
+      { kind: 'login', redirect: '/indicators' },
+    ],
+    ['userが/indicatorsを開く -> ガード不要', indicatorsRoute, asUser, null],
+    ['adminが/indicatorsを開く -> ガード不要', indicatorsRoute, asAdmin, null],
   ];
 
   it.each(cases)('%s', (_name, route, user, expected) => {

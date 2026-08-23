@@ -4,10 +4,12 @@ import {
   getCompany,
   getCompanyDividends,
   getCurrentUser,
+  getIndicatorSettings,
   importFromEdinet,
   listCompanies,
   login,
   logout,
+  saveIndicatorSettings,
   signup,
 } from '../../frontend/api';
 
@@ -242,9 +244,7 @@ describe('getCompanyDividends', () => {
   });
 
   it('/api/companies/:code/dividends へ GET する', async () => {
-    const fetchMock = vi.fn<FetchImpl>(() =>
-      Promise.resolve(jsonResponse({ dividends: [] })),
-    );
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(jsonResponse({ dividends: [] })));
     vi.stubGlobal('fetch', fetchMock);
 
     await getCompanyDividends('7203');
@@ -253,9 +253,7 @@ describe('getCompanyDividends', () => {
   });
 
   it('銘柄コードは URL エンコードする', async () => {
-    const fetchMock = vi.fn<FetchImpl>(() =>
-      Promise.resolve(jsonResponse({ dividends: [] })),
-    );
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(jsonResponse({ dividends: [] })));
     vi.stubGlobal('fetch', fetchMock);
 
     await getCompanyDividends('130A');
@@ -275,6 +273,61 @@ describe('getCompanyDividends', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(getCompanyDividends('7203')).resolves.toEqual(body);
+  });
+});
+
+/**
+ * 指標カスタマイズ画面（T-101。`docs/02_design/api/portfolio-api.md` §指標カスタマイズ）。
+ * **実 API は叩かない**（`getCompany` と同じ方針）。
+ */
+describe('getIndicatorSettings', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GET /api/indicator-settings を呼ぶ', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() =>
+      Promise.resolve(jsonResponse({ selected: [], basisValues: {} })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getIndicatorSettings();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/indicator-settings');
+  });
+
+  it('レスポンスの selected/basisValues をそのまま透過する', async () => {
+    const body = {
+      selected: ['dividendGrowthRate', 'roeAverage'],
+      basisValues: { dividendGrowthRate: 10, roeAverage: 12 },
+    };
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(jsonResponse(body)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getIndicatorSettings()).resolves.toEqual(body);
+  });
+});
+
+describe('saveIndicatorSettings', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('PUT /api/indicator-settings へ payload を JSON で送る', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() =>
+      Promise.resolve(jsonResponse({ selected: ['roeAverage'], basisValues: { roeAverage: 12 } })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await saveIndicatorSettings({ selected: ['roeAverage'], basisValues: { roeAverage: 12 } });
+
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    expect(input).toBe('/api/indicator-settings');
+    expect(init?.method).toBe('PUT');
+    expect(JSON.parse(init?.body as string)).toEqual({
+      selected: ['roeAverage'],
+      basisValues: { roeAverage: 12 },
+    });
   });
 });
 

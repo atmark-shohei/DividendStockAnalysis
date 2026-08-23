@@ -5,6 +5,8 @@ import type {
   AuthUser,
   CompanyListResponse,
   DividendHistoryResponse,
+  IndicatorSettingsRequest,
+  IndicatorSettingsResponse,
   LoginRequest,
   ScoringBandsResponse,
   ScoringResponse,
@@ -15,6 +17,7 @@ import { AuthStatus } from './components/AuthStatus';
 import { NavBar } from './components/NavBar';
 import { AuthPage } from './pages/AuthPage';
 import { CriteriaPage } from './pages/CriteriaPage';
+import { IndicatorCustomPage } from './pages/IndicatorCustomPage';
 import { InputPage } from './pages/InputPage';
 import { ListPage } from './pages/ListPage';
 import {
@@ -33,6 +36,20 @@ import { useRoute } from './use-route';
  * FE は domain の定数を直接 import しない方針（`routes.ts` の `COMPANY_SORT_KEYS` と同じ理由。
  * ADR-0008 のグレーゾーンを避ける）。BE 側の既定値が変わったらここも手動で追従させること */
 const EMPTY_COMPANY_LIST: CompanyListResponse = { companies: [], page: 1, perPage: 15, total: 0 };
+
+/**
+ * ログイン中ユーザーの比較キー。`user` オブジェクト全体ではなく `id` だけを使う
+ * （`getCurrentUser` の再取得等で同じユーザーの新しいオブジェクト参照が来ても
+ * 誤って「切り替わった」と判定しないため）。`null` は未ログイン（guest）。
+ *
+ * fe-reviewer CR-1: ユーザー個別の永続設定（`indicatorSettings`）をリセットすべきタイミングの
+ * 判定に使う。純関数として export し、`tests/frontend/app.test.ts` から直接検証する
+ * （`App` は JSX を含み `@testing-library/react` 未導入のため描画検証はできない。
+ * `indicator-custom-logic.ts` と同じ「判定はexportした純関数に切り出す」方針）。
+ */
+export function authIdentityKey(user: AuthUser | null): number | null {
+  return user === null ? null : user.id;
+}
 
 /**
  * アプリの外枠。**データ取得はここに集約**し、各画面へは props で渡す
@@ -54,6 +71,14 @@ export function App() {
   // 評価基準タブ（T-099）。会社非依存の静的データなので、セッション中1回だけ取得しキャッシュする
   const [criteriaBands, setCriteriaBands] = useState<ScoringBandsResponse | null>(null);
   const [loadingCriteria, setLoadingCriteria] = useState(false);
+  // 指標カスタマイズ画面（T-101）。`criteriaBands` はラベル・単位・並び順の出所として共用する
+  // （`indicators` 表示時にも `criteriaBands === null` なら取得する。新しいAPI呼び出しを増やさない）
+  const [indicatorSettings, setIndicatorSettings] = useState<IndicatorSettingsResponse | null>(
+    null,
+  );
+  const [loadingIndicatorSettings, setLoadingIndicatorSettings] = useState(false);
+  const [savingIndicatorSettings, setSavingIndicatorSettings] = useState(false);
+  const [indicatorSettingsError, setIndicatorSettingsError] = useState<string | null>(null);
   // 初回は必ず reload() が走る前提のため true から始める（CR-6。`false` だと
   // マウント直後の1フレームで EmptyState が一瞬見える）
   const [loadingCompanies, setLoadingCompanies] = useState(true);
@@ -227,9 +252,13 @@ export function App() {
    * 評価基準タブ（T-099）。会社非依存の静的データなので、`/criteria` を開いたときだけ
    * 一度取得し、以後はキャッシュを使い回す（`criteriaBands !== null` で再取得をスキップ。
    * 一覧の `reload()` のように毎回取り直す必要が無い。fe-plan.md §3.8）。
+   *
+   * 指標カスタマイズ画面（T-101）もラベル・単位・並び順の出所として同じ `criteriaBands` を
+   * 共用する（fe-plan.md §5。新しいAPI呼び出しを増やさない）。
    */
   useEffect(() => {
-    if (route.kind !== 'criteria' || criteriaBands !== null) return;
+    if ((route.kind !== 'criteria' && route.kind !== 'indicators') || criteriaBands !== null)
+      return;
 
     let cancelled = false;
     setLoadingCriteria(true);
@@ -252,6 +281,51 @@ export function App() {
       cancelled = true;
     };
   }, [route.kind, criteriaBands]);
+
+  /**
+   * fe-reviewer CR-1: ログイン/ログアウトで別ユーザーに切り替わったら、前ユーザーの
+   * 指標設定キャッシュを破棄する。下の取得 useEffect は `indicatorSettings !== null` を
+   * キャッシュガードに使っているため、これをリセットしないと、フルリロード無しで
+   * 別ユーザーに切り替えた場合に前ユーザーの選択・基準値が再取得されずそのまま表示され、
+   * 気付かず保存すると別ユーザーの設定を上書きしてしまう。
+   *
+   * 依存配列は `authIdentityKey(user)`（`user.id`、guestは`null`）にする。`user` オブジェクト
+   * 全体を依存にすると `getCurrentUser` の再取得等で同一ユーザーでも参照が変わり無駄に
+   * 発火しうるため、比較キーだけを見る。
+   */
+  useEffect(() => {
+    setIndicatorSettings(null);
+    setIndicatorSettingsError(null);
+  }, [authIdentityKey(user)]);
+
+  /**
+   * 指標カスタマイズ画面（T-101）。`/indicators` を開いたときだけ現在の設定を取得し、
+   * 以後はキャッシュを使い回す（`criteriaBands` と同じ方針）。保存成功時は PUT の応答を
+   * そのまま `indicatorSettings` へ上書きするため、ここでの再取得は行わない
+   * （fe-plan.md §5「PUTの200応答がそのまま最新の真実になる」）。
+   */
+  useEffect(() => {
+    if (route.kind !== 'indicators' || indicatorSettings !== null) return;
+
+    let cancelled = false;
+    setLoadingIndicatorSettings(true);
+    api
+      .getIndicatorSettings()
+      .then((result) => {
+        if (!cancelled) setIndicatorSettings(result);
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setError(cause instanceof Error ? cause.message : '指標設定の取得に失敗しました');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingIndicatorSettings(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [route.kind, indicatorSettings]);
 
   const handleSubmit = (payload: AnalyzeCompanyRequest) => {
     setBusy(true);
@@ -405,6 +479,27 @@ export function App() {
       });
   };
 
+  /**
+   * 指標カスタマイズ画面（T-101）の保存。成功時はPUTの応答をそのまま `indicatorSettings`
+   * へ反映し（再GETは行わない）、失敗時はサーバーの文言をそのまま出す
+   * （`AuthForm` の `error` prop と同じ「BEの文言をそのまま出す」方針。fe-plan.md §5）。
+   */
+  const handleSaveIndicatorSettings = (payload: IndicatorSettingsRequest) => {
+    setSavingIndicatorSettings(true);
+    setIndicatorSettingsError(null);
+    api
+      .saveIndicatorSettings(payload)
+      .then((result) => {
+        setIndicatorSettings(result);
+      })
+      .catch((cause: unknown) => {
+        setIndicatorSettingsError(cause instanceof Error ? cause.message : '保存に失敗しました');
+      })
+      .finally(() => {
+        setSavingIndicatorSettings(false);
+      });
+  };
+
   const handleLogout = () => {
     setError(null);
     api
@@ -442,6 +537,15 @@ export function App() {
         <InputPage onSubmit={handleSubmit} disabled={busy} />
       ) : route.kind === 'criteria' ? (
         <CriteriaPage bands={criteriaBands} loading={loadingCriteria} />
+      ) : route.kind === 'indicators' ? (
+        <IndicatorCustomPage
+          bands={criteriaBands}
+          settings={indicatorSettings}
+          loading={loadingCriteria || loadingIndicatorSettings}
+          saving={savingIndicatorSettings}
+          saveError={indicatorSettingsError}
+          onSave={handleSaveIndicatorSettings}
+        />
       ) : route.kind === 'login' || route.kind === 'signup' ? (
         <AuthPage
           mode={route.kind}

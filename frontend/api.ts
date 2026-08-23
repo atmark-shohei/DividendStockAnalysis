@@ -11,6 +11,10 @@ import type {
   DividendHistoryResponse,
 } from '@/handler/dto/company-dividends';
 import type { EdinetImportResponse } from '@/handler/dto/edinet-import';
+import type {
+  IndicatorSettingsRequest,
+  IndicatorSettingsResponse,
+} from '@/handler/dto/indicator-settings';
 import type { IrBankImportResponse } from '@/handler/dto/irbank-import';
 import type { MarketDataImportResponse } from '@/handler/dto/market-data-import';
 import type { ScoringBandsResponse } from '@/handler/dto/scoring-bands';
@@ -28,6 +32,8 @@ export type {
   DividendHistoryResponse,
   ConsecutiveYearRowResponse,
   ScoringBandsResponse,
+  IndicatorSettingsRequest,
+  IndicatorSettingsResponse,
 };
 
 export type { LoginRequest, SignupRequest };
@@ -143,6 +149,29 @@ export function getCompanyDividends(code: string): Promise<DividendHistoryRespon
  */
 export function getScoringBands(): Promise<ScoringBandsResponse> {
   return request<ScoringBandsResponse>('/api/scoring/bands');
+}
+
+/**
+ * 指標カスタマイズ画面（T-101）の現在の設定。**ログイン必須**（未ログインでの呼び出しは
+ * 401 になる想定だが、ルートガード（`resolveRouteGuardRedirect`）で事前に弾かれるため
+ * `getCurrentUser` のような 401 特別扱いは不要）。未設定ユーザーには全10指標選択・
+ * デフォルト基準値相当が返る（`indicator-custom-page.md` §6・§7）。
+ */
+export function getIndicatorSettings(): Promise<IndicatorSettingsResponse> {
+  return request<IndicatorSettingsResponse>('/api/indicator-settings');
+}
+
+/**
+ * 指標カスタマイズ設定の保存。選択していない指標の基準値は含めない
+ * （`buildSavePayload`。`indicator-custom-page.md` §6）。
+ */
+export function saveIndicatorSettings(
+  payload: IndicatorSettingsRequest,
+): Promise<IndicatorSettingsResponse> {
+  return request<IndicatorSettingsResponse>('/api/indicator-settings', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
 }
 
 /** IRバンクから財務データを取り込む。**保存はしない**（結果はフォームの初期値にするだけ） */

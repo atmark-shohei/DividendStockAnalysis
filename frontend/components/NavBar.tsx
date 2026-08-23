@@ -18,6 +18,15 @@ export function shouldShowInputTab(user: AuthUser | null): boolean {
   return isAdmin(user);
 }
 
+/**
+ * 「指標カスタマイズ」タブを表示するか（`docs/02_design/ui/screen-list.md` §2。
+ * `/input` と異なりロール不問。ログイン済みなら user/admin どちらにも表示する）。
+ * guest（`user === null`）には表示しない（`indicator-custom-page.md` §1「ログイン必須」）。
+ */
+export function shouldShowIndicatorsTab(user: AuthUser | null): boolean {
+  return user !== null;
+}
+
 function NavLink({
   to,
   active,
@@ -62,6 +71,19 @@ export function NavBar({
       <NavLink to={{ kind: 'criteria' }} active={current.kind === 'criteria'} onNavigate={onNavigate}>
         評価基準
       </NavLink>
+      {/* 並び順は screen-list.md §4「検索・ポートフォリオ・指標カスタマイズ・評価基準・銘柄登録」だが、
+          `/portfolio`（T-103）は本タスクのスコープ外で未実装のため、現状は
+          「検索・評価基準・指標カスタマイズ・銘柄登録」の順になる。T-103実装時に
+          `/portfolio` 分だけ本来の位置（評価基準の前）へ差し込むこと */}
+      {shouldShowIndicatorsTab(user) && (
+        <NavLink
+          to={{ kind: 'indicators' }}
+          active={current.kind === 'indicators'}
+          onNavigate={onNavigate}
+        >
+          指標カスタマイズ
+        </NavLink>
+      )}
       {shouldShowInputTab(user) && (
         <NavLink to={{ kind: 'input' }} active={current.kind === 'input'} onNavigate={onNavigate}>
           銘柄登録

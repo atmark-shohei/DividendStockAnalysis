@@ -19,6 +19,7 @@ import {
   formatSen,
   multipleSourceText,
   NO_DATA,
+  TOTAL_SCORE_COMPARISON_NOTE,
 } from '../format';
 import type { CompanySortKey } from '../routes';
 
@@ -558,6 +559,9 @@ function ScoringBody({
               指標）
             </span>
           </p>
+          {/* ADR-0012 §決定D-3: 指標の選択・基準値が異なるユーザー間では総合点を
+              単純比較できない旨を常時明記する（T-101）。非表示にする分岐を作らない */}
+          <p className="meta">{TOTAL_SCORE_COMPARISON_NOTE}</p>
           <ScoreBar value={scoring.totalScore} max={scoring.maxTotalScore} />
           {/* ヒーロー行: 株価・配当利回り・PER・PBR（`analysis-dialog.md` §4.1）。
               PBR等が null のとき formatMetricValue/formatSen が NO_DATA（—）を返す */}

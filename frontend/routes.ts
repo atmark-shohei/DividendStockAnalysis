@@ -75,6 +75,7 @@ export type Route =
     }
   | { readonly kind: 'input' }
   | { readonly kind: 'criteria' }
+  | { readonly kind: 'indicators' }
   | {
       readonly kind: 'login';
       /** 成功後に戻る画面のパス。`sanitizeRedirect` を通した後の値（常に安全な相対パス） */
@@ -88,6 +89,7 @@ export type Route =
 export const LIST_PATH = '/';
 export const INPUT_PATH = '/input';
 export const CRITERIA_PATH = '/criteria';
+export const INDICATORS_PATH = '/indicators';
 export const LOGIN_PATH = '/login';
 export const SIGNUP_PATH = '/signup';
 
@@ -143,6 +145,10 @@ export function parseRoute(href: string): Route {
   // 会社非依存の公開画面（ログイン不要）。クエリパラメータは持たない
   // （`/indicators` と同じ「静的画面はURLに付随状態を持たない」方針。screen-list.md:80）
   if (pathname === CRITERIA_PATH) return { kind: 'criteria' };
+  // 指標カスタマイズ画面（T-101）。ログイン必須（user/admin）だが、選択・基準値の
+  // 編集中値は URL に一切載せない（`indicator-custom-page.md` §1）。クエリパラメータは
+  // `criteria` と同様に無視してよい
+  if (pathname === INDICATORS_PATH) return { kind: 'indicators' };
   if (pathname === LOGIN_PATH)
     return { kind: 'login', redirect: sanitizeRedirect(params.get('redirect')) };
   if (pathname === SIGNUP_PATH) {
@@ -209,6 +215,7 @@ export function createListRoute(
 export function routeToPath(route: Route): string {
   if (route.kind === 'input') return INPUT_PATH;
   if (route.kind === 'criteria') return CRITERIA_PATH;
+  if (route.kind === 'indicators') return INDICATORS_PATH;
 
   if (route.kind === 'login' || route.kind === 'signup') {
     const base = route.kind === 'login' ? LOGIN_PATH : SIGNUP_PATH;
@@ -251,9 +258,9 @@ export function isAdmin(user: AuthUser | null): boolean {
  * **タブを隠す／FE でリダイレクトすることは認可ではない**（`.claude/rules/frontend.md`）。
  * `/input` の実効的な制限は BE 側の `requireRole('admin')`（T-104）が別途必要。
  *
- * **`/portfolio`・`/indicators` は `Route` 型に未追加のため本関数の対象外**
- * （§5.2 の該当2行は未実装）。各画面実装タスク（T-102/T-103・T-100/T-101）で
- * `Route` バリアント追加と同時にガード条件を足すこと。
+ * **`/indicators` はログイン必須（user/admin）でガード済み**（T-101）。`/portfolio` は
+ * `Route` 型に未追加のため引き続き本関数の対象外（§5.2 の該当行は未実装。
+ * T-102/T-103 で `Route` バリアント追加と同時にガード条件を足すこと）。
  *
  * guest 判定は常に `user === null`（`Role` 型に `'guest'` は無い。
  * `src/domain/auth/user.ts` の `Role` 型定義を参照）。
@@ -268,6 +275,12 @@ export function resolveRouteGuardRedirect(route: Route, user: AuthUser | null): 
       return createListRoute();
     }
     return null;
+  }
+
+  // 指標カスタマイズ画面（T-101）。user/admin いずれも許可（`/input` と異なりロール分岐は無い。
+  // `screen-list.md` §2「指標カスタマイズ: user ✅ / admin ✅」）
+  if (route.kind === 'indicators' && user === null) {
+    return { kind: 'login', redirect: routeToPath(route) };
   }
 
   if ((route.kind === 'login' || route.kind === 'signup') && user !== null) {

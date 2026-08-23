@@ -10,6 +10,20 @@ import type { ConsecutiveYearRowResponse, ScoringResponse } from './api';
 /** データなしの表示。`0` と区別する */
 export const NO_DATA = '—';
 
+/**
+ * 「総合点は比較不能」の注記（ADR-0012 §決定D-3）。指標カスタマイズ画面
+ * （`IndicatorCustomPage.tsx`）と解析ダイアログ（`ListPage.tsx` の `ScoringBody`）の
+ * 両方から同一文言を import し、文言の食い違いを防ぐ。**常時表示・非表示にできない**
+ * （両画面とも条件付きレンダリングにしないこと）。
+ *
+ * TODO(T-101・推測実装): 解析ダイアログ側にこの注記を出す際の正確な文言は
+ * `docs/02_design/ui/pages/indicator-custom-page.md` §2 の ASCII 図から採録したもので、
+ * 解析ダイアログ側の文言そのものは設計書に指定が無い。指標カスタマイズ画面と
+ * 同一文言を流用する判断（推測実装）。
+ */
+export const TOTAL_SCORE_COMPARISON_NOTE =
+  '※ 指標の選択・基準値が異なる相手とは総合点を単純比較できません';
+
 /** 判定不能の理由をユーザー向けの文言にする */
 const REASON_TEXT: Readonly<Record<string, string>> = {
   'input-missing': 'データなし',
