@@ -1,8 +1,9 @@
 # データベース設計
 
-> ステータス: 🟢 銘柄・スコア・認証部分は実装済み（2026-08-18）／🟡 ポートフォリオ部分は設計のみ
+> ステータス: 🟢 銘柄・スコア・認証・ポートフォリオ部分は実装済み（2026-08-23）
 > 実装: `src/infra/d1/schema.ts` / マイグレーション: `db/migrations/0000_reflective_prism.sql`
-> （認証部分は `db/migrations/0006_fat_shaman.sql`）
+> （認証部分は `db/migrations/0006_fat_shaman.sql`、ポートフォリオ部分は
+> `db/migrations/0008_acoustic_ozymandias.sql`）
 >
 > ⚠️ **2026-07-28 に全面書き直し。** 旧版は PostgreSQL（`BIGSERIAL`/`TIMESTAMPTZ`）を前提に
 > `stocks`/`dividends`/`stock_prices`/`watchlist_items`/`users`/`ingest_errors` を定義していたが、
@@ -24,8 +25,12 @@
 >
 > ✅ **2026-08-22 追記（T-101）。** `user_indicator_settings` を実装した
 > （`src/infra/d1/user-indicator-settings-repository.ts`、マイグレーション
-> `db/migrations/0007_rapid_turbo.sql`）。`portfolios`/`portfolio_holdings` は
-> 引き続き未着手（T-102 待ち）。
+> `db/migrations/0007_rapid_turbo.sql`）。
+>
+> ✅ **2026-08-23 追記（T-103）。** `portfolios`/`portfolio_holdings` を実装した
+> （`src/infra/d1/portfolio-repository.ts`、マイグレーション
+> `db/migrations/0008_acoustic_ozymandias.sql`）。`DELETE /api/companies/:code` の
+> 409対応（下記 §未実装・検討事項 参照）も合わせて実装済み。
 
 ## 設計方針
 
@@ -182,7 +187,9 @@ API の契約は `records` / `dividends` とも最大60件（`company-api.md`）
 > 🟢 **`user_indicator_settings` は実装済み**（2026-08-22、T-101。
 > `src/infra/d1/user-indicator-settings-repository.ts`、マイグレーション
 > `db/migrations/0007_rapid_turbo.sql`）。
-> 🟡 **`portfolios`/`portfolio_holdings` は設計のみ。実装は未着手**（T-102待ち）。
+> 🟢 **`portfolios`/`portfolio_holdings` は実装済み**（2026-08-23、T-103。
+> `src/infra/d1/portfolio-repository.ts`、マイグレーション
+> `db/migrations/0008_acoustic_ozymandias.sql`）。
 > 要求元: [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)（認証・ロール・PBKDF2）、
 > [portfolio-api.md](../api/portfolio-api.md)（API契約）、
 > [indicator-custom-page.md](../ui/pages/indicator-custom-page.md)（指標カスタマイズ）。
@@ -291,8 +298,12 @@ PK: `(user_id, metric_key)`。
   `GET /api/auth/me`・`requireRole` が経由する `getCurrentUser()` が期限切れを検出した時点で
   `deleteById` する。**定期実行によるバッチ掃除は未実装**（期限切れのまま一度も
   アクセスされないセッション行は残り続ける。少人数運用のため許容し、対応は見送り）
-- **`DELETE /api/companies/:code` の 409 対応** — `portfolio_holdings` の `ON DELETE RESTRICT` により、
-  ポートフォリオ実装時にハンドラの変更が要る（上記の注記）
+- **`DELETE /api/companies/:code` の 409 対応** — ✅ **解消（2026-08-23、T-103）。**
+  `portfolio_holdings.company_code` の `ON DELETE RESTRICT`（上記の注記）を D1 の
+  FK 制約に頼らず、`countHoldingsByCompanyCode()`（`PortfolioRepository`）を
+  `deleteCompany` usecase（`src/usecase/read-companies.ts`）が明示的に確認し、
+  保有件数が1件以上あれば409（`{ "error": "この銘柄は誰かのポートフォリオに保有されているため削除できません" }`。
+  `src/handler/dto/delete-company.ts`）を返す実装にした
 - **総合点の出所が2系統（一覧の `score_cards` vs 詳細の毎回再採点）で、
   スコアリングロジック変更直後は一時的に食い違いうる**（T-088レビューで発見、
   2026-08-17。[company-api.md](../api/company-api.md) `GET /api/companies` に詳細を記載）。

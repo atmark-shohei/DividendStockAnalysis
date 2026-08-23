@@ -124,16 +124,28 @@
 | 基準値が0以下              | `BaselineNotPositive`         | 値オブジェクト   | `DomainError` の新kind。`scaleBands` の基準値が0以下（`NaN` 含む）のときに返す（2026-08-22 追加、T-100）                                                                                                                                                                                                                                                                                                                                                           |
 | デフォルト満点境界判定不能 | `BaselineUndeterminable`      | 値オブジェクト   | `DomainError` の新kind。`deriveDefaultBaseline` が区分表からデフォルト満点境界を判定できないときに返す。現行10指標では発生しない理論上の防御的エラー（2026-08-22 追加、T-100）                                                                                                                                                                                                                                                                                     |
 
-## ポートフォリオ（T-102。2026-08-22 追加）
+## ポートフォリオ（T-102。2026-08-22 追加／T-103で拡張。2026-08-23）
 
-> 仕様の正: `docs/02_design/logic/portfolio-metrics.md`。本タスクは domain 層の
-> 集計ロジックのみ（usecase / infra/d1 / handler / frontend は T-103 で追加予定）。
+> 仕様の正: `docs/02_design/logic/portfolio-metrics.md`（集計・評価式）、
+> `docs/02_design/api/portfolio-api.md`（API契約）、
+> `docs/02_design/database/schema.md`（テーブル定義）。
+> T-102 で domain 層の集計ロジックのみを追加し、T-103 で usecase / infra/d1 / handler /
+> frontend まで実装した。
 
-| 日本語                 | 英語（コード名）            | 種別             | 定義                                                                                                                                                                                                                        |
-| ---------------------- | --------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 保有                   | `Holding`                   | 値オブジェクト   | ポートフォリオ集計計算の入力。1銘柄分の保有情報（`quantity`/`acquisitionPriceSen`/`currentPriceSen`/`dividendYieldBp`/`totalScore`）の組。`currentPriceSen`（株価未取得）・`dividendYieldBp`（⑩が判定不能）は `null` を許す |
-| ポートフォリオ集計結果 | `PortfolioMetrics`          | 値オブジェクト   | `calculatePortfolioMetrics` の出力。評価額合計・評価損益合計・平均利回り2種（評価額加重／取得単価）・総合点の単純平均と、それぞれの有効件数（`evaluableValueCount`/`yieldEvaluableHoldingCount`）の組                       |
-| ポートフォリオ集計     | `calculatePortfolioMetrics` | ドメインサービス | 保有一覧（`Holding[]`）から評価額・評価損益・利回り2種・スコア平均を1回の `for` ループで集計する純粋関数。DB・HTTP に触らない。ゼロ除算は例外ではなく `null` で表現する（`buildScoreCard` と同型のパターン）                |
+| 日本語                     | 英語（コード名）             | 種別             | 定義                                                                                                                                                                                                                        |
+| -------------------------- | ---------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 保有                       | `Holding`                    | 値オブジェクト   | ポートフォリオ集計計算の入力。1銘柄分の保有情報（`quantity`/`acquisitionPriceSen`/`currentPriceSen`/`dividendYieldBp`/`totalScore`）の組。`currentPriceSen`（株価未取得）・`dividendYieldBp`（⑩が判定不能）は `null` を許す |
+| ポートフォリオ集計結果     | `PortfolioMetrics`           | 値オブジェクト   | `calculatePortfolioMetrics` の出力。評価額合計・評価損益合計・平均利回り2種（評価額加重／取得単価）・総合点の単純平均と、それぞれの有効件数（`evaluableValueCount`/`yieldEvaluableHoldingCount`）の組                       |
+| ポートフォリオ集計         | `calculatePortfolioMetrics`  | ドメインサービス | 保有一覧（`Holding[]`）から評価額・評価損益・利回り2種・スコア平均を1回の `for` ループで集計する純粋関数。DB・HTTP に触らない。ゼロ除算は例外ではなく `null` で表現する（`buildScoreCard` と同型のパターン）                |
+| ポートフォリオ             | `Portfolio`                  | 集約ルート       | ユーザーが作成する保有銘柄のグルーピング。`id`（`PortfolioIdGenerator` が生成する不透明ID）・`userId`（所有者）・`name`（1〜50文字）・`createdAt` を持つ。`User`/`Company` と同じ「interface（readonly）＋純関数」で実装（`src/domain/portfolio/portfolio.ts`。T-103） |
+| ポートフォリオ要約         | `PortfolioSummary`           | 値オブジェクト   | `GET /api/portfolios` 一覧用の読み取りモデル。`id`/`name`/`holdingCount` のみ（保有銘柄の明細は含まない。N+1回避）（T-103）                                                                                                |
+| 保有銘柄レコード           | `PortfolioHoldingRecord`     | 値オブジェクト   | `portfolio_holdings` の永続化形。`portfolioId`/`companyCode`/`quantity`/`acquisitionPriceSen`/`createdAt`/`updatedAt` を持つ。評価額・評価損益・現在株価・スコア等は保存しない（毎回算出。`src/domain/portfolio/portfolio-holding.ts`。T-103）    |
+| ポートフォリオリポジトリ   | `PortfolioRepository`        | リポジトリIF     | `Portfolio`/`PortfolioHoldingRecord` の永続化インターフェース（domain 側で定義。実装は `D1PortfolioRepository`）。`insert()` はID一意制約違反を例外ではなく `Result` の `id-conflict` で返す（`src/domain/portfolio/portfolio-repository.ts`。T-103）      |
+| ポートフォリオID生成       | `PortfolioIdGenerator`       | ポートIF         | ポートフォリオIDを生成するポート。実装 `WebCryptoPortfolioIdGenerator` は `crypto.getRandomValues(8byte)` を16進文字列化し `pf_` を前置する（例 `pf_1a2b3c4d5e6f7089`）。乱数（Web Crypto）は domain に置かない（`src/domain/portfolio/portfolio-id-generator.ts`。T-103）  |
+| 保有銘柄1件の評価         | `describeHoldingValuation`   | ドメインサービス | 保有銘柄1件（`Holding`）から評価額（`quantity×currentPriceSen`）・評価損益（評価額−取得原価）・配当利回り%（`dividendYieldBp÷100`）を算出する純粋関数。`calculatePortfolioMetrics` と同じ防御的ガード（非safe-integer・負値は `null` 扱い）を再利用する（`src/domain/portfolio/portfolio-metrics.ts`。T-103） |
+| 保有銘柄1件の評価結果     | `HoldingValuation`           | 値オブジェクト   | `describeHoldingValuation` の出力。`valueSen`/`unrealizedGainLossSen`/`dividendYieldPercent`。いずれも算出不能なら `null`（T-103）                                                                                          |
+| ポートフォリオ詳細結果   | `PortfolioDetailResult`      | 値オブジェクト   | `GET /api/portfolios/:id` の応答本体。`id`/`name`/`metrics`（`PortfolioMetrics`）/`holdings`（`PortfolioHoldingDetail[]`）の組（`src/usecase/get-portfolio-detail.ts`。T-103）                                             |
+| ポートフォリオ保有銘柄明細 | `PortfolioHoldingDetail`     | 値オブジェクト   | `PortfolioDetailResult.holdings` の1件分。`code`/`name`/`quantity`/`acquisitionPriceSen`/`currentPriceSen`/`valueSen`/`unrealizedGainLossSen`/`dividendYieldPercent`/`totalScore`/`maxTotalScore`/`effectiveMetricCount`/`totalMetricCount` を持つ（T-103） |
 
 ## 認証（T-091。2026-08-18 追加）
 

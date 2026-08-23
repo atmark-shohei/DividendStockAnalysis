@@ -1,6 +1,7 @@
 # ポートフォリオ集計ロジック
 
-> ステータス: 🟡 設計のみ（2026-08-16）。実装は T-102 待ち
+> ステータス: 🟢 実装済み（2026-08-22、T-102。`src/domain/portfolio/portfolio-metrics.ts`）。
+> §10（保有銘柄1件ぶんの評価額・評価損益・利回り%）は T-103 で追加実装（2026-08-23）
 > 出典: [design_mock](../../design_mock/README.md) §4「ポートフォリオ」、
 > [今後やりたいこと.md](../../adr/今後やりたいこと.md)
 > 対応する機能ID: [F-57](../../01_requirements/features.md)
@@ -11,6 +12,9 @@
 - **2026-08-16**: 新規作成（T-082）
 - **2026-08-22**: `currentPriceSen`/`dividendYieldBp` の非null不正値ガードを追記（T-102
   実装時の追加仕様。§9）
+- **2026-08-23**: 保有銘柄1件ぶんの評価額・評価損益・配当利回り（%）の算出式（`describeHoldingValuation`）
+  を追記（T-103実装時の追加仕様。§10）。`GET /api/portfolios/:id` の `holdings[]` 各要素の
+  `valueSen`/`unrealizedGainLossSen`/`dividendYieldPercent` の元になる
 
 ---
 
@@ -191,7 +195,8 @@ design_mock の footnote は式を文章で示すのみで、`null`/`0` の扱�
 
 ## 7. 既存実装との対応
 
-未実装（T-102）。旧実装（`reference/legacy-web/`）にポートフォリオ機能は無い。
+`src/domain/portfolio/portfolio-metrics.ts`（`calculatePortfolioMetrics`・T-102、
+`describeHoldingValuation`・T-103）。旧実装（`reference/legacy-web/`）にポートフォリオ機能は無い。
 
 ## 8. 関連ドキュメント
 
@@ -225,3 +230,32 @@ design_mock の footnote は式を文章で示すのみで、`null`/`0` の扱�
   常に確定値の前提で検証しない）
 - 実装は `src/domain/portfolio/portfolio-metrics.ts` の `normalizeCurrentPriceSen`/
   `normalizeDividendYieldBp`
+
+## 10. 保有銘柄1件ぶんの評価（2026-08-23 追記、T-103）
+
+> ✅ この節は実装（`src/domain/portfolio/portfolio-metrics.ts:193-217`）完了後に追記した。
+> §1〜§9 はポートフォリオ全体の**集計**（`PortfolioMetrics`）だけを定義しており、
+> `GET /api/portfolios/:id` の `holdings[]` 各要素が持つ `valueSen`/`unrealizedGainLossSen`/
+> `dividendYieldPercent`（[portfolio-api.md](../api/portfolio-api.md) のレスポンス例）の
+> 算出式を明記していなかった。`calculatePortfolioMetrics` の集計式（§3.1〜§3.3）を
+> 集計せず保有銘柄1件だけに適用したものとして、以下のとおり定義する。
+
+`describeHoldingValuation(holding: Holding): HoldingValuation` は、保有銘柄1件から
+評価額・評価損益・配当利回り（%）を算出する純粋関数。
+
+```
+評価額（valueSen）        = currentPriceSen が null（または不正値） ? null : quantity × currentPriceSen
+評価損益（unrealizedGainLossSen） = valueSen === null ? null : valueSen − (quantity × acquisitionPriceSen)
+配当利回り%（dividendYieldPercent） = dividendYieldBp が null（または不正値） ? null : dividendYieldBp ÷ 100
+```
+
+- `quantity × acquisitionPriceSen`（取得原価）は必須入力（§2.1）なので常に算出可能
+- `currentPriceSen`/`dividendYieldBp` の非null不正値ガード（§9の `normalizeCurrentPriceSen`/
+  `normalizeDividendYieldBp`）を集計と同じ形でそのまま再利用する。安全整数でない・負値は
+  `null` と同じ扱い（該当項目のみ `null` にする。他の項目には影響しない）
+- `dividendYieldBp ÷ 100` は §3.3 と同じ bp→% 変換
+- 出力（`HoldingValuation`）はいずれも「算出不能なら `null`」であり、`0` に丸めない
+  （§2.3 の「金額は銭単位の整数」「`null` と 0点は別物」の方針をこの1件評価にも適用する）
+- 実装は `src/domain/portfolio/portfolio-metrics.ts` の `describeHoldingValuation`。
+  `src/usecase/get-portfolio-detail.ts` の `toHoldingDetail()` が
+  `PortfolioHoldingDetail`（API応答形）への変換に利用する

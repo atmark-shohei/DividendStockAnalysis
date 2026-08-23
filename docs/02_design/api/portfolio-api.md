@@ -1,6 +1,6 @@
 # ポートフォリオ・指標設定 API 仕様
 
-> ステータス: 🟡 設計のみ（2026-08-16）。実装は T-091（認証）・T-102（集計domain）待ち
+> ステータス: 🟢 実装済み（2026-08-23、T-103。`src/handler/portfolio-routes.ts`）
 > 呼び出し元: [portfolio-page.md](../ui/pages/portfolio-page.md)（T-081）・
 > [indicator-custom-page.md](../ui/pages/indicator-custom-page.md)
 > 集計の計算式: [portfolio-metrics.md](../logic/portfolio-metrics.md)（正）
@@ -9,6 +9,15 @@
 ## 変更履歴
 
 - **2026-08-16**: 新規作成（T-083）
+- **2026-08-23**（T-103実装時に判明した仕様を追記）:
+  - `PATCH /api/portfolios/:id/holdings/:code` は対象の `code` が保有されていない場合 404
+    （`holding-not-found`）
+  - `PATCH` のリクエストボディは `quantity`/`acquisitionPriceSen` の両方省略（空更新）を
+    400で拒否する
+  - `quantity`/`acquisitionPriceSen` に上限値（`MAX_HOLDING_QUANTITY`/`MAX_PRICE_SEN`）を追加し、
+    超過時は400
+  - ポートフォリオID生成方式（`pf_` + 16進数16桁）を明記
+  - `GET /api/portfolios` の一覧の並び順（作成日時昇順）を明記
 
 ---
 
@@ -55,6 +64,9 @@ zod は handler 境界のみ）。加えてこの文書のエンドポイント�
 }
 ```
 
+- **並び順は作成日時昇順（作成順）。** 評価額順・名前順などの並び替えオプションは無い
+  （§未決定「保有銘柄の並び順」とは別の論点。実装 `D1PortfolioRepository.listSummariesByUserId`）
+
 ### POST /api/portfolios
 
 ```json
@@ -63,6 +75,9 @@ zod は handler 境界のみ）。加えてこの文書のエンドポイント�
 
 - 201。**上限（10）到達時は 403**（`{ "error": "ポートフォリオは最大10個までです" }`）
 - `name` は1〜50文字（zod）。空文字は400
+- **ID生成方式**: `pf_` + 16進数16桁（`crypto.getRandomValues(8byte)` を16進文字列化。例
+  `pf_1a2b3c4d5e6f7089`）。衝突時の内部的なリトライ挙動（衝突検出・再生成）はAPI利用者に
+  関係しない内部実装のため、この文書には記載しない（400/500のレスポンス形は変わらない）
 
 ### DELETE /api/portfolios/:id
 
@@ -140,8 +155,14 @@ zod は handler 境界のみ）。加えてこの文書のエンドポイント�
 | 同じポートフォリオに同じ `code` が既にある      | 409（追加ではなく `PATCH` で数量・単価を更新すること）     |
 | 保有銘柄が既に100件                             | 403                                                        |
 | `quantity` ≤ 0 または `acquisitionPriceSen` ≤ 0 | 400                                                        |
+| `quantity` が上限（`MAX_HOLDING_QUANTITY`=1,000,000株）超過、または `acquisitionPriceSen` が上限（`MAX_PRICE_SEN`=100,000,000銭=1,000,000円）超過 | 400 |
 
 - 201。レスポンスは追加した保有銘柄1件分（`GET` の `holdings[]` の要素と同じ形）
+- **`quantity`/`acquisitionPriceSen` の上限値**は、`calculatePortfolioMetrics`/
+  `describeHoldingValuation` が `quantity × currentPriceSen` 等の積を追加のオーバーフロー
+  チェック無しで計算する前提（[portfolio-metrics.md](../logic/portfolio-metrics.md)）を、
+  入力境界で保証するために設けている（`MAX_HOLDING_QUANTITY × MAX_PRICE_SEN` が
+  `Number.MAX_SAFE_INTEGER` の安全域に収まる値）
 
 ### PATCH /api/portfolios/:id/holdings/:code
 
@@ -152,7 +173,11 @@ zod は handler 境界のみ）。加えてこの文書のエンドポイント�
 ```
 
 - 200。両方または片方だけの更新を許す（zod で optional）
-- 0以下の値は 400
+- 0以下の値、または上限値（`MAX_HOLDING_QUANTITY`/`MAX_PRICE_SEN`。§POST と同じ）超過は 400
+- **両方省略した空更新（`{}`）は 400**（`{ "error": "入力が不正です。項目を確認して再送信してください" }`。
+  `quantity`/`acquisitionPriceSen` のどちらかを指定する必要がある）
+- 対象の `code` がそのポートフォリオに保有されていない場合は **404**
+  （`{ "error": "指定された保有銘柄は見つかりません" }`）
 
 ### DELETE /api/portfolios/:id/holdings/:code
 
