@@ -320,6 +320,45 @@ export function formatBandRange(
 }
 
 /**
+ * ポートフォリオの評価損益（T-103・`docs/02_design/ui/pages/portfolio-page.md` §4.3）。
+ * `▲ +82,340.00 円` / `▼ -12,000.00 円` / `－ 0.00 円`。**FEは符号判定のみ行い、
+ * 差分自体（評価額 - 取得総額）はBEが計算済みの値をそのまま使う**
+ * （`.claude/rules/frontend.md`「計算・判定をしない」）。金額部分は `formatSen` と
+ * 同じ書式（3桁区切り・小数第2位・末尾スペース+円）に揃え、先頭に glyph+符号だけ足す。
+ * `null`（現在株価未取得等でBEが算出不能）は NO_DATA。**`±0.00 円` にしない**
+ * （据置き=0と判定不能=null を区別する。`dividendYoyChangeText` と同じ判断）。
+ */
+export function formatUnrealizedGainLossSen(sen: number | null): string {
+  if (sen === null) return NO_DATA;
+  if (sen === 0) return `－ ${formatSen(0)}`;
+  const sign = sen > 0 ? '▲ +' : '▼ -';
+  return `${sign}${grouped(Math.abs(sen) / 100, 2)} 円`;
+}
+
+/**
+ * 評価損益の色クラス（`pl-positive`/`pl-negative`）。**評価損益専用**
+ * （`design-tokens.md` §2.2「スコア・利回り・増配率には使わない」。`portfolio-page.md` §4.3）。
+ * `0`・`null` は色なし（`undefined`）。色だけで増減を表さないため、
+ * 呼び出し側は必ず `formatUnrealizedGainLossSen`（▲/▼ の glyph）とセットで使うこと。
+ */
+export function unrealizedGainLossColorClass(
+  sen: number | null,
+): 'pl-positive' | 'pl-negative' | undefined {
+  if (sen === null || sen === 0) return undefined;
+  return sen > 0 ? 'pl-positive' : 'pl-negative';
+}
+
+/**
+ * ポートフォリオのスコア平均（T-103・`portfolio-page.md` §4「スコア平均: 小数第1位」）。
+ * `formatMetricValue` は単位（%・倍・年）付き整形のため使えない（スコア平均は単位なしの
+ * 素の数値）。保有0件（BE側が `null` を返す。ゼロ除算を「0点」と誤表示しない）は NO_DATA。
+ */
+export function formatScoreAverage(value: number | null): string {
+  if (value === null) return NO_DATA;
+  return grouped(value, 1);
+}
+
+/**
  * 比率（%・倍）を編集可能なテキスト入力の初期値にする。
  *
  * ROE・配当性向のようにソースが元々2桁程度の比率はそのまま返るが、

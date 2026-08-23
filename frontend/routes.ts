@@ -13,8 +13,15 @@ import type { AuthUser } from './api';
 /**
  * 銘柄コード。4文字固定、先頭3文字は数字・末尾1文字は数字または英大文字
  * （handler の `companyCode` と同じ形式）。
+ *
+ * `export` している（T-103）。`frontend/pages/portfolio-page-logic.ts` の
+ * 保有銘柄追加フォーム（銘柄コード欄）が同じ形式検証を必要とするため、
+ * フロントエンド内部での再利用として export した（`routes.ts` 自身が
+ * BE の `company-input.ts` を独自定義している既存パターンとは別物。あちらは
+ * ADR-0008 のランタイム import 制約を避けるための意図的重複、こちらは同一パッケージ内の
+ * 通常の共有）。
  */
-const COMPANY_CODE = /^\d{3}[0-9A-Z]$/;
+export const COMPANY_CODE = /^\d{3}[0-9A-Z]$/;
 
 /**
  * 指標詳細キーの形式チェック（`docs/adr/0014-analysis-dialog-url-state.md` §決定3）。
@@ -77,6 +84,17 @@ export type Route =
   | { readonly kind: 'criteria' }
   | { readonly kind: 'indicators' }
   | {
+      readonly kind: 'portfolio';
+      /** 表示中のポートフォリオID。既定 `null`（`portfolio-page.md` §2「ユーザーの先頭
+       * ポートフォリオ」）。**先頭ポートフォリオの解決（`portfolios[0]`）は URL の責務外**
+       * （DOM 非依存の `routes.ts` は一覧を知らない）。`App.tsx` が
+       * `resolveActivePortfolioId`（`portfolio-page-logic.ts`）で解決する */
+      readonly portfolioId: string | null;
+      /** 解析ダイアログ共通（ADR-0014）。`list` と同じ形式チェック */
+      readonly selectedCode: string | null;
+      readonly metric: string | null;
+    }
+  | {
       readonly kind: 'login';
       /** 成功後に戻る画面のパス。`sanitizeRedirect` を通した後の値（常に安全な相対パス） */
       readonly redirect: string;
@@ -90,6 +108,7 @@ export const LIST_PATH = '/';
 export const INPUT_PATH = '/input';
 export const CRITERIA_PATH = '/criteria';
 export const INDICATORS_PATH = '/indicators';
+export const PORTFOLIO_PATH = '/portfolio';
 export const LOGIN_PATH = '/login';
 export const SIGNUP_PATH = '/signup';
 
@@ -157,9 +176,23 @@ export function parseRoute(href: string): Route {
 
   const code = params.get('code');
   // 形式不正のコードは「選択なし」にする。API へ渡す前にここで弾く
+  const selectedCode = code !== null && COMPANY_CODE.test(code) ? code : null;
+
+  // ポートフォリオ画面（T-103）。`code`/`metric` は解析ダイアログ共通（ADR-0014）で
+  // `list` と同じ形式チェックを再利用する。ログイン必須の実効ガードは
+  // `resolveRouteGuardRedirect` 側
+  if (pathname === PORTFOLIO_PATH) {
+    return {
+      kind: 'portfolio',
+      portfolioId: parsePortfolioIdParam(params.get('portfolio')),
+      selectedCode,
+      metric: parseMetricParam(params.get('metric')),
+    };
+  }
+
   return {
     kind: 'list',
-    selectedCode: code !== null && COMPANY_CODE.test(code) ? code : null,
+    selectedCode,
     metric: parseMetricParam(params.get('metric')),
     // 真偽値は文字列 "true" のときだけ true にする（`api.ts` の `useActualForScoring` と同じ形式）
     useActualForScoring: params.get('useActualForScoring') === 'true',
@@ -168,6 +201,15 @@ export function parseRoute(href: string): Route {
     sort: parseCompanySortKey(params.get('sort')),
     page: parseCompanyListPage(params.get('page')),
   };
+}
+
+/**
+ * ポートフォリオID（`?portfolio=`）の読み取り。**形式検証はしない**（`pf_xxxxx` 等の
+ * 不透明なサーバー生成ID。`COMPANY_CODE`のような固定長フォーマットが無いため）。
+ * 空文字・未指定は「先頭ポートフォリオへ委ねる」既定（`null`）にする。
+ */
+function parsePortfolioIdParam(raw: string | null): string | null {
+  return raw !== null && raw !== '' ? raw : null;
 }
 
 /** 形式不正・空文字・未指定は `null`（概要モード）に倒す */
@@ -212,10 +254,35 @@ export function createListRoute(
   };
 }
 
+/**
+ * `kind: 'portfolio'` の `Route` を既定値付きで作る。`createListRoute` と同じ理由
+ * （呼び出し側は差分だけ書けばよい）。
+ */
+export function createPortfolioRoute(
+  overrides?: Partial<Omit<Extract<Route, { readonly kind: 'portfolio' }>, 'kind'>>,
+): Route {
+  return {
+    kind: 'portfolio',
+    portfolioId: null,
+    selectedCode: null,
+    metric: null,
+    ...overrides,
+  };
+}
+
 export function routeToPath(route: Route): string {
   if (route.kind === 'input') return INPUT_PATH;
   if (route.kind === 'criteria') return CRITERIA_PATH;
   if (route.kind === 'indicators') return INDICATORS_PATH;
+
+  if (route.kind === 'portfolio') {
+    const params = new URLSearchParams();
+    if (route.portfolioId !== null) params.set('portfolio', route.portfolioId);
+    if (route.selectedCode !== null) params.set('code', route.selectedCode);
+    if (route.metric !== null) params.set('metric', route.metric);
+    const query = params.toString();
+    return query === '' ? PORTFOLIO_PATH : `${PORTFOLIO_PATH}?${query}`;
+  }
 
   if (route.kind === 'login' || route.kind === 'signup') {
     const base = route.kind === 'login' ? LOGIN_PATH : SIGNUP_PATH;
@@ -258,9 +325,8 @@ export function isAdmin(user: AuthUser | null): boolean {
  * **タブを隠す／FE でリダイレクトすることは認可ではない**（`.claude/rules/frontend.md`）。
  * `/input` の実効的な制限は BE 側の `requireRole('admin')`（T-104）が別途必要。
  *
- * **`/indicators` はログイン必須（user/admin）でガード済み**（T-101）。`/portfolio` は
- * `Route` 型に未追加のため引き続き本関数の対象外（§5.2 の該当行は未実装。
- * T-102/T-103 で `Route` バリアント追加と同時にガード条件を足すこと）。
+ * **`/indicators` はログイン必須（user/admin）でガード済み**（T-101）。`/portfolio` も
+ * 同様にログイン必須（T-103。`portfolio-page.md` §1「ログイン必須（user・admin）」）。
  *
  * guest 判定は常に `user === null`（`Role` 型に `'guest'` は無い。
  * `src/domain/auth/user.ts` の `Role` 型定義を参照）。
@@ -280,6 +346,11 @@ export function resolveRouteGuardRedirect(route: Route, user: AuthUser | null): 
   // 指標カスタマイズ画面（T-101）。user/admin いずれも許可（`/input` と異なりロール分岐は無い。
   // `screen-list.md` §2「指標カスタマイズ: user ✅ / admin ✅」）
   if (route.kind === 'indicators' && user === null) {
+    return { kind: 'login', redirect: routeToPath(route) };
+  }
+
+  // ポートフォリオ画面（T-103）。`/indicators` と同じくロール不問・ログイン必須
+  if (route.kind === 'portfolio' && user === null) {
     return { kind: 'login', redirect: routeToPath(route) };
   }
 

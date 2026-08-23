@@ -1,5 +1,5 @@
 import type { AuthUser } from '../api';
-import { createListRoute, isAdmin, routeToPath, type Route } from '../routes';
+import { createListRoute, createPortfolioRoute, isAdmin, routeToPath, type Route } from '../routes';
 
 /**
  * 2画面の切り替え。**本物の `<a href>` を使う**（`.claude/rules/frontend.md`:
@@ -24,6 +24,14 @@ export function shouldShowInputTab(user: AuthUser | null): boolean {
  * guest（`user === null`）には表示しない（`indicator-custom-page.md` §1「ログイン必須」）。
  */
 export function shouldShowIndicatorsTab(user: AuthUser | null): boolean {
+  return user !== null;
+}
+
+/**
+ * 「ポートフォリオ」タブを表示するか（T-103。`portfolio-page.md` §1「ログイン必須
+ * （user・admin）」）。`shouldShowIndicatorsTab` と同型（ロール不問・guest は非表示）。
+ */
+export function shouldShowPortfolioTab(user: AuthUser | null): boolean {
   return user !== null;
 }
 
@@ -68,13 +76,22 @@ export function NavBar({
       <NavLink to={createListRoute()} active={current.kind === 'list'} onNavigate={onNavigate}>
         検索
       </NavLink>
+      {/* 並び順は screen-list.md §4「検索・ポートフォリオ・指標カスタマイズ・評価基準・銘柄登録」。
+          T-103でポートフォリオタブを本来の位置（検索の直後・評価基準の直前）へ追加した。
+          評価基準⇄指標カスタマイズの順序自体が完成形と食い違っている件は本タスクのスコープ外
+          （fe-plan.md §1 確認事項E、Manager確認済み） */}
+      {shouldShowPortfolioTab(user) && (
+        <NavLink
+          to={createPortfolioRoute()}
+          active={current.kind === 'portfolio'}
+          onNavigate={onNavigate}
+        >
+          ポートフォリオ
+        </NavLink>
+      )}
       <NavLink to={{ kind: 'criteria' }} active={current.kind === 'criteria'} onNavigate={onNavigate}>
         評価基準
       </NavLink>
-      {/* 並び順は screen-list.md §4「検索・ポートフォリオ・指標カスタマイズ・評価基準・銘柄登録」だが、
-          `/portfolio`（T-103）は本タスクのスコープ外で未実装のため、現状は
-          「検索・評価基準・指標カスタマイズ・銘柄登録」の順になる。T-103実装時に
-          `/portfolio` 分だけ本来の位置（評価基準の前）へ差し込むこと */}
       {shouldShowIndicatorsTab(user) && (
         <NavLink
           to={{ kind: 'indicators' }}

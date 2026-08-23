@@ -198,6 +198,15 @@ describe('frontend/**/*.tsx に色・rgba直値が無い（design-tokens.md §6 
     '../../frontend/pages/CriteriaPage.tsx',
     '../../frontend/components/MetricCriteriaCard.tsx',
     '../../frontend/components/ImplementationBadge.tsx',
+    // T-103: ポートフォリオ画面（解析ダイアログの共有抽出を含む）
+    '../../frontend/components/AnalysisDialogBody.tsx',
+    '../../frontend/pages/PortfolioPage.tsx',
+    '../../frontend/components/PortfolioTabs.tsx',
+    '../../frontend/components/HoldingForm.tsx',
+    '../../frontend/components/HoldingsTable.tsx',
+    '../../frontend/components/CreatePortfolioForm.tsx',
+    // T-103 fe-review CR-3: 保有銘柄編集フォーム
+    '../../frontend/components/EditHoldingForm.tsx',
   ];
 
   it.each(tsxFiles)('%s に #RRGGBB / rgba( の直値が無い', (relativePath) => {
@@ -255,12 +264,24 @@ describe('ListPage.tsx の --font-mono 適用（class 付与の検証。CR-1/CR-
     );
   });
 
-  it('総合点の分母（maxTotalScore）に numeric class が付与されている（T-096: ScoringBody 内でローカル変数 scoring に束縛）', () => {
-    expect(listPageSource).toMatch(/className="numeric">\{scoring\.maxTotalScore\}/);
+  // T-103: 以下2件は `ScoringBody`（`scoring` ローカル変数）が `AnalysisDialogBody.tsx` へ
+  // 移設されたため、参照元をそちらへ更新した（動作は変えず抽出のみ）
+  it('総合点の分母（maxTotalScore）に numeric class が付与されている（T-096: AnalysisDialogBody 内でローカル変数 scoring に束縛）', () => {
+    const analysisDialogBodySource = readFileSync(
+      resolve(__dirname, '../../frontend/components/AnalysisDialogBody.tsx'),
+      'utf-8',
+    );
+    expect(analysisDialogBodySource).toMatch(/className="numeric">\{scoring\.maxTotalScore\}/);
   });
 
   it('解析結果詳細の入力日時（formatFetchedAt(scoring.fetchedAt)）に numeric class が付与されている（T-096: ローカル変数 scoring）', () => {
-    expect(listPageSource).toMatch(/className="numeric">\{formatFetchedAt\(scoring\.fetchedAt\)\}/);
+    const analysisDialogBodySource = readFileSync(
+      resolve(__dirname, '../../frontend/components/AnalysisDialogBody.tsx'),
+      'utf-8',
+    );
+    expect(analysisDialogBodySource).toMatch(
+      /className="numeric">\{formatFetchedAt\(scoring\.fetchedAt\)\}/,
+    );
   });
 });
 
@@ -315,42 +336,45 @@ describe('MetricTable.tsx に「›」装飾列が追加されている（T-096 
   });
 });
 
-describe('ListPage.tsx のダイアログ内エラー表示に role="alert"（T-096 fe-review CR-3 是正）', () => {
-  const listPageSource = readFileSync(
-    resolve(__dirname, '../../frontend/pages/ListPage.tsx'),
+// T-103: 以下3ブロックは `ScoringBody` の `AnalysisDialogBody.tsx` への抽出に伴い、
+// 参照元を `ListPage.tsx` から `AnalysisDialogBody.tsx` へ更新した
+// （動作は変えず抽出のみ。アサーション内容自体は変更していない）。
+describe('AnalysisDialogBody.tsx のダイアログ内エラー表示に role="alert"（T-096 fe-review CR-3 是正）', () => {
+  const analysisDialogBodySource = readFileSync(
+    resolve(__dirname, '../../frontend/components/AnalysisDialogBody.tsx'),
     'utf-8',
   );
 
   it('解析結果取得失敗時の <p className="meta"> に role="alert" が付与されている', () => {
-    expect(listPageSource).toMatch(
+    expect(analysisDialogBodySource).toMatch(
       /<p className="meta" role="alert">\s*解析結果を表示できませんでした。/,
     );
   });
 });
 
-describe('ListPage.tsx のダイアログ見出しに銘柄コードが併記されている（T-096 fe-review CR-4 是正）', () => {
-  const listPageSource = readFileSync(
-    resolve(__dirname, '../../frontend/pages/ListPage.tsx'),
+describe('AnalysisDialogBody.tsx のダイアログ見出しに銘柄コードが併記されている（T-096 fe-review CR-4 是正）', () => {
+  const analysisDialogBodySource = readFileSync(
+    resolve(__dirname, '../../frontend/components/AnalysisDialogBody.tsx'),
     'utf-8',
   );
 
   it('<h2> 内で selected.code が mono company-code class 付きで描画される', () => {
-    expect(listPageSource).toMatch(
+    expect(analysisDialogBodySource).toMatch(
       /\{selected\.code !== null && <span className="mono company-code">\{selected\.code\}<\/span>\}/,
     );
   });
 });
 
 describe('概要モードの2カラム化（T-096 fe-review CR-5 是正。analysis-dialog.md §3）', () => {
-  const listPageSource = readFileSync(
-    resolve(__dirname, '../../frontend/pages/ListPage.tsx'),
+  const analysisDialogBodySource = readFileSync(
+    resolve(__dirname, '../../frontend/components/AnalysisDialogBody.tsx'),
     'utf-8',
   );
 
-  it('ListPage.tsx: 総合スコアカード（dialog-summary-score）とレーダーチャート（dialog-summary-chart）が dialog-summary でグリッド化されている', () => {
-    expect(listPageSource).toMatch(/<div className="dialog-summary">/);
-    expect(listPageSource).toMatch(/<div className="dialog-summary-score">/);
-    expect(listPageSource).toMatch(/<div className="dialog-summary-chart">/);
+  it('AnalysisDialogBody.tsx: 総合スコアカード（dialog-summary-score）とレーダーチャート（dialog-summary-chart）が dialog-summary でグリッド化されている', () => {
+    expect(analysisDialogBodySource).toMatch(/<div className="dialog-summary">/);
+    expect(analysisDialogBodySource).toMatch(/<div className="dialog-summary-score">/);
+    expect(analysisDialogBodySource).toMatch(/<div className="dialog-summary-chart">/);
   });
 
   it('style.css: .dialog-summary が2列グリッドで、左カラム幅を --space-* の組み合わせ（新規トークン無し）で表現している', () => {
@@ -361,5 +385,60 @@ describe('概要モードの2カラム化（T-096 fe-review CR-5 是正。analys
     expect(block).toMatch(
       /grid-template-columns:\s*calc\(var\(--space-6\) \* 8 \+ var\(--space-4\)\) 1fr;/,
     );
+  });
+});
+
+/**
+ * ポートフォリオ画面（`/portfolio`、T-103）。`docs/02_design/ui/pages/portfolio-page.md` §3
+ * 「評価額合計は `--font-size-display`（38px）/700」・§4.3「評価損益にのみ
+ * `--color-positive`/`--color-negative`」。`design-tokens.md` §3.2・§4.3 が正。
+ */
+describe('style.css: .portfolio-total-value（評価額合計。design-tokens.md §3.2）', () => {
+  it('--font-size-display / font-weight: 700 を参照している', () => {
+    const blockMatch = styleCss.match(/\.portfolio-total-value\s*\{([\s\S]*?)\}/);
+    expect(blockMatch).not.toBeNull();
+    const block = blockMatch?.[1] ?? '';
+    expect(block).toContain('var(--font-size-display)');
+    expect(block).toMatch(/font-weight:\s*700;/);
+  });
+});
+
+describe('style.css: .pl-positive / .pl-negative（評価損益専用の色。design-tokens.md §2.2）', () => {
+  it('.pl-positive は --color-positive を参照している', () => {
+    expect(styleCss).toMatch(/\.pl-positive\s*\{\s*color:\s*var\(--color-positive\);\s*\}/);
+  });
+
+  it('.pl-negative は --color-negative を参照している', () => {
+    expect(styleCss).toMatch(/\.pl-negative\s*\{\s*color:\s*var\(--color-negative\);\s*\}/);
+  });
+});
+
+/**
+ * ポートフォリオタブの選択中スタイル（T-103 fe-review CR-6）。`PortfolioTabs.tsx` の
+ * `aria-current="true"` に対応するスタイルが `style.css` に存在することを機械検証する
+ * （`.nav a[aria-current='page']` の検証ブロックと同型）。トークン参照のみで
+ * 色の直値が無いことも確認する（design-tokens.md §6 受入基準）。
+ */
+describe('style.css: .portfolio-tabs button[aria-current] の選択中スタイル（CR-6是正）', () => {
+  it('選択中タブは --color-action / --color-surface を参照している（直値なし）', () => {
+    const blockMatch = styleCss.match(
+      /\.portfolio-tabs button\[aria-current='true'\]\s*\{([\s\S]*?)\}/,
+    );
+    expect(blockMatch).not.toBeNull();
+    const block = blockMatch?.[1] ?? '';
+    expect(block).toContain('var(--color-surface)');
+    expect(block).toContain('var(--color-action)');
+    expect(block).not.toMatch(/#[0-9a-fA-F]{3,6}/);
+    expect(block).not.toMatch(/rgba\(/);
+  });
+
+  it('非選択タブ（「＋ 追加」は除外）は --color-line-strong / --color-text を参照している（.button-outline相当）', () => {
+    const blockMatch = styleCss.match(
+      /\.portfolio-tabs button:not\(\[aria-current='true'\]\):not\(\.portfolio-tabs-add\)\s*\{([\s\S]*?)\}/,
+    );
+    expect(blockMatch).not.toBeNull();
+    const block = blockMatch?.[1] ?? '';
+    expect(block).toContain('var(--color-line-strong)');
+    expect(block).toContain('var(--color-text)');
   });
 });

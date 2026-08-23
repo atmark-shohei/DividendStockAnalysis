@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AuthUser } from '../../frontend/api';
 import {
   createListRoute,
+  createPortfolioRoute,
   isAdmin,
   parseRoute,
   resolveRouteGuardRedirect,
@@ -195,6 +196,47 @@ describe('parseRoute', () => {
   });
 });
 
+/**
+ * ポートフォリオ画面（T-103）。`docs/02_design/ui/pages/portfolio-page.md` §2
+ * 「portfolio（表示中のポートフォリオID）/ code・metric（解析ダイアログ共通）」。
+ */
+describe('parseRoute（ポートフォリオ）', () => {
+  const cases: readonly (readonly [name: string, href: string, expected: Route])[] = [
+    ['ポートフォリオ画面（既定）', '/portfolio', createPortfolioRoute()],
+    [
+      'portfolio 付き',
+      '/portfolio?portfolio=pf_01',
+      createPortfolioRoute({ portfolioId: 'pf_01' }),
+    ],
+    [
+      'portfolio・code・metric を同時に受け取る',
+      '/portfolio?portfolio=pf_01&code=7203&metric=roeAverage',
+      createPortfolioRoute({ portfolioId: 'pf_01', selectedCode: '7203', metric: 'roeAverage' }),
+    ],
+    [
+      '末尾スラッシュは同じ画面（/input 等と同じ正規化）',
+      '/portfolio/',
+      createPortfolioRoute(),
+    ],
+    ['portfolio 省略時は null（先頭ポートフォリオへ委ねる既定）', '/portfolio?code=7203', createPortfolioRoute({ selectedCode: '7203' })],
+    ['portfolio が空文字なら null 扱い', '/portfolio?portfolio=', createPortfolioRoute()],
+    [
+      'code の形式不正は選択なしにする（list と同じ形式チェックを再利用）',
+      '/portfolio?code=abc',
+      createPortfolioRoute(),
+    ],
+    [
+      'metric の形式不正は概要モードへ倒す（list と同じ形式チェックを再利用）',
+      '/portfolio?metric=roe-average',
+      createPortfolioRoute(),
+    ],
+  ];
+
+  it.each(cases)('%s', (_name, href, expected) => {
+    expect(parseRoute(href)).toEqual(expected);
+  });
+});
+
 describe('routeToPath', () => {
   const cases: readonly (readonly [name: string, route: Route, expected: string])[] = [
     ['一覧・選択なし', createListRoute(), '/'],
@@ -202,6 +244,17 @@ describe('routeToPath', () => {
     ['入力画面', { kind: 'input' }, '/input'],
     ['評価基準画面', { kind: 'criteria' }, '/criteria'],
     ['指標カスタマイズ画面', { kind: 'indicators' }, '/indicators'],
+    ['ポートフォリオ画面（既定）', createPortfolioRoute(), '/portfolio'],
+    [
+      'ポートフォリオID付き',
+      createPortfolioRoute({ portfolioId: 'pf_01' }),
+      '/portfolio?portfolio=pf_01',
+    ],
+    [
+      'ポートフォリオID・code・metric を同時に付ける',
+      createPortfolioRoute({ portfolioId: 'pf_01', selectedCode: '7203', metric: 'roeAverage' }),
+      '/portfolio?portfolio=pf_01&code=7203&metric=roeAverage',
+    ],
     [
       'metric 付きは code の後ろに並ぶ',
       createListRoute({ selectedCode: '7203', metric: 'roeAverage' }),
@@ -300,6 +353,26 @@ describe('createListRoute', () => {
       q: '',
       sort: 'created_desc',
       page: 1,
+    });
+  });
+});
+
+describe('createPortfolioRoute', () => {
+  it('引数無しは既定値そのもの', () => {
+    expect(createPortfolioRoute()).toEqual({
+      kind: 'portfolio',
+      portfolioId: null,
+      selectedCode: null,
+      metric: null,
+    });
+  });
+
+  it('overrides で差分だけ渡せる', () => {
+    expect(createPortfolioRoute({ portfolioId: 'pf_01' })).toEqual({
+      kind: 'portfolio',
+      portfolioId: 'pf_01',
+      selectedCode: null,
+      metric: null,
     });
   });
 });
@@ -409,6 +482,7 @@ describe('resolveRouteGuardRedirect', () => {
   const inputRoute: Route = { kind: 'input' };
   const criteriaRoute: Route = { kind: 'criteria' };
   const indicatorsRoute: Route = { kind: 'indicators' };
+  const portfolioRoute: Route = createPortfolioRoute();
   const loginRoute: Route = { kind: 'login', redirect: '/' };
   const signupRoute: Route = { kind: 'signup', redirect: '/' };
 
@@ -442,6 +516,15 @@ describe('resolveRouteGuardRedirect', () => {
     ],
     ['userが/indicatorsを開く -> ガード不要', indicatorsRoute, asUser, null],
     ['adminが/indicatorsを開く -> ガード不要', indicatorsRoute, asAdmin, null],
+    // ポートフォリオ画面（T-103）はログイン必須・user/admin両方許可（`/indicators`と同型）
+    [
+      'guestが/portfolioを開く -> /loginへ',
+      portfolioRoute,
+      null,
+      { kind: 'login', redirect: '/portfolio' },
+    ],
+    ['userが/portfolioを開く -> ガード不要', portfolioRoute, asUser, null],
+    ['adminが/portfolioを開く -> ガード不要', portfolioRoute, asAdmin, null],
   ];
 
   it.each(cases)('%s', (_name, route, user, expected) => {

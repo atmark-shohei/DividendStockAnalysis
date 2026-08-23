@@ -157,6 +157,150 @@ export function getScoringBands(): Promise<ScoringBandsResponse> {
  * `getCurrentUser` のような 401 特別扱いは不要）。未設定ユーザーには全10指標選択・
  * デフォルト基準値相当が返る（`indicator-custom-page.md` §6・§7）。
  */
+/**
+ * ポートフォリオ関連の型（T-103）。**BE の handler DTO（`src/handler/dto/portfolio.ts`）が
+ * まだ存在しないため、一時的にここでローカル定義する**（`docs/02_design/api/portfolio-api.md`
+ * の JSON 例をそのまま型へ落としたもの。`CompanyListResponse` と同じ「handler DTO化前は
+ * ここへローカル定義」パターン）。
+ *
+ * TODO(T-103・推測実装): BE 側の handler DTO が実装され次第、この節の `interface` 群を
+ * `import type { ... } from '@/handler/dto/portfolio'` に置き換え、ここのローカル定義は
+ * 削除すること（二重定義の解消。fe-plan.md §5）。
+ */
+export interface PortfolioSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly holdingCount: number;
+}
+
+export interface PortfolioListResponse {
+  readonly portfolios: readonly PortfolioSummary[];
+  readonly maxPortfolios: number;
+}
+
+/** `GET /api/portfolios/:id` の `metrics`。`portfolio-metrics.md` の `PortfolioMetrics` そのもの */
+export interface PortfolioMetricsView {
+  readonly totalValueSen: number;
+  readonly evaluableValueCount: number;
+  readonly unrealizedGainLossSen: number;
+  readonly weightedYieldPercent: number | null;
+  readonly costBasisYieldPercent: number | null;
+  readonly yieldEvaluableHoldingCount: number;
+  readonly scoreAverage: number | null;
+}
+
+/** `GET /api/portfolios/:id` の `holdings[]` の1件分 */
+export interface HoldingView {
+  readonly code: string;
+  readonly name: string;
+  readonly quantity: number;
+  readonly acquisitionPriceSen: number;
+  readonly currentPriceSen: number | null;
+  readonly valueSen: number | null;
+  readonly unrealizedGainLossSen: number | null;
+  readonly dividendYieldPercent: number | null;
+  readonly totalScore: number;
+  readonly maxTotalScore: number;
+  readonly effectiveMetricCount: number;
+  readonly totalMetricCount: number;
+}
+
+export interface PortfolioDetailResponse {
+  readonly id: string;
+  readonly name: string;
+  readonly metrics: PortfolioMetricsView;
+  readonly holdings: readonly HoldingView[];
+}
+
+export interface CreatePortfolioRequest {
+  readonly name: string;
+}
+
+export interface AddHoldingRequest {
+  readonly code: string;
+  readonly quantity: number;
+  readonly acquisitionPriceSen: number;
+}
+
+export interface UpdateHoldingRequest {
+  readonly quantity?: number;
+  readonly acquisitionPriceSen?: number;
+}
+
+/** ログイン中のユーザーのポートフォリオ一覧。**保有銘柄の明細は含まない**（軽量に保つ） */
+export function listPortfolios(): Promise<PortfolioListResponse> {
+  return request<PortfolioListResponse>('/api/portfolios');
+}
+
+/**
+ * ポートフォリオを作成する。201。上限（10）到達時は403（`portfolio-api.md`）。
+ *
+ * TODO(T-103・推測実装): 応答本文の形は `portfolio-api.md` に明記が無い（201とだけ記載）。
+ * `GET /api/portfolios` の `portfolios[]` 要素（`PortfolioSummary`）と同じ形が返る前提で
+ * 実装した（作成直後にその1件を一覧へ反映しやすくするための自然な設計。BE実装後に
+ * 実レスポンスと突き合わせて確認すること）。
+ */
+export function createPortfolio(payload: CreatePortfolioRequest): Promise<PortfolioSummary> {
+  return request<PortfolioSummary>('/api/portfolios', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * ポートフォリオを削除する。**冪等にしない**（存在しない・他ユーザーのものは404。
+ * `deleteCompany` と異なり404も例外として扱う。`portfolio-api.md` §DELETE /api/portfolios/:id）。
+ */
+export async function deletePortfolio(id: string): Promise<void> {
+  const response = await fetch(`/api/portfolios/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('削除に失敗しました。再試行してください');
+}
+
+/**
+ * ポートフォリオの集計・保有銘柄一覧。**集計値はサーバー側で計算済み**（`portfolio-page.md`
+ * §8）。フロントは再計算しない。
+ */
+export function getPortfolio(id: string): Promise<PortfolioDetailResponse> {
+  return request<PortfolioDetailResponse>(`/api/portfolios/${encodeURIComponent(id)}`);
+}
+
+/** 保有銘柄を1件追加する。201。レスポンスは追加した保有銘柄1件分（`portfolio-api.md`） */
+export function addHolding(
+  portfolioId: string,
+  payload: AddHoldingRequest,
+): Promise<HoldingView> {
+  return request<HoldingView>(`/api/portfolios/${encodeURIComponent(portfolioId)}/holdings`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * 保有銘柄の数量・取得単価を更新する。200。
+ *
+ * TODO(T-103・推測実装): 応答本文の形は `portfolio-api.md` に明記が無い（200とだけ記載）。
+ * `POST` と同様に更新後の保有銘柄1件分（`HoldingView`）が返る前提で実装した。
+ */
+export function updateHolding(
+  portfolioId: string,
+  code: string,
+  payload: UpdateHoldingRequest,
+): Promise<HoldingView> {
+  return request<HoldingView>(
+    `/api/portfolios/${encodeURIComponent(portfolioId)}/holdings/${encodeURIComponent(code)}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+  );
+}
+
+/** 保有銘柄を1件削除する。**204・冪等**（未保有でも204。`portfolio-api.md`） */
+export async function removeHolding(portfolioId: string, code: string): Promise<void> {
+  const response = await fetch(
+    `/api/portfolios/${encodeURIComponent(portfolioId)}/holdings/${encodeURIComponent(code)}`,
+    { method: 'DELETE' },
+  );
+  if (!response.ok) throw new Error('削除に失敗しました。再試行してください');
+}
+
 export function getIndicatorSettings(): Promise<IndicatorSettingsResponse> {
   return request<IndicatorSettingsResponse>('/api/indicator-settings');
 }

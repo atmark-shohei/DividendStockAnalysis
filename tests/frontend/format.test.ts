@@ -11,11 +11,14 @@ import {
   formatBandRange,
   formatMetricValue,
   formatPriceAsOf,
+  formatScoreAverage,
   formatSen,
+  formatUnrealizedGainLossSen,
   payoutRatioBreakdownText,
   ratioToEditableText,
   reasonText,
   senToEditableText,
+  unrealizedGainLossColorClass,
 } from '../../frontend/format';
 
 /**
@@ -479,5 +482,75 @@ describe('formatBandRange', () => {
 
   it('下限・上限とも null（区分表として不正な行）は NO_DATA', () => {
     expect(formatBandRange({ minInclusive: null, maxExclusive: null }, '%', false)).toBe(NO_DATA);
+  });
+});
+
+/**
+ * ポートフォリオの評価損益（T-103・`docs/02_design/ui/pages/portfolio-page.md` §4.3）。
+ * **`null`（現在株価未取得等でBEが算出不能）と `0`（評価損益がちょうど0）を混同しない**
+ * （`.claude/rules/frontend.md`「データが無い場合に0を表示しない」）。境界値必須。
+ */
+describe('formatUnrealizedGainLossSen', () => {
+  it('正の値（含み益）は ▲ + 金額 円', () => {
+    expect(formatUnrealizedGainLossSen(8_234_000)).toBe('▲ +82,340.00 円');
+  });
+
+  it('負の値（含み損）は ▼ - 金額 円', () => {
+    expect(formatUnrealizedGainLossSen(-1_200_000)).toBe('▼ -12,000.00 円');
+  });
+
+  it('ちょうど0（境界値）は － 0.00 円（判定可能な結果。null と区別する）', () => {
+    expect(formatUnrealizedGainLossSen(0)).toBe('－ 0.00 円');
+    expect(formatUnrealizedGainLossSen(0)).not.toBe(NO_DATA);
+  });
+
+  it('null（現在株価未取得等で算出不能）は NO_DATA', () => {
+    expect(formatUnrealizedGainLossSen(null)).toBe(NO_DATA);
+  });
+
+  it('1銭差の境界値でも正しく銭→円変換する', () => {
+    expect(formatUnrealizedGainLossSen(1)).toBe('▲ +0.01 円');
+    expect(formatUnrealizedGainLossSen(-1)).toBe('▼ -0.01 円');
+  });
+});
+
+describe('unrealizedGainLossColorClass（評価損益専用の色。design-tokens.md §2.2）', () => {
+  it('正の値は pl-positive', () => {
+    expect(unrealizedGainLossColorClass(100)).toBe('pl-positive');
+  });
+
+  it('負の値は pl-negative', () => {
+    expect(unrealizedGainLossColorClass(-100)).toBe('pl-negative');
+  });
+
+  it('0（境界値）は色なし（undefined）', () => {
+    expect(unrealizedGainLossColorClass(0)).toBeUndefined();
+  });
+
+  it('null（算出不能）は色なし（undefined）', () => {
+    expect(unrealizedGainLossColorClass(null)).toBeUndefined();
+  });
+});
+
+/**
+ * ポートフォリオのスコア平均（T-103・`portfolio-page.md` §4「スコア平均: 小数第1位」）。
+ * 保有0件は `null`（ゼロ除算を「0点」と誤表示しない。§10 受入基準）。
+ */
+describe('formatScoreAverage', () => {
+  it('null（保有0件）は NO_DATA。0点と表示しない', () => {
+    expect(formatScoreAverage(null)).toBe(NO_DATA);
+  });
+
+  it('小数第1位で丸める', () => {
+    expect(formatScoreAverage(68.2)).toBe('68.2');
+  });
+
+  it('0（境界値。実際にスコア平均が0の場合）は NO_DATA にしない', () => {
+    expect(formatScoreAverage(0)).toBe('0.0');
+    expect(formatScoreAverage(0)).not.toBe(NO_DATA);
+  });
+
+  it('整数値も小数第1位までゼロ埋めする', () => {
+    expect(formatScoreAverage(70)).toBe('70.0');
   });
 });

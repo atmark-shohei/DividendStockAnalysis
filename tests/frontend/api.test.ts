@@ -1,16 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  addHolding,
+  createPortfolio,
+  deletePortfolio,
   getCompany,
   getCompanyDividends,
   getCurrentUser,
   getIndicatorSettings,
+  getPortfolio,
   importFromEdinet,
   listCompanies,
+  listPortfolios,
   login,
   logout,
+  removeHolding,
   saveIndicatorSettings,
   signup,
+  updateHolding,
 } from '../../frontend/api';
 
 /**
@@ -328,6 +335,230 @@ describe('saveIndicatorSettings', () => {
       selected: ['roeAverage'],
       basisValues: { roeAverage: 12 },
     });
+  });
+});
+
+/**
+ * ポートフォリオ関連（T-103・fe-review CR-4）。契約は
+ * `docs/02_design/api/portfolio-api.md`。BE handler の実装が無いため、モックレスポンスは
+ * 設計書の JSON サンプルをそのまま流用する（TODO: BE実装後、実レスポンスとの整合を再確認する）。
+ * **実 API は叩かない**（`getCompany` と同じ方針）。
+ */
+describe('listPortfolios', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GET /api/portfolios を呼ぶ', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() =>
+      Promise.resolve(jsonResponse({ portfolios: [], maxPortfolios: 10 })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await listPortfolios();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/portfolios');
+  });
+
+  it('レスポンスの portfolios/maxPortfolios をそのまま透過する', async () => {
+    const body = {
+      portfolios: [{ id: 'pf_01', name: 'メインNISA', holdingCount: 4 }],
+      maxPortfolios: 10,
+    };
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(jsonResponse(body)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(listPortfolios()).resolves.toEqual(body);
+  });
+});
+
+describe('createPortfolio', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('POST /api/portfolios へ { name } を JSON で送る', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() =>
+      Promise.resolve(
+        jsonResponse({ id: 'pf_02', name: '高配当コア', holdingCount: 0 }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createPortfolio({ name: '高配当コア' });
+
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    expect(input).toBe('/api/portfolios');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init?.body as string)).toEqual({ name: '高配当コア' });
+  });
+});
+
+describe('deletePortfolio', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('DELETE /api/portfolios/:id を呼ぶ（idはURLエンコード）', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(new Response(null, { status: 204 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await deletePortfolio('pf 01');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/portfolios/pf%2001');
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('DELETE');
+  });
+
+  it('非OK（404: 他ユーザーのもの・存在しない）で例外を投げる（冪等にしない設計）', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(new Response(null, { status: 404 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(deletePortfolio('pf_99')).rejects.toThrow('削除に失敗しました');
+  });
+});
+
+describe('getPortfolio', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GET /api/portfolios/:id を呼ぶ（idはURLエンコード）', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(jsonResponse({})));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getPortfolio('pf 01');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/portfolios/pf%2001');
+  });
+
+  it('レスポンスの metrics/holdings をそのまま透過する', async () => {
+    const body = {
+      id: 'pf_01',
+      name: 'メインNISA',
+      metrics: {
+        totalValueSen: 62_840_000,
+        evaluableValueCount: 3,
+        unrealizedGainLossSen: 4_120_000,
+        weightedYieldPercent: 3.42,
+        costBasisYieldPercent: 4.1,
+        yieldEvaluableHoldingCount: 3,
+        scoreAverage: 68.2,
+      },
+      holdings: [
+        {
+          code: '7203',
+          name: 'トヨタ自動車',
+          quantity: 100,
+          acquisitionPriceSen: 280_000,
+          currentPriceSen: 314_200,
+          valueSen: 31_420_000,
+          unrealizedGainLossSen: 3_420_000,
+          dividendYieldPercent: 3.18,
+          totalScore: 62,
+          maxTotalScore: 100,
+          effectiveMetricCount: 8,
+          totalMetricCount: 10,
+        },
+      ],
+    };
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(jsonResponse(body)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getPortfolio('pf_01')).resolves.toEqual(body);
+  });
+});
+
+describe('addHolding', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('POST /api/portfolios/:id/holdings へ { code, quantity, acquisitionPriceSen } を JSON で送る', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() =>
+      Promise.resolve(
+        jsonResponse({
+          code: '7203',
+          name: 'トヨタ自動車',
+          quantity: 100,
+          acquisitionPriceSen: 280_000,
+          currentPriceSen: null,
+          valueSen: null,
+          unrealizedGainLossSen: null,
+          dividendYieldPercent: null,
+          totalScore: 0,
+          maxTotalScore: 100,
+          effectiveMetricCount: 0,
+          totalMetricCount: 10,
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await addHolding('pf_01', { code: '7203', quantity: 100, acquisitionPriceSen: 280_000 });
+
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    expect(input).toBe('/api/portfolios/pf_01/holdings');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init?.body as string)).toEqual({
+      code: '7203',
+      quantity: 100,
+      acquisitionPriceSen: 280_000,
+    });
+  });
+});
+
+describe('updateHolding', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('PATCH /api/portfolios/:id/holdings/:code へ payload（両方）を JSON で送る', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() =>
+      Promise.resolve(jsonResponse({ quantity: 150, acquisitionPriceSen: 275_000 })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await updateHolding('pf_01', '7203', { quantity: 150, acquisitionPriceSen: 275_000 });
+
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    expect(input).toBe('/api/portfolios/pf_01/holdings/7203');
+    expect(init?.method).toBe('PATCH');
+    expect(JSON.parse(init?.body as string)).toEqual({
+      quantity: 150,
+      acquisitionPriceSen: 275_000,
+    });
+  });
+
+  it('片方のみの更新（quantity だけ）も payload をそのまま送る（`portfolio-api.md` §PATCH「片方だけの更新を許す」）', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(jsonResponse({ quantity: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await updateHolding('pf_01', '7203', { quantity: 200 });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(init?.body as string)).toEqual({ quantity: 200 });
+  });
+});
+
+describe('removeHolding', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('DELETE /api/portfolios/:id/holdings/:code を呼び、204で解決する（冪等）', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(new Response(null, { status: 204 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(removeHolding('pf_01', '7203')).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/portfolios/pf_01/holdings/7203');
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('DELETE');
+  });
+
+  it('非OK（500等）で例外を投げる', async () => {
+    const fetchMock = vi.fn<FetchImpl>(() => Promise.resolve(new Response(null, { status: 500 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(removeHolding('pf_01', '7203')).rejects.toThrow('削除に失敗しました');
   });
 });
 

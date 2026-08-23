@@ -756,3 +756,83 @@ footer {
   font-size: var(--font-size-2xs);
   white-space: nowrap;
 }
+
+/*
+ * ポートフォリオ画面（`/portfolio`、T-103）。
+ * `docs/02_design/ui/pages/portfolio-page.md` §3・§4。
+ */
+.portfolio-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+/*
+ * 選択中タブ（CR-6・T-103 FEレビュー対応）。`.nav a[aria-current='page']`
+ * （背景・文字色の反転で現在地を示す）の考え方を <button> 用に翻案する。
+ */
+.portfolio-tabs button[aria-current='true'] {
+  background: var(--color-surface);
+  color: var(--color-action);
+  border: 1px solid var(--color-action);
+}
+
+/* 非選択タブは .button-outline 相当の控えめな見た目にする。「＋ 追加」は
+ * .portfolio-tabs-add を除外セレクタにして対象から外す（既定の強調色のまま保つ）。 */
+.portfolio-tabs button:not([aria-current='true']):not(.portfolio-tabs-add) {
+  background: transparent;
+  border: 1px solid var(--color-line-strong);
+  color: var(--color-text);
+}
+
+.portfolio-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin-block: var(--space-3);
+}
+
+.portfolio-summary dt {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.portfolio-summary dd {
+  margin: 0;
+}
+
+/* 評価額合計（§3「--font-size-display（38px）/700」。design-tokens.md §3.2 唯一の用途） */
+.portfolio-total-value {
+  font-size: var(--font-size-display);
+  font-weight: 700;
+}
+
+/* 評価損益専用の色（design-tokens.md §2.2「スコア・利回り・増配率には使わない」）。
+ * 必ず ▲/▼ の glyph（`formatUnrealizedGainLossSen`）とセットで使う */
+.pl-positive {
+  color: var(--color-positive);
+}
+
+.pl-negative {
+  color: var(--color-negative);
+}
+
+.portfolio-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+/*
+ * 保有銘柄テーブルの操作列（CR-3・T-103 FEレビュー対応）。
+ * `.metric-row-button::after`（`inset: 0`）が行全体の当たり判定を覆う stretched button
+ * パターンのため、`position: relative` + `z-index` でこの列のボタンを前面に出す
+ * （色・サイズの直値は使わない。当たり判定の回避だけが目的）。
+ */
+.holding-row-actions {
+  position: relative;
+  z-index: 1;
+}

@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type {
+  AddHoldingRequest,
   AnalyzeCompanyRequest,
   AuthUser,
   CompanyListResponse,
   DividendHistoryResponse,
+  HoldingView,
   IndicatorSettingsRequest,
   IndicatorSettingsResponse,
   LoginRequest,
+  PortfolioDetailResponse,
+  PortfolioListResponse,
   ScoringBandsResponse,
   ScoringResponse,
   SignupRequest,
+  UpdateHoldingRequest,
 } from './api';
 import * as api from './api';
 import { AuthStatus } from './components/AuthStatus';
@@ -20,8 +25,11 @@ import { CriteriaPage } from './pages/CriteriaPage';
 import { IndicatorCustomPage } from './pages/IndicatorCustomPage';
 import { InputPage } from './pages/InputPage';
 import { ListPage } from './pages/ListPage';
+import { PortfolioPage } from './pages/PortfolioPage';
+import { resolveActivePortfolioId } from './pages/portfolio-page-logic';
 import {
   createListRoute,
+  createPortfolioRoute,
   isAdmin,
   parseRoute,
   resolveRouteGuardRedirect,
@@ -79,6 +87,26 @@ export function App() {
   const [loadingIndicatorSettings, setLoadingIndicatorSettings] = useState(false);
   const [savingIndicatorSettings, setSavingIndicatorSettings] = useState(false);
   const [indicatorSettingsError, setIndicatorSettingsError] = useState<string | null>(null);
+  // ポートフォリオ画面（T-103）。`null` は「未取得」（`indicatorSettings` と同じ設計。
+  // 保有0件・ポートフォリオ0件の空配列と区別するため、初期値は空配列ではなく null にする）
+  const [portfolios, setPortfolios] = useState<PortfolioListResponse | null>(null);
+  const [loadingPortfolios, setLoadingPortfolios] = useState(false);
+  const [portfolioDetail, setPortfolioDetail] = useState<PortfolioDetailResponse | null>(null);
+  const [loadingPortfolioDetail, setLoadingPortfolioDetail] = useState(false);
+  const [savingHolding, setSavingHolding] = useState(false);
+  const [savingPortfolio, setSavingPortfolio] = useState(false);
+  const [isAddPortfolioOpen, setIsAddPortfolioOpen] = useState(false);
+  const [isAddHoldingOpen, setIsAddHoldingOpen] = useState(false);
+  const [addPortfolioError, setAddPortfolioError] = useState<string | null>(null);
+  const [addHoldingError, setAddHoldingError] = useState<string | null>(null);
+  // 保有銘柄の編集ダイアログ（CR-3）。`null` = 閉。編集対象1件を保持する
+  // （`indicatorSettings` 等と同じ「取得済みデータをそのまま保持」ではなく、
+  // `portfolioDetail.holdings` から都度検索した1件のスナップショットを持つ）
+  const [editingHolding, setEditingHolding] = useState<HoldingView | null>(null);
+  // 保有銘柄の編集・削除、ポートフォリオ削除に共通のエラー表示（CR-3。
+  // 追加系の `addHoldingError`/`addPortfolioError` とは別枠にする）
+  const [holdingActionError, setHoldingActionError] = useState<string | null>(null);
+  const [deletingPortfolio, setDeletingPortfolio] = useState(false);
   // 初回は必ず reload() が走る前提のため true から始める（CR-6。`false` だと
   // マウント直後の1フレームで EmptyState が一瞬見える）
   const [loadingCompanies, setLoadingCompanies] = useState(true);
@@ -94,21 +122,35 @@ export function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
 
-  const selectedCode = route.kind === 'list' ? route.selectedCode : null;
+  // 解析ダイアログ（`AnalysisDialogBody`）は `/`（list）と `/portfolio`（portfolio）で共通
+  // （ADR-0014）。選択中コード・指標詳細キーは両ルートから取り出す
+  const selectedCode =
+    route.kind === 'list' || route.kind === 'portfolio' ? route.selectedCode : null;
   // ③ 予想配当性向の採点に実績を使うか。URL が正（`.claude/rules/frontend.md`
-  // 「選択中の銘柄コードは URL に置く」と同じ扱い。Manager決定、2026-08-06）
+  // 「選択中の銘柄コードは URL に置く」と同じ扱い。Manager決定、2026-08-06）。
+  // **`portfolio` route には `useActualForScoring` フィールドが無い**
+  // （`routes.ts` の `Route` 型定義。`portfolio-page.md` §2 の URL状態表が
+  // `portfolio`/`code`/`metric` のみを規定しているため）。ポートフォリオ画面から開いた
+  // 解析ダイアログでは常に既定（予想優先）表示になり、トグルは永続化されない
+  // （`handleToggleUseActualForScoring` 参照。TODO・推測: 設計書に明記が無いための実装判断）
   const useActualForScoring = route.kind === 'list' ? route.useActualForScoring : false;
   // 検索・ソート・ページも URL が正（`screen-list.md` §3.1）
   const q = route.kind === 'list' ? route.q : '';
   const sort: CompanySortKey = route.kind === 'list' ? route.sort : 'created_desc';
   const page = route.kind === 'list' ? route.page : 1;
+  const activeMetricParam =
+    route.kind === 'list' || route.kind === 'portfolio' ? route.metric : null;
   // ①増配率（5年CAGR。`analysis-dialog.md` §5.1）・②連続非減配年数（同 §5.2）のいずれかの
   // 指標詳細を開いているか。①②は同じ `GET /api/companies/:code/dividends` を共用する（T-098）。
-  // `route.metric` は形式チェック済みだが実在未検証の生値（`ListPage.resolveActiveMetric` が
+  // `route.metric` は形式チェック済みだが実在未検証の生値（`resolveActiveMetric` が
   // 実在検証を担う）。ここでは「取得すべきか」の判定だけなので生値の突き合わせで十分
   const isDividendHistoryMetricOpen =
-    route.kind === 'list' &&
-    (route.metric === 'dividendGrowthRate' || route.metric === 'consecutiveYears');
+    activeMetricParam === 'dividendGrowthRate' || activeMetricParam === 'consecutiveYears';
+  // ポートフォリオ画面（T-103）。既定は「ユーザーの先頭ポートフォリオ」（portfolio-page.md §2）
+  const activePortfolioId =
+    route.kind === 'portfolio'
+      ? resolveActivePortfolioId(route.portfolioId, portfolios?.portfolios ?? [])
+      : null;
 
   /**
    * 依存配列は q/sort/page だけに絞る。`selectedCode`/`useActualForScoring` の変化
@@ -299,6 +341,74 @@ export function App() {
   }, [authIdentityKey(user)]);
 
   /**
+   * ポートフォリオ画面（T-103）。ログイン/ログアウトで別ユーザーに切り替わったら、
+   * 前ユーザーの一覧・詳細キャッシュを破棄する（`indicatorSettings` と同じ CR-1 対策）。
+   */
+  useEffect(() => {
+    setPortfolios(null);
+    setPortfolioDetail(null);
+  }, [authIdentityKey(user)]);
+
+  /**
+   * ポートフォリオ一覧（T-103）。`/portfolio` を開いたときだけ一度取得し、以後は
+   * キャッシュを使い回す（`criteriaBands`/`indicatorSettings` と同じ方針）。
+   */
+  useEffect(() => {
+    if (route.kind !== 'portfolio' || portfolios !== null) return;
+
+    let cancelled = false;
+    setLoadingPortfolios(true);
+    api
+      .listPortfolios()
+      .then((result) => {
+        if (!cancelled) setPortfolios(result);
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setError(cause instanceof Error ? cause.message : 'ポートフォリオ一覧の取得に失敗しました');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPortfolios(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [route.kind, portfolios]);
+
+  /**
+   * ポートフォリオの集計・保有銘柄一覧（T-103）。表示中のポートフォリオ（既定は
+   * 先頭ポートフォリオ）が変わるたびに取得し直す。集計値はサーバー側で計算済みのものを
+   * そのまま使う（`portfolio-page.md` §8。クライアントで再計算しない）。
+   */
+  useEffect(() => {
+    if (activePortfolioId === null) {
+      setPortfolioDetail(null);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingPortfolioDetail(true);
+    api
+      .getPortfolio(activePortfolioId)
+      .then((result) => {
+        if (!cancelled) setPortfolioDetail(result);
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setPortfolioDetail(null);
+        setError(cause instanceof Error ? cause.message : 'ポートフォリオの取得に失敗しました');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPortfolioDetail(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activePortfolioId]);
+
+  /**
    * 指標カスタマイズ画面（T-101）。`/indicators` を開いたときだけ現在の設定を取得し、
    * 以後はキャッシュを使い回す（`criteriaBands` と同じ方針）。保存成功時は PUT の応答を
    * そのまま `indicatorSettings` へ上書きするため、ここでの再取得は行わない
@@ -358,26 +468,43 @@ export function App() {
   /**
    * ダイアログを閉じる（✕ / 背景クリック / Escape）。`?code=` と `?metric=` の
    * 両方を外す（`docs/adr/0014-analysis-dialog-url-state.md` §決定4）。`handleDelete`
-   * 内の削除後処理（同じく selectedCode を外す navigate）と同型
+   * 内の削除後処理（同じく selectedCode を外す navigate）と同型。
+   *
+   * `/portfolio` から開いたダイアログは `/portfolio` へ戻す（ADR-0014「ダイアログは
+   * `/` と `/portfolio` で共通」。**現在の画面から離脱させない**）。
    */
   const handleCloseDialog = useCallback(() => {
+    if (route.kind === 'portfolio') {
+      navigate(createPortfolioRoute({ portfolioId: route.portfolioId }));
+      return;
+    }
     navigate(createListRoute({ q, sort, page }));
-  }, [navigate, q, sort, page]);
+  }, [navigate, route, q, sort, page]);
 
   /** 指標行クリック。`?metric=<key>` を付ける（`code` はそのまま維持） */
   const handleOpenMetric = useCallback(
     (metric: string) => {
       if (selectedCode === null) return;
+      if (route.kind === 'portfolio') {
+        navigate(createPortfolioRoute({ portfolioId: route.portfolioId, selectedCode, metric }));
+        return;
+      }
       navigate(createListRoute({ selectedCode, metric, useActualForScoring, q, sort, page }));
     },
-    [navigate, selectedCode, useActualForScoring, q, sort, page],
+    [navigate, route, selectedCode, useActualForScoring, q, sort, page],
   );
 
   /** 「← 指標一覧へ戻る」。`?metric=` だけを外す（`code` は残す。ADR-0014 §決定4） */
   const handleBackToOverview = useCallback(() => {
     if (selectedCode === null) return;
+    if (route.kind === 'portfolio') {
+      navigate(
+        createPortfolioRoute({ portfolioId: route.portfolioId, selectedCode, metric: null }),
+      );
+      return;
+    }
     navigate(createListRoute({ selectedCode, metric: null, useActualForScoring, q, sort, page }));
-  }, [navigate, selectedCode, useActualForScoring, q, sort, page]);
+  }, [navigate, route, selectedCode, useActualForScoring, q, sort, page]);
 
   /**
    * `dialogHandlers` オブジェクトを `useMemo` 化する（CR-7是正）。インラインで毎レンダー
@@ -397,7 +524,153 @@ export function App() {
 
   const handleToggleUseActualForScoring = (checked: boolean) => {
     if (selectedCode === null) return;
+    // `/portfolio` から開いたダイアログでは永続化しない（`useActualForScoring` 導出のコメント参照。
+    // `Route` の `portfolio` バリアントにこのフィールドが無いため no-op にする）
+    if (route.kind === 'portfolio') return;
     navigate(createListRoute({ selectedCode, useActualForScoring: checked, q, sort, page }));
+  };
+
+  /** ポートフォリオ切替タブのクリック。`?portfolio=` を更新する（`portfolio-page.md` §3） */
+  const handleSelectPortfolio = (id: string) => {
+    setError(null);
+    navigate(createPortfolioRoute({ portfolioId: id }));
+  };
+
+  /** 保有銘柄の行クリック。`?code=` を付けて解析ダイアログを開く（ADR-0014） */
+  const handleOpenHolding = (code: string) => {
+    setError(null);
+    if (route.kind !== 'portfolio') return;
+    navigate(createPortfolioRoute({ portfolioId: route.portfolioId, selectedCode: code }));
+  };
+
+  const handleOpenAddPortfolio = () => {
+    setAddPortfolioError(null);
+    setIsAddPortfolioOpen(true);
+  };
+
+  const handleCloseAddPortfolio = () => {
+    setIsAddPortfolioOpen(false);
+  };
+
+  /**
+   * 「＋ 作成」の送信。成功したら一覧を取り直し、作成したポートフォリオへ切り替える
+   * （`indicatorSettings` の保存と異なり、作成直後にIDが新規発行されるため
+   * 一覧の再取得が必要。fe-plan.md §2.7「更新のたびに軽量な一覧APIを叩き直す」）。
+   */
+  const handleCreatePortfolio = (name: string) => {
+    setSavingPortfolio(true);
+    setAddPortfolioError(null);
+    api
+      .createPortfolio({ name })
+      .then(async (created) => {
+        setIsAddPortfolioOpen(false);
+        setPortfolios(await api.listPortfolios());
+        navigate(createPortfolioRoute({ portfolioId: created.id }));
+      })
+      .catch((cause: unknown) => {
+        setAddPortfolioError(cause instanceof Error ? cause.message : '作成に失敗しました');
+      })
+      .finally(() => {
+        setSavingPortfolio(false);
+      });
+  };
+
+  const handleOpenAddHolding = () => {
+    setAddHoldingError(null);
+    setIsAddHoldingOpen(true);
+  };
+
+  const handleCloseAddHolding = () => {
+    setIsAddHoldingOpen(false);
+  };
+
+  /** 「＋ 銘柄を追加」の送信。成功したら詳細（集計・保有銘柄一覧）を取り直す */
+  const handleAddHolding = (payload: AddHoldingRequest) => {
+    if (activePortfolioId === null) return;
+    setSavingHolding(true);
+    setAddHoldingError(null);
+    api
+      .addHolding(activePortfolioId, payload)
+      .then(async () => {
+        setIsAddHoldingOpen(false);
+        setPortfolioDetail(await api.getPortfolio(activePortfolioId));
+      })
+      .catch((cause: unknown) => {
+        setAddHoldingError(cause instanceof Error ? cause.message : '追加に失敗しました');
+      })
+      .finally(() => {
+        setSavingHolding(false);
+      });
+  };
+
+  /** 保有銘柄の「編集」ボタン（CR-3）。表示中の詳細から該当行を検索してダイアログを開く */
+  const handleOpenEditHolding = (code: string) => {
+    setHoldingActionError(null);
+    const holding = portfolioDetail?.holdings.find((item) => item.code === code) ?? null;
+    setEditingHolding(holding);
+  };
+
+  const handleCloseEditHolding = () => {
+    setEditingHolding(null);
+  };
+
+  /** 編集フォームの送信（CR-3）。成功したら詳細を取り直し、ダイアログを閉じる */
+  const handleUpdateHolding = (code: string, payload: UpdateHoldingRequest) => {
+    if (activePortfolioId === null) return;
+    setSavingHolding(true);
+    setHoldingActionError(null);
+    api
+      .updateHolding(activePortfolioId, code, payload)
+      .then(async () => {
+        setEditingHolding(null);
+        setPortfolioDetail(await api.getPortfolio(activePortfolioId));
+      })
+      .catch((cause: unknown) => {
+        setHoldingActionError(cause instanceof Error ? cause.message : '更新に失敗しました');
+      })
+      .finally(() => {
+        setSavingHolding(false);
+      });
+  };
+
+  /**
+   * 保有銘柄の「削除」ボタン（CR-3）。`window.confirm` はボタン側（`HoldingsTable.tsx`）で
+   * 済ませてから呼ばれる。成功したら詳細を取り直す
+   */
+  const handleRemoveHolding = (code: string) => {
+    if (activePortfolioId === null) return;
+    setHoldingActionError(null);
+    api
+      .removeHolding(activePortfolioId, code)
+      .then(async () => {
+        setPortfolioDetail(await api.getPortfolio(activePortfolioId));
+      })
+      .catch((cause: unknown) => {
+        setHoldingActionError(cause instanceof Error ? cause.message : '削除に失敗しました');
+      });
+  };
+
+  /**
+   * ポートフォリオの「削除」ボタン（CR-3）。`window.confirm` は呼び出し側
+   * （`PortfolioPage.tsx`）で済ませてから呼ばれる。成功したら一覧を取り直し、
+   * 既定（先頭ポートフォリオ、または0件なら空状態）へ遷移する
+   * （`resolveActivePortfolioId` の既存フォールバックに任せる）。
+   */
+  const handleDeletePortfolio = (id: string) => {
+    setDeletingPortfolio(true);
+    setHoldingActionError(null);
+    api
+      .deletePortfolio(id)
+      .then(async () => {
+        setPortfolios(await api.listPortfolios());
+        navigate(createPortfolioRoute());
+      })
+      .catch((cause: unknown) => {
+        setHoldingActionError(cause instanceof Error ? cause.message : '削除に失敗しました');
+      })
+      .finally(() => {
+        setDeletingPortfolio(false);
+      });
   };
 
   const handleDelete = (code: string) => {
@@ -441,9 +714,8 @@ export function App() {
 
   /**
    * ログイン/サインアップ成功後の遷移先は `redirect`（生の相対パス文字列）を
-   * `parseRoute` に通してから `navigate` へ渡す。`/portfolio` 等の未実装画面への
-   * `redirect` が来ても `parseRoute` の「未知のパスは一覧へ倒す」safe fallback がそのまま働く
-   * （`fe-plan.md` §2.2）。
+   * `parseRoute` に通してから `navigate` へ渡す。未知のパスへの `redirect` が来ても
+   * `parseRoute` の「未知のパスは一覧へ倒す」safe fallback がそのまま働く（`fe-plan.md` §2.2）。
    */
   const handleLogin = (payload: LoginRequest, redirect: string) => {
     setAuthBusy(true);
@@ -556,6 +828,61 @@ export function App() {
           onLogin={handleLogin}
           onSignup={handleSignup}
         />
+      ) : route.kind === 'portfolio' ? (
+        <PortfolioPage
+          portfolios={{
+            items: portfolios?.portfolios ?? [],
+            // BE 既定値（`portfolio-api.md` §GET /api/portfolios）と同じ値の意図的な重複
+            // （`EMPTY_COMPANY_LIST` の `perPage: 15` と同じ方針。未取得時のみ使う既定値）
+            maxPortfolios: portfolios?.maxPortfolios ?? 10,
+            loading: loadingPortfolios,
+          }}
+          activePortfolioId={activePortfolioId}
+          detail={{ data: portfolioDetail, loading: loadingPortfolioDetail }}
+          actions={{
+            onSelectPortfolio: handleSelectPortfolio,
+            onCreatePortfolio: handleCreatePortfolio,
+            onAddHolding: handleAddHolding,
+            onOpenHolding: handleOpenHolding,
+            onEditHolding: handleOpenEditHolding,
+            onUpdateHolding: handleUpdateHolding,
+            onRemoveHolding: handleRemoveHolding,
+            onDeletePortfolio: handleDeletePortfolio,
+          }}
+          addPortfolioDialog={{
+            open: isAddPortfolioOpen,
+            onOpen: handleOpenAddPortfolio,
+            onClose: handleCloseAddPortfolio,
+            submitting: savingPortfolio,
+            error: addPortfolioError,
+          }}
+          addHoldingDialog={{
+            open: isAddHoldingOpen,
+            onOpen: handleOpenAddHolding,
+            onClose: handleCloseAddHolding,
+            submitting: savingHolding,
+            error: addHoldingError,
+          }}
+          editHoldingDialog={{
+            open: editingHolding !== null,
+            // 編集は HoldingsTable の行内ボタンから開く（`+`ボタンが無い）ため no-op
+            // （`EditHoldingDialogState` の JSDoc 参照）
+            onOpen: () => {},
+            onClose: handleCloseEditHolding,
+            submitting: savingHolding,
+            error: holdingActionError,
+            holding: editingHolding,
+          }}
+          deletingPortfolio={deletingPortfolio}
+          selected={{ code: selectedCode, scoring, loading: loadingScoring }}
+          payoutRatioSourceControl={{
+            checked: useActualForScoring,
+            onToggle: handleToggleUseActualForScoring,
+          }}
+          activeMetricParam={activeMetricParam}
+          dialogHandlers={dialogHandlers}
+          dividendHistory={{ data: dividendHistory, loading: loadingDividendHistory }}
+        />
       ) : (
         <ListPage
           companies={companies.companies}
@@ -580,7 +907,7 @@ export function App() {
             },
           }}
           rowActions={{ onSelect: handleSelect, onDelete: handleDelete }}
-          activeMetricParam={route.kind === 'list' ? route.metric : null}
+          activeMetricParam={activeMetricParam}
           dialogHandlers={dialogHandlers}
           dividendHistory={{ data: dividendHistory, loading: loadingDividendHistory }}
         />
