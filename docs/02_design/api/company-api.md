@@ -13,6 +13,14 @@
 
 ## 変更履歴
 
+- **2026-08-22**（T-101）: 指標カスタマイズ（`GET`/`PUT /api/indicator-settings`）を実装。
+  併せて `GET /api/scoring/bands` のレスポンスに `metrics[].defaultBasisValue` を追加し、
+  `GET /api/companies/:code` がログイン中ユーザーの指標カスタマイズ設定を反映するように
+  なった（未ログイン・未設定ユーザーは従来どおり全10指標）。詳細は下記
+  「GET /api/scoring/bands」「GET /api/companies/:code」「GET/PUT /api/indicator-settings」の
+  各節を参照。**`score_cards`（一覧・ポートフォリオの総合点）は変更していない**
+  （常にデフォルト設定＝全10指標で計算し続ける。[schema.md](../database/schema.md)
+  §未実装・検討事項）。
 - **2026-08-22**（T-099）: 新規エンドポイント `GET /api/scoring/bands` を追加。
   10指標の区分表を `src/domain/scoring/bands.ts` からそのまま返す（評価基準タブ・
   T-099が区分表をハードコードしないために使う）。認証不要・クエリパラメータ無し・
@@ -551,7 +559,15 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 保存済みの `score_cards`/`transformed_metrics` をそのまま返さないのは、ロジックを直したあとに
 古い整形データを見せると画面と実装が食い違うため（`usecase/read-companies.ts`）。
 
-クエリパラメータ:
+> ✅ **2026-08-22 追記（T-101）。** セッション Cookie があれば任意にユーザーを解決し
+> （`src/handler/optional-user.ts` の `resolveOptionalUser`。無効・期限切れ・未ログインは
+> 例外にせず `null` に倒す）、そのユーザーの指標カスタマイズ設定（`GET`/`PUT
+/api/indicator-settings`）を採点に反映する。**未ログイン・未設定ユーザーはこれまでどおり
+> 全10指標・デフォルト境界のまま**で、無認証でも 200 を返す既存仕様は変えていない（401分岐
+> は無い）。この結果、**`ScoringResponse.maxTotalScore`/`totalMetricCount` はログイン中
+> ユーザーの選択指標数に応じて可変**になる（選択指標数×10 / 選択指標数。全10指標選択時は
+> 従来どおり100/10）。`POST /api/companies`（登録時プレビュー）はこの反映の対象外で、
+> 常に100/10のまま（スコープ外。`score_cards` を書き込む唯一の経路であるため変更していない）。
 
 | 項目                  | 制約                                                                                                                                                |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -652,6 +668,11 @@ T-098 §1 参照）。
 > （評価基準タブ）が区分表をハードコードしないために使う。company集約に依存しない
 > 独立エンドポイントのため、company系ルート群の外に配置している
 > （`src/handler/app.ts` の `GET /api/health` 直後）。
+>
+> ✅ **2026-08-22 追記（T-101）。** レスポンスの `metrics[]` に `defaultBasisValue` を
+> 追加した（`src/usecase/get-scoring-bands.ts` / `src/handler/dto/scoring-bands.ts`）。
+> 指標カスタマイズ画面（[indicator-custom-page.md](../ui/pages/indicator-custom-page.md)）の
+> 「初期設定に戻す」が使うデフォルトの満点境界値。
 
 10指標の区分表を `src/domain/scoring/bands.ts` からそのまま返す。値の書き写し・
 別定数化はしていない（`src/usecase/get-scoring-bands.ts` が `bands.ts` の定数を
@@ -679,26 +700,52 @@ T-098 §1 参照）。
       "bands": [
         { "minInclusive": 30, "maxExclusive": null, "points": 10 },
         { "minInclusive": 0, "maxExclusive": 2, "points": 1 }
-      ]
+      ],
+      "defaultBasisValue": 30
     }
   ]
 }
 ```
 
-| フィールド             | 意味                                                                                                         |
-| :--------------------- | :----------------------------------------------------------------------------------------------------------- |
-| `metrics`              | `METRIC_KEYS`（`src/domain/shared/metric-key.ts`）の順（①〜⑩）で固定10件                                     |
-| `metrics[].key`        | `MetricKey`（10種の文字列リテラル）                                                                          |
-| `metrics[].number`     | 原典の通し番号（①〜⑩＝1〜10）                                                                                |
-| `metrics[].label`      | 画面見出し（`METRIC_LABEL` 準拠）                                                                            |
-| `metrics[].unit`       | `'%'` \| `'倍'` \| `'年'`（`MetricUnit`）                                                                    |
-| `metrics[].bands`      | 対応する `*_BANDS` 定数をそのままコピーしたもの。段数は指標ごとに異なる（③=10段・1点行なし、②=4段、他=11段） |
-| `bands[].minInclusive` | 下限。この値を含む。`null`＝下限なし                                                                         |
-| `bands[].maxExclusive` | 上限。この値を含まない。`null`＝上限なし（最上位区分）                                                       |
-| `bands[].points`       | 0〜10                                                                                                        |
+| フィールド                    | 意味                                                                                                                                                                                                                             |
+| :---------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `metrics`                     | `METRIC_KEYS`（`src/domain/shared/metric-key.ts`）の順（①〜⑩）で固定10件                                                                                                                                                         |
+| `metrics[].key`               | `MetricKey`（10種の文字列リテラル）                                                                                                                                                                                              |
+| `metrics[].number`            | 原典の通し番号（①〜⑩＝1〜10）                                                                                                                                                                                                    |
+| `metrics[].label`             | 画面見出し（`METRIC_LABEL` 準拠）                                                                                                                                                                                                |
+| `metrics[].unit`              | `'%'` \| `'倍'` \| `'年'`（`MetricUnit`）                                                                                                                                                                                        |
+| `metrics[].bands`             | 対応する `*_BANDS` 定数をそのままコピーしたもの。段数は指標ごとに異なる（③=10段・1点行なし、②=4段、他=11段）                                                                                                                     |
+| `bands[].minInclusive`        | 下限。この値を含む。`null`＝下限なし                                                                                                                                                                                             |
+| `bands[].maxExclusive`        | 上限。この値を含まない。`null`＝上限なし（最上位区分）                                                                                                                                                                           |
+| `bands[].points`              | 0〜10                                                                                                                                                                                                                            |
+| `metrics[].defaultBasisValue` | 満点となる基準値のデフォルト（`bands.ts` 由来）。指標カスタマイズ画面の「初期設定に戻す」用（T-101, 2026-08-22）。単位は `basisValues` と同じ（⑩配当利回りも `%` 小数）。**⑨MIX係数のみ常に `null`**（基準値を設定できないため） |
 
 境界値の解釈（下限以上・上限未満）を表す文言はレスポンスに含めない
 （[criteria-tab.md](../ui/pages/criteria-tab.md) §2.3 の固定文言としてFE側が持つ想定）。
+
+---
+
+## GET/PUT /api/indicator-settings
+
+> 🟢 **実装済み（T-101, 2026-08-22）。** リクエスト/レスポンスの形・検証順序・エラー応答は
+> [portfolio-api.md §指標カスタマイズ](./portfolio-api.md#指標カスタマイズ)が正。**この節では
+> 重複を避け、実装ファイルパスのみを記す。**
+
+- `src/handler/indicator-settings-routes.ts` — `registerIndicatorSettingsRoutes(app, deps, userOrAdmin)`。
+  `GET`/`PUT /api/indicator-settings` のルート登録
+- `src/handler/dto/indicator-settings.ts` — zodスキーマ（`IndicatorSettingsRequest`）、
+  `IndicatorSettingsResponse`、`toIndicatorSettingsResponse`、`toSaveIndicatorSettingsErrorResponse`
+- `src/usecase/get-indicator-settings.ts` / `src/usecase/save-indicator-settings.ts` — GET/PUT の
+  アプリケーションサービス
+- `src/usecase/resolve-scoring-bands.ts` — ユーザーの選択・基準値から有効な区分表を組み立てる
+  共通ヘルパー（`GET /api/companies/:code` と本エンドポイントの両方が使う）。⑩配当利回りの
+  単位変換（`%` 小数 ⇔ 1/100%整数）もここに閉じる
+- `src/domain/scoring/user-indicator-settings.ts` / `user-indicator-settings-repository.ts` — 値
+  オブジェクトとリポジトリIF（domain層）
+- `src/infra/d1/user-indicator-settings-repository.ts` — D1実装（`user_indicator_settings`
+  テーブル、[schema.md](../database/schema.md) §user_indicator_settings）
+- 認証: `userOrAdmin`（`requireRole(['user', 'admin'])`、`src/handler/app.ts`）。未ログインは
+  401（`portfolio-api.md` §共通仕様と同じ形）
 
 ---
 

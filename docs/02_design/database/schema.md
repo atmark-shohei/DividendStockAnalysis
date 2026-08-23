@@ -21,6 +21,11 @@
 > （`sessions.expires_at` の計算と同じ時計を使い、テストから固定できるようにするため。
 > `companies.created_at` 等の `CURRENT_TIMESTAMP` パターンとは意図的に異なる）。
 > `portfolios`/`portfolio_holdings`/`user_indicator_settings` の実装は未着手（T-102 待ち）。
+>
+> ✅ **2026-08-22 追記（T-101）。** `user_indicator_settings` を実装した
+> （`src/infra/d1/user-indicator-settings-repository.ts`、マイグレーション
+> `db/migrations/0007_rapid_turbo.sql`）。`portfolios`/`portfolio_holdings` は
+> 引き続き未着手（T-102 待ち）。
 
 ## 設計方針
 
@@ -174,7 +179,10 @@ API の契約は `records` / `dividends` とも最大60件（`company-api.md`）
 
 > 🟢 **`users`/`sessions` は実装済み**（2026-08-18、T-091。`src/infra/d1/schema.ts`、
 > マイグレーション `db/migrations/0006_fat_shaman.sql`）。
-> 🟡 **`portfolios`/`portfolio_holdings`/`user_indicator_settings` は設計のみ。実装は未着手**（T-102待ち）。
+> 🟢 **`user_indicator_settings` は実装済み**（2026-08-22、T-101。
+> `src/infra/d1/user-indicator-settings-repository.ts`、マイグレーション
+> `db/migrations/0007_rapid_turbo.sql`）。
+> 🟡 **`portfolios`/`portfolio_holdings` は設計のみ。実装は未着手**（T-102待ち）。
 > 要求元: [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)（認証・ロール・PBKDF2）、
 > [portfolio-api.md](../api/portfolio-api.md)（API契約）、
 > [indicator-custom-page.md](../ui/pages/indicator-custom-page.md)（指標カスタマイズ）。
@@ -296,3 +304,11 @@ PK: `(user_id, metric_key)`。
   総合点」に置き換えるか、ユーザーごとに動的計算するか、**T-101着手前に決める必要がある**
   （現状は未決。`score_cards` の構造自体を見直すか、検索・ポートフォリオ一覧の
   総合点表示方法ごと再設計するかの判断を含む）
+  - ✅ **解消（2026-08-22、T-101 スコープ決定）。** `score_cards`／一覧・ポートフォリオの
+    総合点は常にデフォルト設定（全10指標・`bands.ts` の既定境界）で計算し続ける方針に決め、
+    今回は一切変更しなかった。ユーザー設定を反映するのは `GET /api/companies/:code`
+    （毎回再採点する詳細表示の経路）だけで、`score_cards` を読み書きしない。
+    `buildScoreCard` は `selectedKeys` 引数を追加したが既定値 `METRIC_KEYS`（全10件）を
+    持ち、`score_cards`/`transformed_metrics` を書き込む唯一の経路（`analyze-company.ts`
+    → `scoreCompany`）は常に既定引数のまま呼ばれることをコードで確認済みのため、
+    この懸念は発生しない。

@@ -502,7 +502,7 @@
 | T-098 | 指標詳細：連続非減配年数の年次リスト                                 | P1     | 🟢   | T-096        |
 | T-099 | 評価基準画面（`bands.ts` から描画。ハードコード禁止）                | P0     | 🟢   | T-074, T-090 |
 | T-100 | 指標カスタマイズ：domain（基準値→区分表の導出＋`validateBands()`）   | P1     | 🟢   | T-079        |
-| T-101 | 指標カスタマイズ：API・画面                                          | P1     | 🔴   | T-100, T-080 |
+| T-101 | 指標カスタマイズ：API・画面                                          | P1     | 🟢   | T-100, T-080 |
 | T-102 | ポートフォリオ：domain（集計計算。銭整数・ゼロ除算）                 | P1     | 🟢   | T-082        |
 | T-103 | ポートフォリオ：API・画面                                            | P1     | 🔴   | T-102, T-083 |
 | T-104 | 銘柄登録画面を管理者限定にする                                       | P0     | 🟢   | T-092        |
@@ -522,6 +522,14 @@
 > `%` 小数（例: `5.5`）であり、この単位変換（`%` → 1/100%整数）をどのレイヤーが
 > いつ行うかがどの設計書にも未記載。**T-101 着手時に、handler/usecase 境界での
 > 変換責務をいずれかの設計書に明記すること。**
+>
+> ✅ **解消（T-101 実装、2026-08-22）。** 変換責務は usecase層
+> `src/usecase/resolve-scoring-bands.ts` に確定した。API契約・DB保存の単位は他9指標と同じ
+> `%` 小数のまま（`user_indicator_settings.basis_value` も `%` 小数で保存）、`scaleBands()` を
+> 呼ぶ直前にだけ `Math.round(basisValuePercent * 100)` で1/100%整数へ変換する（逆変換
+> `fromDividendYieldBaselineHundredths` は `get-scoring-bands.ts`/`get-indicator-settings.ts`）。
+> 詳細は [company-api.md](../02_design/api/company-api.md) §GET/PUT /api/indicator-settings、
+> [schema.md](../02_design/database/schema.md) §user_indicator_settings を参照。
 
 ---
 

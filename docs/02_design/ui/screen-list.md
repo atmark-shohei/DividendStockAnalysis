@@ -28,6 +28,10 @@
 > `frontend/pages/CriteriaPage.tsx`）。`GET /api/scoring/bands` から取得したデータで
 > 10カードを動的に描画する。詳細は [criteria-tab.md](./pages/criteria-tab.md) の変更履歴を参照。
 >
+> 🟢 **`/indicators`（指標カスタマイズ、F-58）は実装済み**（2026-08-23、T-101。
+> `frontend/pages/IndicatorCustomPage.tsx`）。詳細は
+> [indicator-custom-page.md](./pages/indicator-custom-page.md) の変更履歴を参照。
+>
 > ⚠️ **2026-08-16 に 2画面 → 6画面へ全面改訂した。**
 > [design_mock](../../design_mock/README.md) の反映（[design-mock-alignment.md](../../03_tasks/design-mock-alignment.md) T-071）と、
 > 認証の導入決定（[ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)）による。
@@ -76,6 +80,12 @@
   `GET /api/scoring/bands`（T-099で新規実装したBE API）から取得したデータで10カードを
   動的に描画し、区分表のリテラルは画面側に持たない。F-31 を 🔴 → 🟢 に更新
   （詳細は [criteria-tab.md](./pages/criteria-tab.md) の変更履歴を参照）
+- **2026-08-23**（T-101）: `/indicators`（指標カスタマイズ、F-58）を実装
+  （`frontend/pages/IndicatorCustomPage.tsx`・`frontend/components/IndicatorRow.tsx`・
+  `frontend/components/NumberInput.tsx`）。「初期設定に戻す」は `GET /api/scoring/bands` の
+  `defaultBasisValue`（BE側で新規追加）を使って実装した。基準値が「きざみ」の倍数でない
+  場合のエラー文言を追加した（詳細は [indicator-custom-page.md](./pages/indicator-custom-page.md)
+  の変更履歴を参照）。F-58 を 🔴 → 🟢 に更新
 
 ---
 
@@ -89,7 +99,7 @@
 | `/`           | 検索             | 全員        | 🟢 `pages/ListPage`（T-094・T-096・T-097・T-098）                                | [search-page.md](./pages/search-page.md)（T-072）            |
 | `/criteria`   | 評価基準         | 全員        | 🟢 `pages/CriteriaPage`（T-099）                                                 | [criteria-tab.md](./pages/criteria-tab.md)                   |
 | `/portfolio`  | ポートフォリオ   | user, admin | 🔴 未実装                                                                        | [portfolio-page.md](./pages/portfolio-page.md)（T-081）      |
-| `/indicators` | 指標カスタマイズ | user, admin | 🔴 未実装                                                                        | [indicator-custom-page.md](./pages/indicator-custom-page.md) |
+| `/indicators` | 指標カスタマイズ | user, admin | 🟢 `pages/IndicatorCustomPage`（T-101）                                          | [indicator-custom-page.md](./pages/indicator-custom-page.md) |
 | `/input`      | 銘柄登録         | **admin**   | 🟢 `pages/InputPage`（FE ガード・BE制限・ラベルとも実装済み。T-091/T-092/T-104） | [market-data-import.md](./pages/market-data-import.md)       |
 | `/login`      | ログイン         | 未ログイン  | 🟢 `pages/AuthPage`（FE・BEとも実装済み。T-091）                                 | [login-page.md](./pages/login-page.md)（T-075）              |
 | `/signup`     | アカウント作成   | 未ログイン  | 🟢 同上（1画面2モード）                                                          | 同上（1画面2モード）                                         |
@@ -242,7 +252,7 @@
 | F-55   | ロールによる画面の出し分け           | 🔴   | nav（§2）                      |
 | F-56   | ポートフォリオ管理                   | 🔴   | `/portfolio`                   |
 | F-57   | ポートフォリオ集計                   | 🔴   | `/portfolio`                   |
-| F-58   | 指標カスタマイズ                     | 🔴   | `/indicators`                  |
+| F-58   | 指標カスタマイズ                     | 🟢   | `/indicators`                  |
 
 ## 7. この構成で守っていること
 
