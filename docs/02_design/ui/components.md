@@ -7,6 +7,8 @@
 
 ## 変更履歴
 
+- **2026-08-24**（T-105）: 新規コンポーネント `<ConfirmDialog>`（`<Dialog>` をラップした
+  汎用確認モーダル）を §1・§6 に追加した
 - **2026-08-16**: 配置先の誤り（`src/components/`）を訂正、実装済みコンポーネントの棚卸しを追加、
   design_mock 由来の新規部品を追加、§未決定 の3項目を決着（T-084）
 
@@ -32,6 +34,7 @@ FE の実体は `frontend/components/` で、`src/components/` は Next.js 時�
 | `ScoreRadar`         | `ScoreRadar.tsx`         | 10指標のレーダーチャート。**Recharts** を使用（§4 参照）                                                                                  |
 | `BalanceSheetFields` | `BalanceSheetFields.tsx` | ⑥用の貸借対照表4項目の入力欄                                                                                                              |
 | `CompanyForm`        | `CompanyForm.tsx`        | データ入力画面の中心。**1954行と大きく、既存規約の「100行超で分割検討」を超過している**（新規の分割は本ファイルの対象外。別タスクで扱う） |
+| `ConfirmDialog`（新規・T-105） | `ConfirmDialog.tsx`      | 破壊的操作（削除）の確認モーダル。`<Dialog>` をラップし、メッセージ・確認/キャンセルボタンを持つ汎用コンポーネント。`HoldingsTable.tsx`（保有銘柄削除）・`PortfolioPage.tsx`（ポートフォリオ削除）から共通利用する。開いた直後はキャンセルボタンへ初期フォーカスし、破壊的操作の誤操作を防ぐ |
 
 `frontend/format.ts` には `<Money>` / `<Yield>` / `<FetchedAt>` に相当する**関数版**
 （`formatSen` / `formatMetricValue` / `formatFetchedAt`）が既にある。
@@ -200,6 +203,7 @@ frontend/components/
   ScoreRadar.tsx         （実装済み）
   BalanceSheetFields.tsx （実装済み）
   CompanyForm.tsx        （実装済み）
+  ConfirmDialog.tsx       （実装済み。T-105）
   Money.tsx              （設計のみ）
   Yield.tsx               （設計のみ）
   ScoreBar.tsx             （設計のみ）
