@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import type {
   AddHoldingRequest,
   HoldingView,
@@ -14,6 +16,7 @@ import {
   type PayoutRatioSourceControl,
   type Selection,
 } from '../components/analysis-dialog-logic';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CreatePortfolioForm } from '../components/CreatePortfolioForm';
 import { Dialog } from '../components/Dialog';
 import { EditHoldingForm } from '../components/EditHoldingForm';
@@ -69,9 +72,9 @@ export interface PortfolioActions {
   readonly onEditHolding: (code: string) => void;
   /** 編集フォームの送信（CR-3） */
   readonly onUpdateHolding: (code: string, payload: UpdateHoldingRequest) => void;
-  /** 保有銘柄の削除ボタン（CR-3。`window.confirm` 確認後に呼ばれる） */
+  /** 保有銘柄の削除ボタン（CR-3。`<ConfirmDialog>` 確認後に呼ばれる。T-105で window.confirm から置き換え） */
   readonly onRemoveHolding: (code: string) => void;
-  /** ポートフォリオの削除ボタン（CR-3。`window.confirm` 確認後に呼ばれる） */
+  /** ポートフォリオの削除ボタン（CR-3。`<ConfirmDialog>` 確認後に呼ばれる。T-105で window.confirm から置き換え） */
   readonly onDeletePortfolio: (id: string) => void;
 }
 
@@ -124,9 +127,14 @@ export function PortfolioPage({
   readonly dialogHandlers: DialogHandlers;
   readonly dividendHistory: DividendHistoryState;
 }) {
+  // 削除確認モーダルの開閉（T-105 確認事項B）。`window.confirm` を独自モーダルに置き換えた
+  const [isDeletePortfolioConfirmOpen, setIsDeletePortfolioConfirmOpen] = useState(false);
+
   const selectedName =
-    detail.data?.holdings.find((holding) => holding.code === selected.code)?.name ??
-    selected.code;
+    detail.data?.holdings.find((holding) => holding.code === selected.code)?.name ?? selected.code;
+  // CR-4: 削除確認メッセージに対象名を含める（`HoldingsTable.tsx` の保有銘柄削除確認と同じ考え方）
+  const activePortfolioName =
+    portfolios.items.find((portfolio) => portfolio.id === activePortfolioId)?.name ?? null;
   const activeMetric = resolveActiveMetric(activeMetricParam, selected.scoring?.metrics);
   const canAddNewPortfolio = canAddPortfolio(portfolios.items.length, portfolios.maxPortfolios);
   const gainLossColorClass =
@@ -173,11 +181,7 @@ export function PortfolioPage({
                     disabled={deletingPortfolio}
                     onClick={() => {
                       if (activePortfolioId === null) return;
-                      // 削除確認UIは既存パターンが無いため window.confirm を暫定採用
-                      // （HoldingsTable の削除ボタンと同じ判断。CR-3・TODO・推測実装）
-                      if (window.confirm('このポートフォリオを削除しますか？')) {
-                        actions.onDeletePortfolio(activePortfolioId);
-                      }
+                      setIsDeletePortfolioConfirmOpen(true);
                     }}
                   >
                     ポートフォリオを削除
@@ -213,15 +217,15 @@ export function PortfolioPage({
                   <div>
                     <dt>平均利回り（評価額加重）</dt>
                     <dd className="numeric">
-                      {formatMetricValue(detail.data.metrics.weightedYieldPercent, '%', false)}
-                      （{detail.data.metrics.yieldEvaluableHoldingCount}銘柄）
+                      {formatMetricValue(detail.data.metrics.weightedYieldPercent, '%', false)}（
+                      {detail.data.metrics.yieldEvaluableHoldingCount}銘柄）
                     </dd>
                   </div>
                   <div>
                     <dt>取得単価利回り</dt>
                     <dd className="numeric">
-                      {formatMetricValue(detail.data.metrics.costBasisYieldPercent, '%', false)}
-                      （{detail.data.metrics.yieldEvaluableHoldingCount}銘柄）
+                      {formatMetricValue(detail.data.metrics.costBasisYieldPercent, '%', false)}（
+                      {detail.data.metrics.yieldEvaluableHoldingCount}銘柄）
                     </dd>
                   </div>
                   <div>
@@ -326,7 +330,30 @@ export function PortfolioPage({
         )}
       </Dialog>
 
-      <Dialog open={selected.code !== null} onClose={dialogHandlers.onClose} labelId={DIALOG_TITLE_ID}>
+      <ConfirmDialog
+        open={isDeletePortfolioConfirmOpen}
+        labelId="delete-portfolio-confirm-title"
+        title="ポートフォリオを削除"
+        message={
+          activePortfolioName !== null
+            ? `「${activePortfolioName}」を削除しますか？`
+            : 'このポートフォリオを削除しますか？'
+        }
+        onConfirm={() => {
+          setIsDeletePortfolioConfirmOpen(false);
+          if (activePortfolioId === null) return;
+          actions.onDeletePortfolio(activePortfolioId);
+        }}
+        onCancel={() => {
+          setIsDeletePortfolioConfirmOpen(false);
+        }}
+      />
+
+      <Dialog
+        open={selected.code !== null}
+        onClose={dialogHandlers.onClose}
+        labelId={DIALOG_TITLE_ID}
+      >
         <AnalysisDialogBody
           selected={selected}
           selectedName={selectedName}

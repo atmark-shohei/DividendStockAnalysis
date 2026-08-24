@@ -106,6 +106,56 @@ describe('IndicatorRow.tsx: トグルは<button>を使う（§8アクセシビ�
   });
 });
 
+/**
+ * T-105 問題1（確認事項A、Manager承認: (a) ✓ glyph 追加）。
+ * トグルの選択状態を色（背景塗り）だけで表現しないよう、選択時のみ ✓ glyph を描画する。
+ * アクセシブルネームは既存の `aria-label` が担うため、glyph は `aria-hidden="true"` にして
+ * SR の二重読み上げを避ける。
+ */
+describe('IndicatorRow.tsx: 選択状態を色だけで表現しない（T-105 問題1・確認事項A(a)）', () => {
+  it('selected のときだけ ✓ glyph を描画する分岐が存在する', () => {
+    expect(indicatorRowSource).toMatch(/\{selected && \(/);
+    expect(indicatorRowSource).toMatch(/indicator-toggle-check/);
+  });
+
+  it('glyph は aria-hidden="true"（アクセシブルネームは aria-label のまま。二重読み上げを避ける）', () => {
+    const checkBlockMatch = indicatorRowSource.match(
+      /<span className="indicator-toggle-check" aria-hidden="true">/,
+    );
+    expect(checkBlockMatch).not.toBeNull();
+  });
+
+  it('aria-pressed/aria-label は変更されていない（既存の SR 対応を回帰させない）', () => {
+    expect(indicatorRowSource).toMatch(/aria-pressed=\{selected\}/);
+    expect(indicatorRowSource).toMatch(
+      /aria-label=\{`\$\{row\.label\}を\$\{selected \? '解除' : '選択'\}`\}/,
+    );
+  });
+});
+
+/**
+ * CR-1: `.indicator-toggle-check` の文字色トークン誤用の是正。
+ * `--color-action` 塗りの上の前景色は `--color-on-action` を使う（`style.css` の
+ * 通常ボタン `background: var(--color-action); color: var(--color-on-action);` と同じ慣習）。
+ * ページ背景色である `--color-bg` を転用しない。
+ */
+describe('style.css: .indicator-toggle-check の color トークン（CR-1是正）', () => {
+  const styleCssSource = readFileSync(resolve(__dirname, '../../frontend/style.css'), 'utf-8');
+
+  it('.indicator-toggle-check の color が var(--color-on-action) である', () => {
+    const blockMatch = styleCssSource.match(/\.indicator-toggle-check\s*\{([\s\S]*?)\}/);
+    expect(blockMatch).not.toBeNull();
+    const block = blockMatch?.[1] ?? '';
+    expect(block).toMatch(/color:\s*var\(--color-on-action\);/);
+  });
+
+  it('.indicator-toggle-check の color に var(--color-bg) を使っていない（誤用の再発防止）', () => {
+    const blockMatch = styleCssSource.match(/\.indicator-toggle-check\s*\{([\s\S]*?)\}/);
+    const block = blockMatch?.[1] ?? '';
+    expect(block).not.toMatch(/color:\s*var\(--color-bg\);/);
+  });
+});
+
 describe('IndicatorCustomPage.tsx / IndicatorRow.tsx: 保存中は行を disabled にする（fe-reviewer CR-3）', () => {
   it('IndicatorCustomPage.tsx が <IndicatorRow> に disabled={saving} を渡している', () => {
     expect(indicatorCustomPageSource).toMatch(/<IndicatorRow[\s\S]*?disabled=\{saving\}/);

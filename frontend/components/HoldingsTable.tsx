@@ -1,4 +1,7 @@
+import { useState } from 'react';
+
 import type { HoldingView } from '../api';
+import { ConfirmDialog } from './ConfirmDialog';
 import {
   formatMetricValue,
   formatSen,
@@ -29,6 +32,10 @@ import {
  * 何もしないと当たり判定の下に埋もれてクリックできない。操作列の `<td>` に
  * `.holding-row-actions`（`position: relative; z-index: 1;`）を付与し、stretched button の
  * `::after` より前面に出す（`frontend/style.css` 参照）。
+ *
+ * 削除ボタンは `<ConfirmDialog>`（T-105 確認事項B）で確認してから `onRemoveHolding` を呼ぶ。
+ * `window.confirm`（ブラウザネイティブ）を独自モーダルに置き換えた
+ * （フォーカストラップ・Escape は `<Dialog>` 側の実装をそのまま継承する）。
  */
 export function HoldingsTable({
   holdings,
@@ -41,89 +48,108 @@ export function HoldingsTable({
   readonly onEditHolding: (code: string) => void;
   readonly onRemoveHolding: (code: string) => void;
 }) {
+  // 削除確認モーダルの対象。null なら非表示（`AddDialogState` 系と違い、対象そのものを
+  // state に持つ必要があるため専用の state にする）
+  const [confirmTarget, setConfirmTarget] = useState<HoldingView | null>(null);
+
   return (
-    <table className="metric-table">
-      <caption>保有銘柄一覧</caption>
-      <thead>
-        <tr>
-          <th scope="col">銘柄</th>
-          <th scope="col">保有数量</th>
-          <th scope="col">取得単価</th>
-          <th scope="col">現在株価</th>
-          <th scope="col">評価額</th>
-          <th scope="col">評価損益</th>
-          <th scope="col">利回り</th>
-          <th scope="col">スコア</th>
-          <th scope="col">操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        {holdings.map((holding) => {
-          const colorClass = unrealizedGainLossColorClass(holding.unrealizedGainLossSen);
-          return (
-            <tr key={holding.code} className="metric-row">
-              <th scope="row">
-                <button
-                  type="button"
-                  className="metric-row-button"
-                  onClick={() => {
-                    onRowClick(holding.code);
-                  }}
-                >
-                  <span className="company-name" title={holding.name}>
-                    {holding.name}
-                  </span>{' '}
-                  <span className="mono company-code">{holding.code}</span>
-                </button>
-              </th>
-              <td className="numeric">{holding.quantity}</td>
-              <td className="numeric">{formatSen(holding.acquisitionPriceSen)}</td>
-              <td className="numeric">{formatSen(holding.currentPriceSen)}</td>
-              <td className="numeric">{formatSen(holding.valueSen)}</td>
-              {/* 評価損益は色だけで増減を表さない。▲/▼ の glyph と色クラスを必ずセットで出す
+    <>
+      <table className="metric-table">
+        <caption>保有銘柄一覧</caption>
+        <thead>
+          <tr>
+            <th scope="col">銘柄</th>
+            <th scope="col">保有数量</th>
+            <th scope="col">取得単価</th>
+            <th scope="col">現在株価</th>
+            <th scope="col">評価額</th>
+            <th scope="col">評価損益</th>
+            <th scope="col">利回り</th>
+            <th scope="col">スコア</th>
+            <th scope="col">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {holdings.map((holding) => {
+            const colorClass = unrealizedGainLossColorClass(holding.unrealizedGainLossSen);
+            return (
+              <tr key={holding.code} className="metric-row">
+                <th scope="row">
+                  <button
+                    type="button"
+                    className="metric-row-button"
+                    onClick={() => {
+                      onRowClick(holding.code);
+                    }}
+                  >
+                    <span className="company-name" title={holding.name}>
+                      {holding.name}
+                    </span>{' '}
+                    <span className="mono company-code">{holding.code}</span>
+                  </button>
+                </th>
+                <td className="numeric">{holding.quantity}</td>
+                <td className="numeric">{formatSen(holding.acquisitionPriceSen)}</td>
+                <td className="numeric">{formatSen(holding.currentPriceSen)}</td>
+                <td className="numeric">{formatSen(holding.valueSen)}</td>
+                {/* 評価損益は色だけで増減を表さない。▲/▼ の glyph と色クラスを必ずセットで出す
                   （design-tokens.md §2.2、portfolio-page.md §4.3） */}
-              <td className={colorClass === undefined ? 'numeric' : `numeric ${colorClass}`}>
-                {formatUnrealizedGainLossSen(holding.unrealizedGainLossSen)}
-              </td>
-              <td className="numeric">
-                {formatMetricValue(holding.dividendYieldPercent, '%', false)}
-              </td>
-              <td className="numeric">
-                {holding.totalScore} / {holding.maxTotalScore}
-                {/* 有効指標数の併記は必須（scoring-requirements.md §0.5。省略しない） */}
-                <span className="score-effective">
-                  （有効 {holding.effectiveMetricCount}/{holding.totalMetricCount}）
-                </span>
-              </td>
-              <td className="holding-row-actions">
-                <button
-                  type="button"
-                  className="button-outline"
-                  onClick={() => {
-                    onEditHolding(holding.code);
-                  }}
-                >
-                  編集
-                </button>
-                <button
-                  type="button"
-                  className="button-outline"
-                  onClick={() => {
-                    // 削除確認UIは既存パターンが無いため window.confirm を暫定採用
-                    // （破壊的操作の確認なし即時削除にはしない。TODO・推測実装:
-                    // より丁寧な確認モーダルの要否は完了報告でManagerへ申し送る）
-                    if (window.confirm(`${holding.name}（${holding.code}）を削除しますか？`)) {
-                      onRemoveHolding(holding.code);
-                    }
-                  }}
-                >
-                  削除
-                </button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+                <td className={colorClass === undefined ? 'numeric' : `numeric ${colorClass}`}>
+                  {formatUnrealizedGainLossSen(holding.unrealizedGainLossSen)}
+                </td>
+                <td className="numeric">
+                  {formatMetricValue(holding.dividendYieldPercent, '%', false)}
+                </td>
+                <td className="numeric">
+                  {holding.totalScore} / {holding.maxTotalScore}
+                  {/* 有効指標数の併記は必須（scoring-requirements.md §0.5。省略しない） */}
+                  <span className="score-effective">
+                    （有効 {holding.effectiveMetricCount}/{holding.totalMetricCount}）
+                  </span>
+                </td>
+                <td className="holding-row-actions">
+                  <button
+                    type="button"
+                    className="button-outline"
+                    onClick={() => {
+                      onEditHolding(holding.code);
+                    }}
+                  >
+                    編集
+                  </button>
+                  <button
+                    type="button"
+                    className="button-outline"
+                    onClick={() => {
+                      setConfirmTarget(holding);
+                    }}
+                  >
+                    削除
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        labelId="holding-delete-confirm-title"
+        title="保有銘柄を削除"
+        message={
+          confirmTarget !== null
+            ? `${confirmTarget.name}（${confirmTarget.code}）を削除しますか？`
+            : ''
+        }
+        onConfirm={() => {
+          if (confirmTarget === null) return;
+          onRemoveHolding(confirmTarget.code);
+          setConfirmTarget(null);
+        }}
+        onCancel={() => {
+          setConfirmTarget(null);
+        }}
+      />
+    </>
   );
 }

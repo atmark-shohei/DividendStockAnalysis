@@ -99,8 +99,12 @@ describe('PortfolioPage.tsx: evaluableValueCount の併記（CR-2是正）', () 
 /**
  * CR-3・推測仕様#5（Manager承認済み）: 保有銘柄の削除・数量編集、ポートフォリオの
  * 削除操作。`HoldingsTable.tsx` の操作列・`.holding-row-actions`（stretched button の
- * 当たり判定回避）・`PortfolioPage.tsx` のポートフォリオ削除ボタン・`window.confirm`
+ * 当たり判定回避）・`PortfolioPage.tsx` のポートフォリオ削除ボタン・`<ConfirmDialog>`
  * 経由の呼び出しを検証する。
+ *
+ * T-105 確認事項B: `window.confirm`（ブラウザネイティブ）を `<Dialog>` ベースの独自
+ * 確認モーダル（`ConfirmDialog.tsx`）に置き換えた。フォーカストラップ・Escape・
+ * aria-modal は `<Dialog>` 側の実装をそのまま継承する。
  */
 describe('HoldingsTable.tsx: 操作列（編集・削除ボタン）が存在する（CR-3是正）', () => {
   it('<th scope="col">操作</th> の見出しがある', () => {
@@ -111,16 +115,36 @@ describe('HoldingsTable.tsx: 操作列（編集・削除ボタン）が存在す
     expect(holdingsTableSource).toMatch(/onEditHolding\(holding\.code\);/);
   });
 
-  it('削除ボタンは window.confirm の確認後に onRemoveHolding(holding.code) を呼ぶ', () => {
-    expect(holdingsTableSource).toMatch(/window\.confirm\(/);
-    const confirmBlockMatch = holdingsTableSource.match(
-      /if \(window\.confirm\([\s\S]*?\)\) \{\s*onRemoveHolding\(holding\.code\);\s*\}/,
+  it('削除ボタンは window.confirm を直接呼ばない（T-105是正）', () => {
+    expect(holdingsTableSource).not.toMatch(/window\.confirm\(/);
+  });
+
+  it('削除ボタンは確認対象を state にセットし、<ConfirmDialog> の onConfirm から onRemoveHolding を呼ぶ', () => {
+    expect(holdingsTableSource).toMatch(/setConfirmTarget\(holding\);/);
+    expect(holdingsTableSource).toMatch(
+      /onConfirm=\{\(\) => \{\s*if \(confirmTarget === null\) return;\s*onRemoveHolding\(confirmTarget\.code\);/,
     );
-    expect(confirmBlockMatch).not.toBeNull();
+  });
+
+  it('<ConfirmDialog> が配線されている（open は confirmTarget !== null 由来）', () => {
+    expect(holdingsTableSource).toMatch(/<ConfirmDialog/);
+    expect(holdingsTableSource).toMatch(/open=\{confirmTarget !== null\}/);
   });
 
   it('操作列の <td> に .holding-row-actions（stretched button の当たり判定回避）が付与されている', () => {
     expect(holdingsTableSource).toMatch(/<td className="holding-row-actions">/);
+  });
+
+  // CR-5: title/message の実文言自体を固定するテスト（配線の有無だけでなく、
+  // 文言が意図せず変わったら検知する）
+  it('<ConfirmDialog> に title="保有銘柄を削除" が渡っている', () => {
+    expect(holdingsTableSource).toMatch(/title="保有銘柄を削除"/);
+  });
+
+  it('<ConfirmDialog> の message が対象銘柄名・銘柄コードを含むテンプレートである', () => {
+    expect(holdingsTableSource).toMatch(
+      /confirmTarget !== null\s*\?\s*`\$\{confirmTarget\.name\}（\$\{confirmTarget\.code\}）を削除しますか？`/,
+    );
   });
 });
 
@@ -136,16 +160,54 @@ describe('style.css: .holding-row-actions が position:relative/z-index で stre
   });
 });
 
-describe('PortfolioPage.tsx: ポートフォリオ削除ボタン（CR-3是正）', () => {
+describe('PortfolioPage.tsx: ポートフォリオ削除ボタン（CR-3是正・T-105で確認モーダルへ置き換え）', () => {
   it('「ポートフォリオを削除」ボタンが存在する', () => {
     expect(portfolioPageSource).toMatch(/ポートフォリオを削除/);
   });
 
-  it('window.confirm の確認後に actions.onDeletePortfolio(activePortfolioId) を呼ぶ', () => {
+  it('削除ボタンは window.confirm を直接呼ばない（T-105是正）', () => {
+    expect(portfolioPageSource).not.toMatch(/window\.confirm\(/);
+  });
+
+  it('削除ボタンは確認モーダルを開くだけで、即座に onDeletePortfolio を呼ばない', () => {
+    expect(portfolioPageSource).toMatch(/setIsDeletePortfolioConfirmOpen\(true\);/);
+  });
+
+  it('<ConfirmDialog> の onConfirm から actions.onDeletePortfolio(activePortfolioId) を呼ぶ', () => {
     const confirmBlockMatch = portfolioPageSource.match(
-      /if \(window\.confirm\([\s\S]*?\)\) \{\s*actions\.onDeletePortfolio\(activePortfolioId\);\s*\}/,
+      /onConfirm=\{\(\) => \{\s*setIsDeletePortfolioConfirmOpen\(false\);\s*if \(activePortfolioId === null\) return;\s*actions\.onDeletePortfolio\(activePortfolioId\);\s*\}\}/,
     );
     expect(confirmBlockMatch).not.toBeNull();
+  });
+
+  it('<ConfirmDialog> が配線されている（open は isDeletePortfolioConfirmOpen 由来）', () => {
+    expect(portfolioPageSource).toMatch(/<ConfirmDialog/);
+    expect(portfolioPageSource).toMatch(/open=\{isDeletePortfolioConfirmOpen\}/);
+  });
+
+  /**
+   * CR-4: 削除確認メッセージに対象ポートフォリオ名を含める。
+   * CR-5: title/message の実文言自体を固定するテスト（配線の有無だけでなく、
+   * 文言が意図せず変わったら検知する）。
+   */
+  it('activePortfolioName が portfolios.items から activePortfolioId で解決されている', () => {
+    expect(portfolioPageSource).toMatch(
+      /activePortfolioName =\s*portfolios\.items\.find\(\(portfolio\) => portfolio\.id === activePortfolioId\)\?\.name \?\? null;/,
+    );
+  });
+
+  it('<ConfirmDialog> に title="ポートフォリオを削除" が渡っている', () => {
+    expect(portfolioPageSource).toMatch(/title="ポートフォリオを削除"/);
+  });
+
+  it('message は activePortfolioName を参照し、「「名前」を削除しますか？」の形式になる', () => {
+    expect(portfolioPageSource).toMatch(
+      /activePortfolioName !== null\s*\?\s*`「\$\{activePortfolioName\}」を削除しますか？`/,
+    );
+  });
+
+  it('activePortfolioName が null のときの固定文言フォールバックが残っている', () => {
+    expect(portfolioPageSource).toMatch(/'このポートフォリオを削除しますか？'/);
   });
 });
 

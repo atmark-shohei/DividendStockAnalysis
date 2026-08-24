@@ -199,6 +199,31 @@ export function warningsForCell(
 }
 
 /**
+ * T-105 問題4: セル警告の `id`。`cellWarningNotes` と `cellWarningDescribedBy` の両方から
+ * 同じ組み立てで生成し、`aria-describedby` との不一致を防ぐ。
+ *
+ * `row`/`field`/`order` のみに依存する純粋関数なので component の外（module スコープ）に置く
+ * （CR-3: 直接テスト可能にする。`warningsForCell` 等と同じ「純関数は module 直下で export する」流儀）。
+ */
+export function cellWarningId(row: YearRow, field: YearRowField, order: number): string {
+  return `${field}-${row.fiscalYear}-warning-${String(order)}`;
+}
+
+/**
+ * 1セルの警告一覧から `aria-describedby` に渡す id を組み立てる
+ * （CR-3: 1セル複数警告時の id 一致ロジックを直接テストできるように抽出）。
+ * 警告が無いセルは `aria-describedby` を付けない（同ファイルの他の警告表示と同じ流儀）。
+ */
+export function cellWarningIdsFor(
+  warnings: readonly CellWarning[],
+  row: YearRow,
+  field: YearRowField,
+): string | undefined {
+  if (warnings.length === 0) return undefined;
+  return warnings.map((_warning, order) => cellWarningId(row, field, order)).join(' ');
+}
+
+/**
  * 編集されたセルの警告を落とす。ユーザーが値を直した時点でその警告は用済みになる
  * （同 §5.6）。**再検証はしない**（手入力値の妥当性は取り込みの責務ではない）。
  *
@@ -1433,12 +1458,21 @@ export function CompanyForm({
 
   const cellWarningNotes = (row: YearRow, field: YearRowField) =>
     cellWarningsOf(row, field).map((warning, order) => (
-      <p className="warning" key={`${field}-${warning.reason}-${String(order)}`}>
+      <p
+        className="warning"
+        role="alert"
+        id={cellWarningId(row, field, order)}
+        key={`${field}-${warning.reason}-${String(order)}`}
+      >
         {cellWarningText(warning)}
         {/* 元の値は等幅でそのまま出す。金額として整形しない（同設計書 §5.2） */}
         （元の値: <code>{warning.raw}</code>）
       </p>
     ));
+
+  /** `id` の組み立ては module スコープの `cellWarningIdsFor` へ委譲する（CR-3） */
+  const cellWarningDescribedBy = (row: YearRow, field: YearRowField): string | undefined =>
+    cellWarningIdsFor(cellWarningsOf(row, field), row, field);
 
   const warningsOutsideTable = rowlessWarnings(cellWarnings);
 
@@ -1868,6 +1902,7 @@ export function CompanyForm({
                     inputMode="decimal"
                     aria-label="EPS"
                     aria-invalid={invalidIfWarned(row, 'epsYen')}
+                    aria-describedby={cellWarningDescribedBy(row, 'epsYen')}
                   />
                   {cellWarningNotes(row, 'epsYen')}
                 </td>
@@ -1878,6 +1913,7 @@ export function CompanyForm({
                     inputMode="decimal"
                     aria-label="ROE"
                     aria-invalid={invalidIfWarned(row, 'roePercent')}
+                    aria-describedby={cellWarningDescribedBy(row, 'roePercent')}
                   />
                   {cellWarningNotes(row, 'roePercent')}
                 </td>
@@ -1888,6 +1924,7 @@ export function CompanyForm({
                     inputMode="decimal"
                     aria-label="売上高"
                     aria-invalid={invalidIfWarned(row, 'revenueYen')}
+                    aria-describedby={cellWarningDescribedBy(row, 'revenueYen')}
                   />
                   {cellWarningNotes(row, 'revenueYen')}
                 </td>
@@ -1900,6 +1937,7 @@ export function CompanyForm({
                     inputMode="decimal"
                     aria-label="営業利益率"
                     aria-invalid={invalidIfWarned(row, 'operatingMarginPercent')}
+                    aria-describedby={cellWarningDescribedBy(row, 'operatingMarginPercent')}
                   />
                   {cellWarningNotes(row, 'operatingMarginPercent')}
                 </td>
@@ -1910,6 +1948,7 @@ export function CompanyForm({
                     inputMode="decimal"
                     aria-label="1株配当"
                     aria-invalid={invalidIfWarned(row, 'dividendYen')}
+                    aria-describedby={cellWarningDescribedBy(row, 'dividendYen')}
                   />
                   {cellWarningNotes(row, 'dividendYen')}
                 </td>

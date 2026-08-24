@@ -53,7 +53,16 @@ export function IndicatorRow({
         aria-label={`${row.label}を${selected ? '解除' : '選択'}`}
         onClick={onToggle}
         disabled={disabled}
-      />
+      >
+        {/* T-105 確認事項A(a): 色（背景塗り）だけで選択状態を表さない。
+            アクセシブルネームは aria-label が担うため、glyph は aria-hidden にして
+            SR の二重読み上げを避ける（fe-plan.md §1 問題1） */}
+        {selected && (
+          <span className="indicator-toggle-check" aria-hidden="true">
+            ✓
+          </span>
+        )}
+      </button>
       <div className="indicator-row-body">
         <span className="indicator-row-label">{row.label}</span>
         {row.constraint !== null && (

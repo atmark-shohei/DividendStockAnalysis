@@ -137,10 +137,14 @@ export function AuthForm({ mode, redirect, busy, error, onLogin, onSignup }: Aut
             onChange={(event) => setConfirmPassword(event.target.value)}
             autoComplete="new-password"
             aria-invalid={confirmError !== null}
+            // T-105 問題3: エラー文言と aria-describedby で紐付ける。フォーカスを
+            // 入力欄に戻したときも SR がエラー内容を辿れるようにする（role="alert" だけでは
+            // 変更時の読み上げしか担保しない）
+            aria-describedby={confirmError !== null ? 'confirm-password-error' : undefined}
             required
           />
           {confirmError !== null && (
-            <span className="warning" role="alert">
+            <span className="warning" role="alert" id="confirm-password-error">
               {confirmError}
             </span>
           )}

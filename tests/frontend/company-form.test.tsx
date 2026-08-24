@@ -1,7 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
   NO_RESTATED_RELEASE,
+  cellWarningId,
+  cellWarningIdsFor,
   cellWarningText,
   confirmWarningsText,
   createDetectedRestated,
@@ -46,6 +51,11 @@ import {
  * `tsconfig.frontend.json` 側で型チェックする。
  * `@testing-library/react` は導入していないので JSX は書かない。
  */
+
+const companyFormSource = readFileSync(
+  resolve(__dirname, '../../frontend/components/CompanyForm.tsx'),
+  'utf-8',
+);
 
 const THIS_YEAR = new Date().getFullYear();
 
@@ -1905,4 +1915,80 @@ describe('shouldShowEdinetDiagnostics', () => {
       expect(shouldShowEdinetDiagnostics(diagnostics)).toBe(expected);
     });
   }
+});
+
+/**
+ * T-105 問題4: 年度別入力表のセル警告（`cellWarningNotes`）に `role="alert"` が無く、
+ * 対応する `<input>` と `aria-describedby` でも紐付いていなかった（他の警告表示
+ * （`importError` 等）との不整合）。`@testing-library/react` 未導入のため、
+ * `readFileSync` + 正規表現でソースを直接検証する（`nav-bar.test.tsx` と同型）。
+ * このファイル自体は分割しない（属性追加のみ。`components.md` §1 の申し送り）。
+ */
+describe('CompanyForm.tsx: 年度別入力表のセル警告が role="alert" を持ち、aria-describedby で紐付いている（T-105 問題4）', () => {
+  it('cellWarningNotes が返す <p> に role="alert" と一意な id が付与されている', () => {
+    expect(companyFormSource).toMatch(
+      /<p\s+className="warning"\s+role="alert"\s+id=\{cellWarningId\(row, field, order\)\}/,
+    );
+  });
+
+  it('5項目（EPS・ROE・売上高・営業利益率・1株配当）の <input> それぞれに aria-describedby が付与されている', () => {
+    const fields: readonly string[] = [
+      'epsYen',
+      'roePercent',
+      'revenueYen',
+      'operatingMarginPercent',
+      'dividendYen',
+    ];
+    for (const field of fields) {
+      expect(companyFormSource).toMatch(
+        new RegExp(`aria-describedby=\\{cellWarningDescribedBy\\(row, '${field}'\\)\\}`),
+      );
+    }
+  });
+
+  it('警告が無いセルには aria-describedby を付けない（cellWarningDescribedBy が undefined を返す分岐がある）', () => {
+    expect(companyFormSource).toMatch(/if \(warnings\.length === 0\) return undefined;/);
+  });
+});
+
+/**
+ * CR-3: `cellWarningId`/`cellWarningIdsFor` の「1セル複数警告」時の id 一致ロジックを
+ * ソース文字列の正規表現ではなく、実際の戻り値で直接検証する
+ * （上の describe はソース文字列の存在確認のみで、`join(' ')` の出力自体は
+ * 検証していなかった。CR-3 が指すのはその抜けの解消）。
+ */
+describe('cellWarningId / cellWarningIdsFor: 1セル複数警告のid一致ロジック（CR-3）', () => {
+  it.each([0, 1, 2])('order=%i で `field-fiscalYear-warning-order` の形式を返す', (order) => {
+    expect(cellWarningId(row(2026), 'epsYen', order)).toBe(`epsYen-2026-warning-${String(order)}`);
+  });
+
+  it('警告0件: aria-describedby を付けない（undefined を返す）', () => {
+    expect(cellWarningIdsFor([], row(2026), 'epsYen')).toBeUndefined();
+  });
+
+  it('警告1件: 単一idと完全一致する（空白を含まない）', () => {
+    const result = cellWarningIdsFor([warning()], row(2026), 'epsYen');
+    expect(result).toBe(cellWarningId(row(2026), 'epsYen', 0));
+    expect(result).not.toContain(' ');
+  });
+
+  it('警告2件: 空白区切りで順序通りに join した id と完全一致する（1件に潰れない）', () => {
+    const warnings = [warning(), warning({ reason: 'rounded', raw: '150.005' })];
+    const result = cellWarningIdsFor(warnings, row(2026), 'epsYen');
+    expect(result).toBe(
+      `${cellWarningId(row(2026), 'epsYen', 0)} ${cellWarningId(row(2026), 'epsYen', 1)}`,
+    );
+  });
+
+  it('警告3件でも回帰しない（3件目が抜け落ちない）', () => {
+    const warnings = [
+      warning(),
+      warning({ reason: 'rounded', raw: '150.005' }),
+      warning({ reason: 'unparsable-value', valueKept: false, raw: 'N/A' }),
+    ];
+    const result = cellWarningIdsFor(warnings, row(2026), 'epsYen');
+    expect(result).toBe(
+      [0, 1, 2].map((order) => cellWarningId(row(2026), 'epsYen', order)).join(' '),
+    );
+  });
 });

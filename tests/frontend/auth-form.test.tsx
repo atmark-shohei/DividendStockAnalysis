@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 // 入力フォームのうち、React の state を持たない部分をテストする。
@@ -10,6 +13,11 @@ import {
   isValidSignupPasswordLength,
   passwordsMatch,
 } from '../../frontend/components/AuthForm';
+
+const authFormSource = readFileSync(
+  resolve(__dirname, '../../frontend/components/AuthForm.tsx'),
+  'utf-8',
+);
 
 describe('isValidEmailFormat', () => {
   const cases: readonly (readonly [name: string, email: string, expected: boolean])[] = [
@@ -149,5 +157,24 @@ describe('confirmPasswordErrorText', () => {
 
   it('不一致 -> 文言あり', () => {
     expect(confirmPasswordErrorText('12345678', '87654321')).toBe('パスワードが一致しません');
+  });
+});
+
+/**
+ * T-105 問題3: 確認用パスワード欄とエラー文言の `aria-describedby` 紐付け。
+ * `@testing-library/react` 未導入のため、`readFileSync` + 正規表現でソースを直接検証する
+ * （`nav-bar.test.tsx` と同型）。
+ */
+describe('AuthForm.tsx: 確認用パスワード欄がエラー文言と aria-describedby で紐付いている（T-105 問題3）', () => {
+  it('確認欄の aria-describedby は confirmError の有無で id/undefined を出し分ける', () => {
+    expect(authFormSource).toMatch(
+      /aria-describedby=\{confirmError !== null \? 'confirm-password-error' : undefined\}/,
+    );
+  });
+
+  it('エラー <span role="alert"> の id が確認欄の aria-describedby と同じ値である', () => {
+    expect(authFormSource).toMatch(
+      /<span className="warning" role="alert" id="confirm-password-error">/,
+    );
   });
 });
