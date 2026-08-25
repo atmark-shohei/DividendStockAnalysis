@@ -760,6 +760,13 @@ T-098 §1 参照）。
   （`POST`/`DELETE`）は admin 限定にした**（✅ T-091で実装済み。`src/handler/app.ts` の
   `adminOnly`〈`requireRole('admin')`〉ミドルウェアを通る。[ADR-0013](../../adr/0013-multi-user-auth-small-scale.md)
   制約1への対応が完了している）
+- ✅ **2026-08-25 追加（T-107一部対応）。** `GET /api/irbank/:code` /
+  `GET /api/market-data/:code` / `GET /api/edinet/:code` の3本も **admin 限定にした**
+  （`adminOnly` ミドルウェアを通る）。この3本は実際に外部データ源（IRバンク・Yahoo
+  Finance・EDINET）を呼び出すため、未ログインで叩けると
+  [ADR-0013](../../adr/0013-multi-user-auth-small-scale.md) 制約2（データ源ADR3本が
+  「個人利用」を前提にリスク受容している）の前提が崩れる。未ログインは401、
+  `user` ロールは403
 
 ## 関連ドキュメント
 
