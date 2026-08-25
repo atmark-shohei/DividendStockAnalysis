@@ -272,7 +272,7 @@
 | `03_tasks/todo-list.md` Phase 5  | T-050〜T-053 が全て 🟢。`style.css` に `@media` が0件                                       | ✅ 4件訂正                                 |
 | `docs/README.md` §既知のギャップ | 記載が 2026-07-28 時点のまま                                                                | ✅ 更新                                    |
 | `02_design/ui/components.md`     | 配置先 `src/components/` は **ディレクトリ自体が存在しない**。実体は `frontend/components/` | ✅ T-084                                   |
-| `docs/adr/今後やりたいこと.md`   | ADR ではない要望メモが `adr/` にある。`01_requirements/` へ移すのが自然                     | 🔴 T-087                                   |
+| `docs/adr/今後やりたいこと.md`   | ADR ではない要望メモが `adr/` にある。`01_requirements/` へ移すのが自然                     | ✅ T-087（2026-08-25、`01_requirements/`へ移動済み） |
 
 **実測の根拠（2026-08-16）:**
 
@@ -494,8 +494,12 @@
 | T-084 | `ui/components.md` を改訂（配置先訂正・部品追加・未決定を閉じる）     | P1     | 🟢   | T-070        |
 | T-085 | `features.md` に F-50〜F-58 を起票                                    | P0     | 🟢   | T-068        |
 | T-086 | §2.6 のドリフトを直す（todo-list の状態・docs/README の既知ギャップ） | P1     | 🟢   |              |
-| T-087 | `adr/今後やりたいこと.md` を `01_requirements/` へ移す                | P2     | 🔴   |              |
+| T-087 | `adr/今後やりたいこと.md` を `01_requirements/` へ移す                | P2     | 🟢   |              |
 | T-088 | `/review-spec` で Phase A の設計書をレビューする                      | P0     | 🟢   | T-070〜T-085 |
+
+> ✅ **T-087 実施（2026-08-25）。** `docs/adr/今後やりたいこと.md` を
+> `docs/01_requirements/今後やりたいこと.md` へ移動し（`git mv`で履歴を保持）、
+> 参照していた9ファイルの相対リンクをすべて修正した。
 
 ### Phase B — 実装（Phase A 完了後）
 
@@ -561,6 +565,6 @@
 
 - [design_mock/README.md](../design_mock/README.md) — 試作の仕様書
 - [scoring-requirements.md](../01_requirements/scoring-requirements.md) — スコアリングの正典
-- [今後やりたいこと.md](../adr/今後やりたいこと.md) — 試作の元になった要望（T-087 で移動予定）
+- [今後やりたいこと.md](../01_requirements/今後やりたいこと.md) — 試作の元になった要望（T-087で移動済み）
 - [ADR-0005](../adr/0005-thresholds-fixed-for-now.md) — 閾値固定（D-2/D-3 で覆る）
 - [screen-list.md](../02_design/ui/screen-list.md) — 現行の画面一覧

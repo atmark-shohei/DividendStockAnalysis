@@ -5,7 +5,7 @@
 > 対応する機能ID: [F-56](../../../01_requirements/features.md)（管理）・
 > [F-57](../../../01_requirements/features.md)（集計）
 > 出典: [design_mock](../../../design_mock/README.md) §4「ポートフォリオ」、
-> [今後やりたいこと.md](../../../adr/今後やりたいこと.md)
+> [今後やりたいこと.md](../../../01_requirements/今後やりたいこと.md)
 
 ## 変更履歴
 

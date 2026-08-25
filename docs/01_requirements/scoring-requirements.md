@@ -130,7 +130,7 @@
 > （[schema.md](../02_design/database/schema.md) §未実装・検討事項）。
 
 指標カスタマイズが入ると、ユーザーは 5〜10 個の指標を選んで採点できるようになる
-（[今後やりたいこと.md](../adr/今後やりたいこと.md)、[ADR-0012](../adr/0012-indicator-customization-scaling-and-denominator.md)）。
+（[今後やりたいこと.md](./今後やりたいこと.md)、[ADR-0012](../adr/0012-indicator-customization-scaling-and-denominator.md)）。
 このとき §0.5 の「分母は常に100点」は次のように読み替える。
 
 - **総合点の分母 = 選択した指標数 × 10。** 5指標を選べば50点満点、10指標（全指標）を

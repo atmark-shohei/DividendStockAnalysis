@@ -3,7 +3,7 @@
 > ステータス: 🟢 実装済み（2026-08-22、T-102。`src/domain/portfolio/portfolio-metrics.ts`）。
 > §10（保有銘柄1件ぶんの評価額・評価損益・利回り%）は T-103 で追加実装（2026-08-23）
 > 出典: [design_mock](../../design_mock/README.md) §4「ポートフォリオ」、
-> [今後やりたいこと.md](../../adr/今後やりたいこと.md)
+> [今後やりたいこと.md](../../01_requirements/今後やりたいこと.md)
 > 対応する機能ID: [F-57](../../01_requirements/features.md)
 > 呼び出し元: [portfolio-page.md](../ui/pages/portfolio-page.md)（T-081）
 

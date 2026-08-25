@@ -68,7 +68,7 @@
 
 > 📌 **2026-08-16 に F-50〜F-53 を起票**（[design-mock-alignment.md](../03_tasks/design-mock-alignment.md) T-085）。
 > `docs/design_mock/` の試作を反映したもの。F-52・F-53 は
-> [今後やりたいこと.md](../adr/今後やりたいこと.md) 冒頭の要望に対応する。
+> [今後やりたいこと.md](./今後やりたいこと.md) 冒頭の要望に対応する。
 > 画面の一覧・URL・ロールによる出し分けは
 > [screen-list.md](../02_design/ui/screen-list.md) が正。
 

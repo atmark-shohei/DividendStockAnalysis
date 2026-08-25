@@ -8,7 +8,7 @@
 
 ## 文脈
 
-[今後やりたいこと.md](./今後やりたいこと.md) が、メールアドレスとパスワードによる
+[今後やりたいこと.md](../01_requirements/今後やりたいこと.md) が、メールアドレスとパスワードによる
 アカウント作成・ログイン、ユーザーごとのポートフォリオと指標カスタマイズ、
 銘柄登録画面の管理者限定を求めている。これを実現するには認証が要る。
 
@@ -215,7 +215,7 @@ ADR-0011 は「公開・収益化を検討する」を**最優先の見直しト
 
 ## 関連
 
-- [今後やりたいこと.md](./今後やりたいこと.md) — 要件の出所
+- [今後やりたいこと.md](../01_requirements/今後やりたいこと.md) — 要件の出所
 - [auth-api.md](../02_design/api/auth-api.md) — 本 ADR を受けて改訂する（T-076）
 - [schema.md](../02_design/database/schema.md) — `users`/`sessions` テーブル定義（T-078）
 - [design-mock-alignment.md](../03_tasks/design-mock-alignment.md) §3 D-1
