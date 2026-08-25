@@ -16,7 +16,11 @@ import {
 import { type Result, err, ok } from '@/domain/shared/result';
 import { createApp } from '@/handler/app';
 
-import { buildAuthTestDependencies } from './support/build-app-dependencies';
+import {
+  TEST_ADMIN_SESSION_COOKIE,
+  TEST_USER_SESSION_COOKIE,
+  buildAuthTestDependencies,
+} from './support/build-app-dependencies';
 
 /**
  * GET /api/market-data/:code の結線テスト。
@@ -24,7 +28,13 @@ import { buildAuthTestDependencies } from './support/build-app-dependencies';
  *
  * D1 を使わない（このルートはリポジトリに触らない）ので unit プロジェクトで動く。
  * **実 API を叩かない**（`.claude/rules/backend.md`）。`MarketDataSource` を差し替える。
+ *
+ * admin限定（T-107）。データ取得成功系のテストは admin セッションCookieを付けて呼ぶ。
+ * ロールガード自体の確認は末尾の describe（`GET /api/market-data/:code — ロールガード`）で行う。
  */
+
+/** このファイルの正常系テストで共通して使う admin セッションのリクエストヘッダ */
+const ADMIN_HEADERS = { cookie: TEST_ADMIN_SESSION_COOKIE };
 
 function unusedRepository(): CompanyRepository {
   const fail = (): never => {
@@ -75,7 +85,7 @@ function stubSource(
   };
 }
 
-function app(marketDataSource: MarketDataSource) {
+function rawApp(marketDataSource: MarketDataSource) {
   return createApp({
     repository: unusedRepository(),
     financialSource: unusedFinancialSource(),
@@ -85,6 +95,22 @@ function app(marketDataSource: MarketDataSource) {
     ...buildAuthTestDependencies(),
     now: () => new Date('2026-08-03T00:00:00.000Z'),
   });
+}
+
+/**
+ * 正常系・エラー変換のテストは取り込みロジックの検証が主眼であり、ロールガードは
+ * 対象外（末尾の describe で別途尽くす）。そのため `request()` に admin セッション
+ * Cookie を自動付与するラッパーにし、既存の呼び出し箇所を1つずつ書き換えない。
+ */
+function app(marketDataSource: MarketDataSource) {
+  const honoApp = rawApp(marketDataSource);
+  return {
+    request: (input: string, init?: RequestInit) =>
+      honoApp.request(input, {
+        ...init,
+        headers: { ...ADMIN_HEADERS, ...(init?.headers as Record<string, string> | undefined) },
+      }),
+  };
 }
 
 const SAMPLE: MarketData = {
@@ -204,6 +230,32 @@ describe('GET /api/market-data/:code', () => {
     // unusedRepository() は save が呼ばれた瞬間に throw するので、
     // 例外にならず 200 が返ることそのものが「保存していない」ことの証拠
     const response = await app(stubSource(ok(SAMPLE))).request('/api/market-data/9433');
+    expect(response.status).toBe(200);
+  });
+});
+
+/**
+ * ロールガード（T-107）。外部データ源を実際に呼び出すこのエンドポイントは、
+ * `POST/DELETE /api/companies` と同じ `adminOnly` で保護する
+ * （`docs/03_tasks/design-mock-alignment.md` T-107）。
+ */
+describe('GET /api/market-data/:code — ロールガード（admin限定）', () => {
+  it('未ログイン（Cookie無し）は401', async () => {
+    const response = await rawApp(stubSource(ok(SAMPLE))).request('/api/market-data/9433');
+    expect(response.status).toBe(401);
+  });
+
+  it('role=user は403（adminではない）', async () => {
+    const response = await rawApp(stubSource(ok(SAMPLE))).request('/api/market-data/9433', {
+      headers: { cookie: TEST_USER_SESSION_COOKIE },
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it('role=admin は通過する（200）', async () => {
+    const response = await rawApp(stubSource(ok(SAMPLE))).request('/api/market-data/9433', {
+      headers: ADMIN_HEADERS,
+    });
     expect(response.status).toBe(200);
   });
 });

@@ -727,7 +727,10 @@ describe('GET /api/market-data/:code', () => {
           },
         }),
     };
-    const response = await appWithMarketData(stub).request('/api/market-data/9433');
+    // admin限定（T-107）。ロールガード自体は tests/handler/market-data-import.test.ts で尽くす
+    const response = await appWithMarketData(stub).request('/api/market-data/9433', {
+      headers: { cookie: TEST_ADMIN_SESSION_COOKIE },
+    });
     expect(response.status).toBe(200);
 
     const body = (await response.json()) as { code: string; dividendAggregated: boolean };
@@ -755,7 +758,9 @@ describe('GET /api/market-data/:code', () => {
     const before = await env.DB.prepare('SELECT COUNT(*) AS count FROM companies').first<{
       count: number;
     }>();
-    await appWithMarketData(stub).request('/api/market-data/9433');
+    await appWithMarketData(stub).request('/api/market-data/9433', {
+      headers: { cookie: TEST_ADMIN_SESSION_COOKIE },
+    });
     const after = await env.DB.prepare('SELECT COUNT(*) AS count FROM companies').first<{
       count: number;
     }>();

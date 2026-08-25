@@ -293,8 +293,11 @@ export function createApp(dependencies: AppDependencies): Hono {
    * `code` の形式検証は `importFromIrBank` の先（`IrBankFinancialSource`）が行う。
    * 形式違いでもネットワークへ問い合わせずに `invalid-code` を返すので、
    * ここで同じ正規表現を重複させない。
+   *
+   * admin限定（T-107）。外部データ源を叩くエンドポイントを未ログインで呼べる状態
+   * だったため、`POST /api/companies` と同じ `adminOnly` で保護する。
    */
-  app.get('/api/irbank/:code', async (context) => {
+  app.get('/api/irbank/:code', adminOnly, async (context) => {
     const code = context.req.param('code');
     const result = await importFromIrBank(dependencies.financialSource, code);
 
@@ -316,8 +319,10 @@ export function createApp(dependencies: AppDependencies): Hono {
    * `fiscalYearEndMonth` は IRバンク取り込み（`GET /api/irbank/:code`）が返した値を
    * フロントがそのままクエリで渡す想定（設計書 §8-4。2本のエンドポイントに分ける方式）。
    * 未指定なら配当の年度集計をせず、株価・分割イベントだけを返す。
+   *
+   * admin限定（T-107）。理由は `GET /api/irbank/:code` と同じ。
    */
-  app.get('/api/market-data/:code', async (context) => {
+  app.get('/api/market-data/:code', adminOnly, async (context) => {
     const code = context.req.param('code');
     const rawFiscalYearEndMonth = context.req.query('fiscalYearEndMonth');
 
@@ -351,8 +356,10 @@ export function createApp(dependencies: AppDependencies): Hono {
    * docIDインデックス（`edinetDocumentIndexLookup`）は日次バッチ（`scheduled` ハンドラ）が
    * 事前に構築している前提。インデックスが無ければ `document-not-found` を返す
    * （設計書 §7.3。例外にしない）。
+   *
+   * admin限定（T-107）。理由は `GET /api/irbank/:code` と同じ。
    */
-  app.get('/api/edinet/:code', async (context) => {
+  app.get('/api/edinet/:code', adminOnly, async (context) => {
     const code = context.req.param('code');
     const result = await importEdinetHistory(
       dependencies.edinetHistorySource,
