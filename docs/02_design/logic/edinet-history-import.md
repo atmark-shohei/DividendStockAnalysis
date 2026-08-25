@@ -1,5 +1,13 @@
 # EDINET 財務履歴データ取り込み 設計書（④ EPS CAGR・⑦ 売上高CAGR・⑥ 配当維持可能年数・⑤ ROE 5年平均・⑧ 営業利益率5年平均の入力）
 
+> ステータス: 🟢 実装済み（2026-08-25 確認、T-106）。
+> 実装: `src/usecase/import-edinet-history.ts`・`src/infra/edinet/`
+> （`edinet-client.ts`・`parse-documents-list.ts`・`parse-summary-csv.ts`・
+> `unzip-edinet-document.ts`・`document-summary-cache.ts`）。
+> ルート: `GET /api/edinet/:code`（`src/handler/app.ts`）。
+> テスト: `tests/usecase/import-edinet-history.test.ts`・`tests/handler/edinet-import.test.ts`・
+> `tests/infra/edinet/*`・`tests/domain/company/edinet-history-merge.test.ts` ほか。
+>
 > 2026-08-06 起票。2026-08-07 改訂（`/review-spec` の🔴7件の指摘に対するユーザー決定を反映）。
 > 実データで取得可能性を検証したうえで書いている（§2）。
 > 財務諸表の直近データの取り込みは [irbank-json-import.md](./irbank-json-import.md)、

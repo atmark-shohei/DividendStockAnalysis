@@ -83,11 +83,21 @@
 
 | ID   | 機能                                                                                                                                         | 優先度 | 状態 |
 | :--- | :------------------------------------------------------------------------------------------------------------------------------------------- | :----- | :--- |
-| F-54 | 認証（アカウント作成・ログイン・ログアウト・セッション）（[画面](../02_design/ui/pages/login-page.md)・[API](../02_design/api/auth-api.md)） | P0     | 🔴   |
-| F-55 | ロールによる画面の出し分けとルートガード                                                                                                     | P0     | 🔴   |
-| F-56 | ポートフォリオ管理（1ユーザー10ポートフォリオ / 1ポートフォリオ100銘柄）（[設計](../02_design/ui/pages/portfolio-page.md)）                  | P1     | 🔴   |
-| F-57 | ポートフォリオ集計（評価額・評価損益・平均利回り・取得単価利回り・スコア平均）（[計算式](../02_design/logic/portfolio-metrics.md)）          | P1     | 🔴   |
-| F-58 | 指標カスタマイズ（[設計](../02_design/ui/pages/indicator-custom-page.md)）                                                                   | P1     | 🔴   |
+| F-54 | 認証（アカウント作成・ログイン・ログアウト・セッション）（[画面](../02_design/ui/pages/login-page.md)・[API](../02_design/api/auth-api.md)） | P0     | 🟢   |
+| F-55 | ロールによる画面の出し分けとルートガード                                                                                                     | P0     | 🟢   |
+| F-56 | ポートフォリオ管理（1ユーザー10ポートフォリオ / 1ポートフォリオ100銘柄）（[設計](../02_design/ui/pages/portfolio-page.md)）                  | P1     | 🟢   |
+| F-57 | ポートフォリオ集計（評価額・評価損益・平均利回り・取得単価利回り・スコア平均）（[計算式](../02_design/logic/portfolio-metrics.md)）          | P1     | 🟢   |
+| F-58 | 指標カスタマイズ（[設計](../02_design/ui/pages/indicator-custom-page.md)）                                                                   | P1     | 🟢   |
+
+> ✅ **F-54〜F-58 は実装完了済み**（[design-mock-alignment.md](../03_tasks/design-mock-alignment.md) T-091/T-092/T-101/T-102/T-103、いずれも状態🟢）。
+> F-54: `src/domain/auth/`・`src/usecase/{signup,login,logout,get-current-user}.ts`・
+> `frontend/pages/AuthPage.tsx`（T-091、2026-08-18）。
+> F-55: `frontend/routes.ts` の `resolveRouteGuardRedirect`・`frontend/components/NavBar.tsx` の
+> ロール別出し分け（T-092、2026-08-18）。
+> F-56/F-57: `src/domain/portfolio/{portfolio,portfolio-metrics}.ts`・
+> `frontend/pages/PortfolioPage.tsx`（T-102/T-103、2026-08-23）。
+> F-58: `frontend/pages/IndicatorCustomPage.tsx`・`src/domain/scoring/band-scaling.ts`
+> （T-101、2026-08-23）。
 
 > **F-58 の採点への影響。** 選択指標が 5〜10 個になるため、総合点の分母が
 > 「常に100点」から「選択指標数×10」に変わる。

@@ -1,5 +1,11 @@
 # 市場データ取り込み 仕様書（株価・配当履歴・株式分割）
 
+> ステータス: 🟢 実装済み（2026-08-25 確認、T-106）。
+> 実装: `src/usecase/import-market-data.ts`・`src/infra/yahoo/`
+> （`chart-client.ts`・`parse-chart.ts`）。
+> ルート: `GET /api/market-data/:code`（`src/handler/app.ts`）。
+> テスト: `tests/usecase/import-market-data.test.ts`・`tests/handler/market-data-import.test.ts`。
+>
 > 2026-07-30 起票。実データで取得可能性を検証したうえで書いている（§2）。
 > 財務諸表の取り込みは [irbank-json-import.md](./irbank-json-import.md) が正で、
 > **本仕様はそれを置き換えない。補完する。**

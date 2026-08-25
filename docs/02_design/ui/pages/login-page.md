@@ -1,7 +1,7 @@
 # ログイン / アカウント作成（F-54）
 
-> ステータス: 🟡 FE実装済み（2026-08-18、T-091 FE分）。BE（`src/handler/dto/auth.ts` 等）との
-> 結合確認待ち。他画面のロールガード・nav出し分けは T-092
+> ステータス: 🟢 FE・BEとも実装済み（2026-08-18、T-091。結合テスト
+> `tests/integration/auth-flow.test.ts` で確認済み）。他画面のロールガード・nav出し分けは T-092
 > URL: `/login` と `/signup`（[screen-list.md](../screen-list.md) §1・§3.5 が正）
 > 対応する機能ID: [F-54](../../../01_requirements/features.md)
 > 認証方式: [ADR-0013](../../../adr/0013-multi-user-auth-small-scale.md)（少人数向け自前認証。招待制なし）
@@ -9,6 +9,11 @@
 
 ## 変更履歴
 
+- **2026-08-25**（T-106）: BE実装（`src/domain/auth/`・
+  `src/usecase/{signup,login,logout,get-current-user}.ts`）とFEとの結合を
+  `tests/integration/auth-flow.test.ts` で確認済み。ステータスを
+  🟡 FE実装済み → 🟢 FE・BEとも実装済みに更新（`frontend/api.ts` の手書き型は
+  type-only import へ置き換え済み）
 - **2026-08-18**: FE実装（T-091 FE分）。`frontend/pages/AuthPage.tsx` +
   `frontend/components/{AuthForm,AuthStatus,RoleBadge}.tsx`。
   `src/handler/dto/auth.ts` が未着手だったため、`frontend/api.ts` に型を一時的に手書きした
