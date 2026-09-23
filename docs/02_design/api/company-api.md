@@ -13,6 +13,19 @@
 
 ## 変更履歴
 
+- **2026-09-23**（T-108 設計・未実装）: `ScoringResponse` に③の計算根拠を追加する。
+  `payoutRatioForecast`/`payoutRatioActual`（`PayoutRatioSideView`）へ `dividendSen`・
+  `dividendFiscalYear`・`epsSen`・`epsFiscalYear`・`fiscalYearMismatch`・`zeroScoreRule`・
+  `matchedBandIndex` を、トップレベルへ `payoutRatioBands`（採点に実際に使った③の区分表）を追加
+  （追加のみ・後方互換）。解析ダイアログの③詳細
+  （[analysis-dialog.md](../ui/pages/analysis-dialog.md) §5.3.1）が使う。点数の判定結果は
+  変わらないため `SCORING_CALC_VERSION` は上げない。定義の正は
+  [payout-ratio-scoring.md](../logic/payout-ratio-scoring.md) §10。**（Y3）**
+  これらの追加フィールドは `score_cards`/`transformed_metrics` には保存しない
+  （`toStoredScoring` は変更しない）。`GET /api/companies` の `CompanySummary` は変わらない。
+  `POST /api/companies`（登録時プレビュー）が常にデフォルトの区分表を返すのは、
+  `analyze-company.ts` が `scoreCompany` を呼ぶときに `resolvedBands` を渡していないため
+  （指標カスタマイズは `GET /api/companies/:code` にのみ反映される。既存の非対称を継続）
 - **2026-08-22**（T-101）: 指標カスタマイズ（`GET`/`PUT /api/indicator-settings`）を実装。
   併せて `GET /api/scoring/bands` のレスポンスに `metrics[].defaultBasisValue` を追加し、
   `GET /api/companies/:code` がログイン中ユーザーの指標カスタマイズ設定を反映するように
@@ -548,6 +561,55 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 > 無関係に常に両方返す**（画面が両方を表示し、採用元を併記するため。設計書 §7・
 > [payout-ratio-scoring.md](../logic/payout-ratio-scoring.md) §2）。`metrics[]` 中の
 > ③（`payoutRatio`）は採点に**採用した**側の値のみが入る。
+
+> 🟡 **2026-09-23 設計・未実装（T-108）。** ③の計算根拠を追加する（追加のみ・後方互換）。
+> 定義の正は [payout-ratio-scoring.md](../logic/payout-ratio-scoring.md) §10。
+>
+> ```json
+> {
+>   "payoutRatioForecast": {
+>     "score": 2,
+>     "value": 62.5,
+>     "unavailableReason": null,
+>     "dividendSen": 7500,
+>     "dividendFiscalYear": 2027,
+>     "epsSen": 12000,
+>     "epsFiscalYear": 2027,
+>     "fiscalYearMismatch": false,
+>     "zeroScoreRule": null,
+>     "matchedBandIndex": 8
+>   },
+>   "payoutRatioBands": [
+>     { "minInclusive": 0, "maxExclusive": 25, "points": 10 },
+>     { "minInclusive": 70, "maxExclusive": null, "points": 0 }
+>   ]
+> }
+> ```
+>
+> | フィールド（各組）   | 単位・型                                  | `null` / 値の意味                                                                                 |
+> | :------------------- | :---------------------------------------- | :------------------------------------------------------------------------------------------------ |
+> | `dividendSen`        | 銭（整数）                                | その組で選ばれた配当レコードの1株配当。レコードが無い・値が欠損なら `null`。`0` は無配（別物）      |
+> | `dividendFiscalYear` | 年度                                      | 上記レコードの決算年度。レコードが無ければ `null`                                                  |
+> | `epsSen`             | 銭（整数）。**負がありうる**              | その組で選ばれた業績レコードの EPS。レコードが無い・値が欠損なら `null`                           |
+> | `epsFiscalYear`      | 年度                                      | 上記レコードの決算年度。レコードが無ければ `null`                                                  |
+> | `fiscalYearMismatch` | `boolean`                                 | 両レコードがあり年度が異なる。**このとき値は返すが、計算には使っていない**（判定不能）             |
+> | `zeroScoreRule`      | `'negative-eps' \| 'no-dividend' \| null` | 赤字・無配の規則で 0 点にしたとき、その規則                                                        |
+> | `matchedBandIndex`   | 整数（0始まり）                           | `payoutRatioBands` の該当区分の添字。判定不能・`zeroScoreRule` 非 `null` のときは `null`           |
+>
+> `payoutRatioBands` は `GET /api/scoring/bands` と同じ形（`minInclusive`/`maxExclusive`/`points`）だが、
+> **ログイン中ユーザーの指標カスタマイズ（T-101）を反映した、この採点に実際に使った表**を返す
+> （`GET /api/scoring/bands` は常にデフォルトの表）。`POST /api/companies` では常にデフォルトの表
+> （Y3。上記「変更履歴」参照）。
+>
+> 上記フィールドは domain の `PayoutRatioSideResult`（`payout-ratio-scoring.md` §10.1）を
+> `PayoutRatioSideView` が**平らにした**もの（`dividendSen` 等は `evidence` 配下、
+> `fiscalYearMismatch`/`zeroScoreRule`/`matchedBandIndex` は直下にあるが、DTO では
+> すべて同じ階層に並べる）。
+>
+> **0点規則の優先順（Y2）:** 配当 0 かつ EPS が負のときは `zeroScoreRule: "negative-eps"`
+> になる（赤字判定が無配判定より先。§0.3 と §0.4 が両方成立する唯一のケース）。
+> 配当が負の値（制度上ありえないデータ不良）のときは `zeroScoreRule` ではなく
+> `unavailableReason: "input-invalid"` になり、`dividendSen`/`epsSen` は値のまま返る。
 
 400: zod 検証失敗。
 

@@ -24,13 +24,21 @@
 `forecast`（予想）と `actual`（実績）を同じ形の組で受け取り、どちらを採点に使うかを
 `useActualForScoring` で指定する。
 
-| 項目                   | 型               | 単位       | 備考                                                              |
-| :--------------------- | :--------------- | :--------- | :---------------------------------------------------------------- |
-| `forecast.dividendSen` | `number \| null` | 銭（整数） | 今期予想の1株配当                                                 |
-| `forecast.epsSen`      | `number \| null` | 銭（整数） | 今期予想の1株利益。**負（赤字）がありうる**                       |
-| `actual.dividendSen`   | `number \| null` | 銭（整数） | 直近実績の1株配当                                                 |
-| `actual.epsSen`        | `number \| null` | 銭（整数） | 直近実績の1株利益。**負（赤字）がありうる**                       |
-| `useActualForScoring`  | `boolean`        | —          | `true` なら実績を採点へ強制採用する（画面のチェックボックス。§7） |
+| 項目                        | 型               | 単位       | 備考                                                              |
+| :-------------------------- | :--------------- | :--------- | :---------------------------------------------------------------- |
+| `forecast.dividendSen`      | `number \| null` | 銭（整数） | 今期予想の1株配当。**年度が食い違っても `null` にしない**（§10.1）|
+| `forecast.dividendFiscalYear` | `number \| null` | 年度     | 上記配当の決算年度                                                |
+| `forecast.epsSen`           | `number \| null` | 銭（整数） | 今期予想の1株利益。**負（赤字）がありうる**。年度が食い違っても `null` にしない |
+| `forecast.epsFiscalYear`    | `number \| null` | 年度       | 上記EPSの決算年度                                                 |
+| `actual.dividendSen`        | `number \| null` | 銭（整数） | 直近実績の1株配当。年度が食い違っても `null` にしない             |
+| `actual.dividendFiscalYear` | `number \| null` | 年度       | 上記配当の決算年度                                                |
+| `actual.epsSen`             | `number \| null` | 銭（整数） | 直近実績の1株利益。**負（赤字）がありうる**。年度が食い違っても `null` にしない |
+| `actual.epsFiscalYear`      | `number \| null` | 年度       | 上記EPSの決算年度                                                 |
+| `useActualForScoring`       | `boolean`        | —          | `true` なら実績を採点へ強制採用する（画面のチェックボックス。§7） |
+
+> ✅ **2026-09-23 変更（R1・T-108）。** `dividendFiscalYear` / `epsFiscalYear` を新設し、
+> 年度の食い違いの判定を呼び出し側から `calculatePayoutRatio` の内部へ移した
+> （詳細は下記「年度突き合わせ」の注記、§5、§6.4.1、§10）。
 
 **出力**
 
@@ -39,8 +47,12 @@
 | `score`    | `number \| null`                      | —            | **採点に採用した**値の 0〜10 の整数。判定不能なら `null`   |
 | `value`    | `number \| null`                      | %（実数）    | 採点に採用した配当性向。表示用                             |
 | `source`   | `'forecast' \| 'actual' \| null`      | —            | どちらを採点に採用したか。両方判定不能なら `null`          |
-| `forecast` | `{ score, value, unavailableReason }` | `value` は % | 予想側の判定結果。**採点採用と無関係に常に返す**（表示用） |
-| `actual`   | `{ score, value, unavailableReason }` | `value` は % | 実績側の判定結果。同上                                     |
+| `forecast` | `PayoutRatioSideResult`（§10.1）      | —            | 予想側の判定結果（`metric`・計算根拠・0点規則・該当区分の組）。**採点採用と無関係に常に返す**（表示用） |
+| `actual`   | `PayoutRatioSideResult`（§10.1）      | —            | 実績側の判定結果。同上                                     |
+
+> ✅ **2026-09-23 追記（T-108）。** 解析ダイアログの③詳細（計算式と実際に使った数値の表示）の
+> ために、`forecast` / `actual` の各組へ**計算根拠**（生の入力値・年度・該当区分・0点規則）を、
+> 結果全体へ**採点に使った区分表**を追加する。**点数の判定結果は変えない。** 詳細は §10。
 
 > `value` / `forecast.value` / `actual.value` はいずれも**配当性向（%）**。丸めていない生値
 > （[dividend-yield-scoring.md](./dividend-yield-scoring.md) §2.2 と同じ
@@ -49,16 +61,22 @@
 > **金額は銭単位の整数で受け取り、途中で浮動小数点に落とさない。**
 > 比率の算出でのみ小数を使い、**丸めるのは表示層の1箇所だけ**。
 
-> ⚠️ **「今期予想の」「直近実績の」がそれぞれ同一年度であることは、呼び出し側の責務になる。**
+> ✅ **2026-09-23 変更（R1・T-108）。** 「今期予想の」「直近実績の」がそれぞれ同一年度であることの
+> **判定は `calculatePayoutRatio` の内部**で行う。呼び出し側（`score-company.ts`）は
+> `latestForecastRecord` / `selectLatestForecastDividend` / `latestActualRecord` /
+> `selectLatestActualDividend` で選んだレコードの `dividendSen` / `dividendFiscalYear` /
+> `epsSen` / `epsFiscalYear` を**null 化せずにそのまま**渡すだけで、年度の比較はしない
+> （比較しないことをコメントに明記すること。うっかり比較を復活させないため）。
 > [ADR-0009](../../adr/0009-dividend-single-source.md)（配当を `DividendRecord` に
 > 一本化）により、EPS（`FinancialRecord`）と配当（`DividendRecord`）は別の型に分かれている。
 > **予想・実績それぞれ、最新の年度で両方が揃わなければ判定不能に倒し、
-> 古い年度へフォールバックしない**（同 ADR「決定した結合規則」を実績側にも適用する）。
-> 実績側の年度突き合わせには、予想側の `latestForecastRecord` /
+> 古い年度へフォールバックしない**（同 ADR「決定した結合規則」を実績側にも適用したもの）
+> という結合規則そのものは変わらない。**変わったのは判定の置き場所だけ。**
+> 実績側の年度突き合わせに使うレコード選択関数は、予想側の `latestForecastRecord` /
 > `selectLatestForecastDividend` に対応する **`latestActualRecord(company)`
-> （新規）と `selectLatestActualDividend(company.dividends)`（新規）** を使う
-> （`src/domain/company/company.ts` / `dividend-record.ts`）。年度が揃わなければ
-> その側の `dividendSen` / `epsSen` に `null` を渡す。
+> と `selectLatestActualDividend(company.dividends)`**（`src/domain/company/company.ts` /
+> `dividend-record.ts`。2026-08-06 §7 で新設済み）。§6.4.1 の受入基準は
+> domain（`calculatePayoutRatio`）のテストで検証する。
 
 ## 3. 計算式
 
@@ -110,13 +128,14 @@ $$\text{配当性向 (\%)} = \left( \frac{\text{1株配当}}{\text{EPS}} \right)
 
 **`null`（判定不能）と 0点は別物。** 画面には `0` ではなく `—` を出す。
 
-> **年度の食い違いはこの関数の外側（呼び出し側）で `null` に変換して渡す。**
-> `calculatePayoutRatio` 自身は年度を知らない（`fiscalYear` を受け取らない）。
-> 呼び出し側が「予想EPSの年度」と「予想配当の年度」を比較し、一致しなければ
-> `forecast.dividendSen` / `forecast.epsSen` を `null` にしてから渡す。
-> **実績側も同じ規則を独立に適用する**（「実績EPSの年度」と「実績配当の年度」の比較。
-> 予想と実績を互いに比較するわけではない — forecast と actual は完全に独立した2組）。
-> この関数の内部では、結果として単に「入力が `null`」＝ `input-missing` に見える。
+> ✅ **2026-09-23 変更（R1・T-108）。** 年度の食い違いの判定は**この関数の内部**で行う。
+> `calculatePayoutRatio` は各組の `dividendFiscalYear` / `epsFiscalYear` を受け取り、
+> 配当・EPS の**両レコードが存在し**、年度が異なるときに `input-missing`
+> （`fiscalYearMismatch: true`）とする。**実績側も同じ規則を独立に適用する**
+> （「実績EPSの年度」と「実績配当の年度」の比較。予想と実績を互いに比較するわけではない —
+> forecast と actual は完全に独立した2組）。
+> **年度が食い違っても、`dividendSen` / `epsSen` / 両年度は値のまま結果へ返す**
+> （表示用。呼び出し側が渡した値を `null` に変換することはない。§10.1）。
 
 ### 5.1 採点への採用（ソース選択。2026-08-06 追記。詳細は §7）
 
@@ -180,10 +199,15 @@ $$\text{配当性向 (\%)} = \left( \frac{\text{1株配当}}{\text{EPS}} \right)
 予想側は ADR-0009 で既に受入基準がある（同 ADR「決定した結合規則」）。
 **実績側にも同じ形の基準を追加する。**
 
+> ✅ **2026-09-23 変更（R1・T-108）。** 以下の基準はすべて `calculatePayoutRatio`
+> 自身（domain 内部の年度比較）が満たす。呼び出し側は年度を比較しないため、この基準は
+> `tests/domain/scoring/payout-ratio.test.ts` で検証する（usecase 側のテストではない）。
+
 - [ ] 実績EPS(FY2026) と 実績配当(FY2026) が揃う → FY2026 で実績配当性向を判定できる
 - [ ] 実績EPS(FY2026) はあるが実績配当が FY2025 にしか無い → **実績側は `null`**
-      （FY2025 に落ちない。呼び出し側が `actual.epsSen` / `actual.dividendSen` を
-      `null` にして渡す）
+      （FY2025 に落ちない。`calculatePayoutRatio` が年度不一致を検出して
+      `input-missing`（`fiscalYearMismatch: true`）にする。`dividendSen`/`epsSen`
+      そのものは `null` にならず値のまま返る — §10.1）
 - [ ] 実績配当(FY2026) はあるが実績EPSが FY2025 にしか無い → **実績側は `null`**
 - [ ] 予想側は年度が揃うが実績側は揃わない（またはその逆） → **揃った側だけ判定できる**
       （forecast と actual は独立。片方の年度不一致が他方に伝播しない）
@@ -245,6 +269,9 @@ Yahoo 側のPERが同じ倍率で出るなら、Yahoo が実績ベースであ�
 
 - **usecase**: `score-company.ts` で `forecast` / `actual` それぞれの年度突き合わせを行い、
   `useActualForScoring` を受け取って `calculatePayoutRatio` に渡す
+  - ✅ **2026-09-23 変更（R1・T-108）。** 年度突き合わせは `calculatePayoutRatio`（domain）の
+    内部へ移した。usecase は選んだレコードの値と年度を null 化せずに渡すだけで、年度を比較しない
+    （§2「年度突き合わせ」の注記・§5・§6.4.1）。この箇条は 2026-08-06 時点の記録として残す
 - **handler**: DTO にチェックボックスの値を受け取るフィールドを追加する
 - **frontend**: 評価基準タブ（または会社詳細）に「実績配当性向を使う」チェックボックスを
   追加し、③ の表示に予想・実績の両方の値と採用元を併記する（画面設計は `new-screen-spec`、
@@ -309,3 +336,106 @@ Yahoo 側のPERが同じ倍率で出るなら、Yahoo が実績ベースであ�
   `tests/domain/company/company.test.ts`（`latestActualRecord`/`latestForecastRecord`）、
   `tests/usecase/score-company.test.ts`（実績側の年度突き合わせ・ソース選択の結線）、
   `tests/integration/api.test.ts`（POST/GET の `useActualForScoring` 結線）
+
+## 10. 詳細画面向けの計算根拠（2026-09-23 決定。T-108）
+
+### 背景
+
+解析ダイアログの③詳細（[analysis-dialog.md](../ui/pages/analysis-dialog.md) §5.3.1）で
+「計算式と、実際の計算に使った数値」を表示する。現状の出力（§2）は配当性向（%）・点数・
+理由コードしか持たず、**分子・分母・年度・どの区分に当たったか**が画面から見えない。
+
+### 10.1 追加する出力（各組 = `forecast` / `actual` のそれぞれ）
+
+> ✅ **2026-09-23 変更（R2・T-108）。** 各組の型として新しい値オブジェクト
+> `PayoutRatioSideResult` を新設する。**全指標共通の `MetricScore` は拡張しない**
+> （③以外の9指標が計算根拠を持たない非対称を型で保つため。`MetricScore` に
+> `fiscalYearMismatch` 等を足すと、③専用のフィールドが共通型に漏れ出す）。
+>
+> ```ts
+> interface PayoutRatioSideResult {
+>   readonly metric: MetricScore; // score / value / unavailableReason（既存。§2 の内訳と同じ）
+>   readonly evidence: {
+>     readonly dividendSen: number | null;
+>     readonly dividendFiscalYear: number | null;
+>     readonly epsSen: number | null;
+>     readonly epsFiscalYear: number | null;
+>   };
+>   readonly fiscalYearMismatch: boolean;
+>   readonly zeroScoreRule: 'negative-eps' | 'no-dividend' | null;
+>   readonly matchedBandIndex: number | null;
+> }
+> ```
+>
+> `PayoutRatioResult.forecast` / `PayoutRatioResult.actual`（§2）はこの型になる
+> （旧 `MetricScore` 直置きから変更。**点数の判定結果 `metric.score`/`metric.value`/
+> `metric.unavailableReason` は変わらない**）。usecase の `CompanyScoring` と
+> handler の DTO `PayoutRatioSideView`（[glossary.md](../../glossary.md)）は、この
+> `PayoutRatioSideResult` を平らにして（`metric` の中身を展開して）画面まで運ぶ。
+
+| 項目（`evidence` 配下） | 型                                        | 単位       | 意味                                                                                                                                                                  |
+| :----------------------- | :----------------------------------------- | :--------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dividendSen`        | `number \| null`                           | 銭（整数） | その組で**選ばれた**配当レコードの1株配当（予想: `selectLatestForecastDividend`、実績: `selectLatestActualDividend`）。**年度が食い違っても `null` にしない**（表示用） |
+| `dividendFiscalYear` | `number \| null`                           | 年度       | 上記配当レコードの決算年度。レコードが無ければ `null`                                                                                                                 |
+| `epsSen`             | `number \| null`                           | 銭（整数） | その組で選ばれた業績レコード（予想: `latestForecastRecord`、実績: `latestActualRecord`）の EPS。**負がありうる**。年度が食い違っても `null` にしない                  |
+| `epsFiscalYear`      | `number \| null`                           | 年度       | 上記業績レコードの決算年度。レコードが無ければ `null`                                                                                                                 |
+
+| 項目（`PayoutRatioSideResult` 直下） | 型                                        | 単位 | 意味                                                                                                                                     |
+| :------------------------------------ | :----------------------------------------- | :--- | :---------------------------------------------------------------------------------------------------------------------------------------- |
+| `fiscalYearMismatch` | `boolean`                                  | —    | 配当と EPS の**両レコードが存在し**、年度が異なるとき `true`。このとき判定は §5 のとおり `input-missing`（判定不能）のまま                |
+| `zeroScoreRule`      | `'negative-eps' \| 'no-dividend' \| null`  | —    | §0.3（赤字）/ §0.4（無配）の規則で 0点にしたとき、その規則。区分表を引いて 0点になった場合（70%以上）は `null`                            |
+| `matchedBandIndex`   | `number \| null`                           | —    | 区分表（下表の `bands`）の何番目の区分に当たったか（0始まり）。**判定不能・`zeroScoreRule` が非 `null` のときは `null`**                 |
+
+**結果全体に追加する出力**
+
+| 項目    | 型                     | 意味                                                                                                                                     |
+| :------ | :--------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
+| `bands` | `readonly ScoreBand[]` | **この採点に実際に使った③の区分表。** 指標カスタマイズ（T-101）で上書きされていればその表、未設定なら `PAYOUT_RATIO_BANDS`。予想・実績で共通。**`calculatePayoutRatio` が判定に使った表をそのまま返す**（Y1。usecase・handler は表を組み立て直さない） |
+
+### 10.2 判定経路の一本化（必須）
+
+- **`matchedBandIndex` は、点数を決めたのと同じ区分表ルックアップから得る。**
+  「点数用」と「ハイライト用」で別々に区分を判定しない（境界の扱いがずれると、
+  画面のマーカー行と点数が食い違う）。✅ **2026-09-23 決定（R3・T-108）:**
+  - `score-band.ts` に `lookupBandIndex(bands, compare): number | null` を新設する
+    （`lookupPoints` と同じ肯定形の判定・同じ `NaN` の倒し方。**添字**を返す点だけが違う）
+  - 既存の `lookupPoints` はこれをラップして点数だけ取り出す薄いラッパーにする
+    （呼び出し側のシグネチャ・戻り値は変えない）
+  - `metric-lookup.ts` に添字も返す版 `scoreByBandsWithIndex(bands, value): { metric: MetricScore; bandIndex: number | null }`
+    を新設し、既存の `scoreByBands` はこれに委ねる（`{ metric }` だけを取り出すラッパーにする）
+  - **③以外の9指標が呼ぶ公開関数・戻り値は変えない**（`lookupPoints`/`scoreByBands` のシグネチャは不変）
+  - 区分表の外（`value-out-of-band`）は `bandIndex: null`
+- **FE は区分を判定しない**（`.claude/rules/frontend.md`「計算・判定をしない」）。
+  FE は `matchedBandIndex` の行にマーカーを描くだけ
+- **「実際の計算に使った値」と「表示用の生値」の関係:** 年度が一致したときは
+  `evidence.dividendSen` / `evidence.epsSen` がそのまま §3 の式に渡った値である。
+  年度が食い違ったとき（`fiscalYearMismatch: true`）は、✅ **2026-09-23 変更（R1）**
+  `evidence` の値・年度は`null` に変換されず**値のまま**返るが、§5 のとおり
+  `calculatePayoutRatio` 内部の判定は `input-missing`（判定不能）として扱われ、
+  この値は式の計算には使われていない。画面は「年度が一致しないため判定不能」と
+  表示する（値は参考表示）
+
+### 10.3 受入基準（追加）
+
+- [ ] 各組について、`matchedBandIndex !== null` ならば `bands[matchedBandIndex].points === metric.score`
+      （§6.1 の全境界値 `0` / `24.999…` / `25.0` / `60.0` / `69.999…` / `70.0` で確認する）
+- [ ] 区分表を上書きした場合（T-101）、`bands` が上書き後の表になり、`matchedBandIndex` もその表の添字になる
+- [ ] 赤字（EPS < 0）→ `metric.score: 0`、`zeroScoreRule: 'negative-eps'`、`matchedBandIndex: null`
+- [ ] 無配（配当 0、EPS > 0）→ `metric.score: 0`、`zeroScoreRule: 'no-dividend'`、`matchedBandIndex: null`
+- [ ] 配当性向 70% 以上 → `metric.score: 0`、`zeroScoreRule: null`、`matchedBandIndex` は最下位区分の添字
+- [ ] EPS が 0 → `unavailableReason: 'division-by-zero'`、`evidence.dividendSen`/`evidence.epsSen`（=0）は値のまま返る
+- [ ] EPS レコードが無い → `evidence.epsSen: null`、`evidence.epsFiscalYear: null`、`evidence.dividendSen` は値のまま返る
+- [ ] 予想EPS(FY2027) と予想配当(FY2026) → `fiscalYearMismatch: true`、`unavailableReason: 'input-missing'`、
+      `evidence.dividendSen`・`evidence.epsSen`・両年度は**値のまま**返る（`null` にならない）
+- [ ] 実績側にも上記の年度の食い違いを同様に適用し、予想側の状態に影響されない
+- [ ] 既存の §6.1〜§6.6 の結果（`score` / `value` / `source` / `unavailableReason`）が**1件も変わらない**
+      （`SCORING_CALC_VERSION` を上げない根拠）
+- [ ] **（R4）** `lookupPoints`/`scoreByBands` を `lookupBandIndex`/`scoreByBandsWithIndex` の
+      ラッパーに組み替えた後、`tests/domain/scoring/` の全指標（①〜⑩）の既存テストが
+      期待値を変えずに全パスする
+- [ ] **（Y2）** 配当 0 かつ EPS 負（赤字かつ無配）→ `zeroScoreRule: 'negative-eps'`
+      （`payout-ratio.ts` の現行の判定順どおり、EPS 負の判定が無配判定より先に来るため
+      赤字を優先する。§0.3 と §0.4 が両方成立する唯一のケース）
+- [ ] **（Y2）** 配当が負の値 → `unavailableReason: 'input-invalid'`、`zeroScoreRule: null`、
+      `matchedBandIndex: null`。`evidence.dividendSen`/`evidence.epsSen` の値・年度は
+      そのまま返る（配当性向そのものは計算せず `metric.value` は `null`）
