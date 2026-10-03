@@ -23,6 +23,7 @@ import { EditHoldingForm } from '../components/EditHoldingForm';
 import { EmptyState } from '../components/EmptyState';
 import { HoldingForm } from '../components/HoldingForm';
 import { HoldingsTable } from '../components/HoldingsTable';
+import { PageHeader } from '../components/PageHeader';
 import { PortfolioTabs } from '../components/PortfolioTabs';
 import { Skeleton } from '../components/Skeleton';
 import {
@@ -144,8 +145,12 @@ export function PortfolioPage({
 
   return (
     <>
-      <section>
-        <h2>ポートフォリオ</h2>
+      <section className="page">
+        <PageHeader
+          eyebrow="02 — PORTFOLIO"
+          title="ポートフォリオ"
+          lead="保有銘柄の評価額・利回り・スコアをまとめて確認できます。集計方法はページ下部に明記しています。"
+        />
 
         {portfolios.loading ? (
           <Skeleton rows={3} />

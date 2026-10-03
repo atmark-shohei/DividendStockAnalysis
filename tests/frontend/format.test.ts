@@ -13,6 +13,7 @@ import {
   formatPriceAsOf,
   formatScoreAverage,
   formatSen,
+  formatSenAxisTick,
   formatUnrealizedGainLossSen,
   payoutRatioBreakdownText,
   ratioToEditableText,
@@ -234,6 +235,25 @@ describe('formatSen（解析ダイアログの株価表示）', () => {
 
   it('端数の無い銭も小数第2位までゼロ埋めする', () => {
     expect(formatSen(100_000)).toBe('1,000.00 円');
+  });
+});
+
+/** 配当推移グラフの金額軸（`DividendLineChart`）。銭のまま「6000」と出していた誤読の再発防止 */
+describe('formatSenAxisTick（グラフの金額軸の目盛り）', () => {
+  it('銭を円に直す（6000銭 → 60 円。銭のまま出さない）', () => {
+    expect(formatSenAxisTick(6_000)).toBe('60 円');
+  });
+
+  it('0銭（無配）は「0 円」', () => {
+    expect(formatSenAxisTick(0)).toBe('0 円');
+  });
+
+  it('端数がある目盛りだけ小数第2位まで出す', () => {
+    expect(formatSenAxisTick(2_550)).toBe('25.50 円');
+  });
+
+  it('3桁区切りを付ける', () => {
+    expect(formatSenAxisTick(1_234_500)).toBe('12,345 円');
   });
 });
 

@@ -40,8 +40,12 @@ export function ConsecutiveYearsList({ rows, consecutiveYears }: ConsecutiveYear
           <tr>
             <th scope="col">年度</th>
             <th scope="col">状態</th>
-            <th scope="col">1株配当</th>
-            <th scope="col">前年差</th>
+            <th scope="col" className="numeric">
+              1株配当
+            </th>
+            <th scope="col" className="numeric">
+              前年差
+            </th>
           </tr>
         </thead>
         <tbody>

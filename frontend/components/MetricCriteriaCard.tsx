@@ -1,6 +1,10 @@
 import type { ScoringBandsResponse } from '../api';
 import { formatBandRange } from '../format';
 import { ImplementationBadge } from './ImplementationBadge';
+import { ScoreBar } from './ScoreBar';
+
+/** 1指標の満点（0..10点。MetricTable の MAX_METRIC_SCORE と同じ上限） */
+const MAX_BAND_POINTS = 10;
 
 /** ①〜⑩の丸数字見出し。`metric.number`（1〜10）をキーにする */
 const METRIC_ORDINAL: Readonly<Record<number, string>> = {
@@ -61,7 +65,9 @@ export function MetricCriteriaCard({
         <thead>
           <tr>
             <th scope="col">条件</th>
-            <th scope="col">点数</th>
+            <th scope="col" className="numeric">
+              点数
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -70,7 +76,11 @@ export function MetricCriteriaCard({
             // fe-plan.md §7確認事項E）
             <tr key={index}>
               <td>{formatBandRange(band, metric.unit, isHundredthsPercent)}</td>
-              <td className="numeric">{`${String(band.points)} 点`}</td>
+              <td className="numeric band-points">
+                {/* 点数の尺度を目で読めるようにバーを添える（中立色。判断を含まない） */}
+                <ScoreBar value={band.points} max={MAX_BAND_POINTS} />
+                {`${String(band.points)} 点`}
+              </td>
             </tr>
           ))}
         </tbody>

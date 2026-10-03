@@ -1,5 +1,6 @@
 import type { ScoringBandsResponse } from '../api';
 import { MetricCriteriaCard } from '../components/MetricCriteriaCard';
+import { PageHeader } from '../components/PageHeader';
 import { METRIC_DESCRIPTION, METRIC_FORMULA } from './criteria-content';
 
 /**
@@ -26,8 +27,12 @@ export function CriteriaPage({
   }
 
   return (
-    <section>
-      <h2>評価基準</h2>
+    <section className="page">
+      <PageHeader
+        eyebrow="03 — CRITERIA"
+        title="評価基準"
+        lead="10指標それぞれの計算式と採点区分をすべて公開しています。スコアは良し悪しの推奨ではなく、公開された物差しに当てた結果です。"
+      />
       <div className="criteria-grid">
         {bands.metrics.map((metric) => (
           <MetricCriteriaCard

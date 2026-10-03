@@ -6,6 +6,7 @@ import type {
   ScoringBandsResponse,
 } from '../api';
 import { IndicatorRow, type IndicatorRowViewModel } from '../components/IndicatorRow';
+import { PageHeader } from '../components/PageHeader';
 import { ratioToEditableText, TOTAL_SCORE_COMPARISON_NOTE } from '../format';
 import {
   INDICATOR_CONSTRAINTS,
@@ -138,11 +139,17 @@ export function IndicatorCustomPage({
   };
 
   return (
-    <section>
-      <h2>指標カスタマイズ</h2>
-      <p className={countLow ? 'indicator-counter indicator-counter-low' : 'indicator-counter'}>
-        選択中 <span className="numeric">{selectedCount}</span> / 10（最小 5）
-      </p>
+    <section className="page">
+      <PageHeader
+        eyebrow="04 — CUSTOMIZE"
+        title="指標カスタマイズ"
+        lead="採点に使う指標（5〜10個）と、それぞれ満点となる基準値を選べます。"
+        aside={
+          <p className={countLow ? 'indicator-counter indicator-counter-low' : 'indicator-counter'}>
+            選択中 <span className="numeric">{selectedCount}</span> / 10（最小 5）
+          </p>
+        }
+      />
       {countLow && (
         <p className="warning" role="status">
           ⚠ 選択中の指標が5個未満です。5〜10個を選択してください。
@@ -172,17 +179,19 @@ export function IndicatorCustomPage({
           );
         })}
       </div>
-      <button type="button" onClick={handleSave} disabled={saving || !canSave}>
-        設定を保存
-      </button>
-      <button
-        type="button"
-        className="button-outline"
-        onClick={handleResetToDefault}
-        disabled={saving}
-      >
-        初期設定に戻す
-      </button>
+      <div className="form-actions">
+        <button type="button" onClick={handleSave} disabled={saving || !canSave}>
+          設定を保存
+        </button>
+        <button
+          type="button"
+          className="button-outline"
+          onClick={handleResetToDefault}
+          disabled={saving}
+        >
+          初期設定に戻す
+        </button>
+      </div>
       {saveError !== null && (
         <p className="error" role="alert">
           {saveError}

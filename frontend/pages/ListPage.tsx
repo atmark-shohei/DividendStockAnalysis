@@ -13,6 +13,7 @@ import {
 } from '../components/analysis-dialog-logic';
 import { Dialog } from '../components/Dialog';
 import { EmptyState } from '../components/EmptyState';
+import { PageHeader } from '../components/PageHeader';
 import { computePageCount, Pagination } from '../components/Pagination';
 import { ScoreBar } from '../components/ScoreBar';
 import { Skeleton } from '../components/Skeleton';
@@ -165,129 +166,146 @@ export function ListPage({
 
   return (
     <>
-      <section>
-        <h2>検索</h2>
-        <div className="search-bar">
-          <label className="sr-only" htmlFor="company-search-input">
-            銘柄コード・銘柄名で検索
-          </label>
-          <input
-            id="company-search-input"
-            type="search"
-            placeholder="銘柄コード・銘柄名で検索"
-            value={searchText}
-            onChange={(event) => {
-              setSearchText(event.target.value);
-            }}
-          />
-          <span className="search-count numeric">該当 {searchControl.total} 件</span>
-          <label className="search-sort inline">
-            ソート
-            <select
-              value={searchControl.sort}
+      <section className="page">
+        <PageHeader
+          eyebrow="01 — SCREENER"
+          title="検索"
+          lead="保存済みの銘柄を10指標の総合点で横並びに比較できます。行を選ぶと、指標ごとの内訳を開きます。"
+        />
+        <div className="panel">
+          <div className="search-bar">
+            <label className="sr-only" htmlFor="company-search-input">
+              銘柄コード・銘柄名で検索
+            </label>
+            <input
+              id="company-search-input"
+              type="search"
+              placeholder="銘柄コード・銘柄名で検索"
+              value={searchText}
               onChange={(event) => {
-                searchControl.onSortChange(event.target.value as CompanySortKey);
+                setSearchText(event.target.value);
               }}
-            >
-              {SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {searchControl.loading ? (
-          <Skeleton rows={searchControl.perPage} />
-        ) : companies.length === 0 ? (
-          <EmptyState
-            heading={heading}
-            description={description}
-            cta={
-              showEmptyStateCta
-                ? { label: '銘柄登録へ', onClick: searchControl.onNavigateToInput }
-                : undefined
-            }
-          />
-        ) : (
-          <>
-            <table className="metric-table">
-              <caption>保存済み銘柄の一覧</caption>
-              <thead>
-                <tr>
-                  <th scope="col">銘柄</th>
-                  <th scope="col">総合点</th>
-                  <th scope="col">配当利回り</th>
-                  <th scope="col">配当性向</th>
-                  <th scope="col">株価</th>
-                  <th scope="col">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {companies.map((company) => {
-                  const isSelected = company.code === selected.code;
-                  return (
-                    // 選択行は色だけで示さない（色覚多様性）。操作列にも文言を出す
-                    <tr key={company.code} className={isSelected ? 'is-selected' : undefined}>
-                      <th scope="row" className="company-cell">
-                        <span className="company-name" title={company.name}>
-                          {company.name}
-                        </span>
-                        <span className="mono company-code">{company.code}</span>
-                      </th>
-                      <td className="score-cell">
-                        <ScoreBar value={company.totalScore} max={company.maxTotalScore} />
-                        <span className="numeric score-value">
-                          {company.totalScore} / {company.maxTotalScore}
-                          <span className="score-unit"> 点</span>
-                        </span>
-                        {/* 有効指標数の併記は必須（scoring-requirements.md §0.5） */}
-                        <span className="score-effective">
-                          有効{' '}
-                          <span className="numeric">
-                            {company.effectiveMetricCount}/{company.totalMetricCount}
-                          </span>
-                        </span>
-                      </td>
-                      <td className="numeric">
-                        {formatMetricValue(company.dividendYieldValue, '%', true)}
-                      </td>
-                      <td className="numeric text-secondary">
-                        {formatMetricValue(company.payoutRatioValue, '%', false)}
-                      </td>
-                      <td className="numeric text-secondary">{formatSen(company.priceSen)}</td>
-                      <td>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            rowActions.onSelect(company.code);
-                          }}
-                          aria-pressed={isSelected}
-                        >
-                          {isSelected ? '表示中' : '表示'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            rowActions.onDelete(company.code);
-                          }}
-                        >
-                          削除
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <Pagination
-              page={searchControl.page}
-              pageCount={pageCount}
-              onChange={searchControl.onPageChange}
             />
-          </>
-        )}
+            <span className="search-count numeric">該当 {searchControl.total} 件</span>
+            <label className="search-sort inline">
+              ソート
+              <select
+                value={searchControl.sort}
+                onChange={(event) => {
+                  searchControl.onSortChange(event.target.value as CompanySortKey);
+                }}
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {searchControl.loading ? (
+            <Skeleton rows={searchControl.perPage} />
+          ) : companies.length === 0 ? (
+            <EmptyState
+              heading={heading}
+              description={description}
+              cta={
+                showEmptyStateCta
+                  ? { label: '銘柄登録へ', onClick: searchControl.onNavigateToInput }
+                  : undefined
+              }
+            />
+          ) : (
+            <>
+              <table className="metric-table">
+                <caption>保存済み銘柄の一覧</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">銘柄</th>
+                    <th scope="col">総合点</th>
+                    <th scope="col" className="numeric">
+                      配当利回り
+                    </th>
+                    <th scope="col" className="numeric">
+                      配当性向
+                    </th>
+                    <th scope="col" className="numeric">
+                      株価
+                    </th>
+                    <th scope="col" className="numeric">
+                      操作
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {companies.map((company) => {
+                    const isSelected = company.code === selected.code;
+                    return (
+                      // 選択行は色だけで示さない（色覚多様性）。操作列にも文言を出す
+                      <tr key={company.code} className={isSelected ? 'is-selected' : undefined}>
+                        <th scope="row" className="company-cell">
+                          <span className="company-name" title={company.name}>
+                            {company.name}
+                          </span>
+                          <span className="mono company-code">{company.code}</span>
+                        </th>
+                        <td className="score-cell">
+                          <span className="numeric score-value">
+                            {company.totalScore} / {company.maxTotalScore}
+                            <span className="score-unit"> 点</span>
+                          </span>
+                          {/* 数値が主役。バーはその下に添える（試作 README §2 Col 2） */}
+                          <ScoreBar value={company.totalScore} max={company.maxTotalScore} />
+                          {/* 有効指標数の併記は必須（scoring-requirements.md §0.5） */}
+                          <span className="score-effective">
+                            有効{' '}
+                            <span className="numeric">
+                              {company.effectiveMetricCount}/{company.totalMetricCount}
+                            </span>
+                          </span>
+                        </td>
+                        <td className="numeric">
+                          {formatMetricValue(company.dividendYieldValue, '%', true)}
+                        </td>
+                        <td className="numeric text-secondary">
+                          {formatMetricValue(company.payoutRatioValue, '%', false)}
+                        </td>
+                        <td className="numeric text-secondary">{formatSen(company.priceSen)}</td>
+                        <td className="row-actions">
+                          <button
+                            type="button"
+                            className="button-compact"
+                            onClick={() => {
+                              rowActions.onSelect(company.code);
+                            }}
+                            aria-pressed={isSelected}
+                          >
+                            {isSelected ? '表示中' : '表示'}
+                          </button>
+                          <button
+                            type="button"
+                            className="button-ghost button-compact"
+                            onClick={() => {
+                              rowActions.onDelete(company.code);
+                            }}
+                          >
+                            削除
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <Pagination
+                page={searchControl.page}
+                pageCount={pageCount}
+                onChange={searchControl.onPageChange}
+              />
+            </>
+          )}
+        </div>
       </section>
 
       <Dialog

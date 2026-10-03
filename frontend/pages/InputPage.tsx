@@ -1,5 +1,6 @@
 import type { AnalyzeCompanyRequest } from '../api';
 import { CompanyForm } from '../components/CompanyForm';
+import { PageHeader } from '../components/PageHeader';
 
 /**
  * データ入力だけの画面（`/input`）。
@@ -16,12 +17,15 @@ export function InputPage({
   readonly disabled: boolean;
 }) {
   return (
-    <section>
-      <h2>銘柄登録</h2>
-      <p className="meta">
-        解析すると保存され、一覧画面へ移動して結果を表示します。入力内容は保存後に破棄されます。
-      </p>
-      <CompanyForm onSubmit={onSubmit} disabled={disabled} />
+    <section className="page">
+      <PageHeader
+        eyebrow="05 — REGISTER"
+        title="銘柄登録"
+        lead="解析すると保存され、一覧画面へ移動して結果を表示します。入力内容は保存後に破棄されます。"
+      />
+      <div className="panel">
+        <CompanyForm onSubmit={onSubmit} disabled={disabled} />
+      </div>
     </section>
   );
 }

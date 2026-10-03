@@ -44,8 +44,12 @@ export function MetricTable({
         <tr>
           <th scope="col">#</th>
           <th scope="col">指標</th>
-          <th scope="col">算出値</th>
-          <th scope="col">スコア</th>
+          <th scope="col" className="numeric">
+            算出値
+          </th>
+          <th scope="col" className="numeric">
+            スコア
+          </th>
           <th scope="col">備考</th>
           {/* 装飾のみの列（analysis-dialog.md §4.2「›: 装飾のみ、aria-hidden」）。
               見出しテキストが無い列をSRが「列見出し不明」と読まないよう列見出しごと隠す */}

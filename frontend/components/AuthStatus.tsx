@@ -27,6 +27,7 @@ export function AuthStatus({
     return (
       <div className="auth-status">
         <a
+          className="button-link"
           href={routeToPath(loginRoute)}
           onClick={(event) => {
             if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -42,9 +43,15 @@ export function AuthStatus({
 
   return (
     <div className="auth-status">
-      <span>{user.email}</span>
+      {/* メールの頭文字のアバター。メールアドレス本文を併記するので装飾扱い */}
+      <span className="avatar" aria-hidden="true">
+        {user.email.charAt(0).toUpperCase()}
+      </span>
+      <span className="auth-email" title={user.email}>
+        {user.email}
+      </span>
       {user.role === 'admin' && <RoleBadge role="admin" />}
-      <button type="button" onClick={onLogout}>
+      <button type="button" className="button-outline button-compact" onClick={onLogout}>
         ログアウト
       </button>
     </div>

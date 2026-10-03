@@ -56,33 +56,50 @@ export function AuthPage({
   readonly onSignup: (payload: AuthFormPayload, redirect: string) => void;
 }) {
   return (
-    <section className="auth-card">
-      <nav className="auth-tabs" aria-label="ログイン・アカウント作成の切り替え">
-        <AuthTab
-          label="ログイン"
-          to={{ kind: 'login', redirect }}
-          active={mode === 'login'}
-          onNavigate={onNavigate}
+    <div className="auth-layout">
+      {/* ログインの目的を先に伝える導入文。装飾ではなく本文として読ませる */}
+      <div className="auth-intro">
+        <p className="page-eyebrow" aria-hidden="true">
+          ACCOUNT
+        </p>
+        <h2 className="auth-intro-title">
+          配当の質を、
+          <br />
+          10の物差しで。
+        </h2>
+        <p className="page-lead">
+          ログインすると、ポートフォリオの記録と、採点に使う指標のカスタマイズができます。
+          銘柄の検索と評価基準はログインなしで利用できます。
+        </p>
+      </div>
+      <section className="auth-card" aria-label={mode === 'login' ? 'ログイン' : 'アカウント作成'}>
+        <nav className="auth-tabs" aria-label="ログイン・アカウント作成の切り替え">
+          <AuthTab
+            label="ログイン"
+            to={{ kind: 'login', redirect }}
+            active={mode === 'login'}
+            onNavigate={onNavigate}
+          />
+          <AuthTab
+            label="アカウント作成"
+            to={{ kind: 'signup', redirect }}
+            active={mode === 'signup'}
+            onNavigate={onNavigate}
+          />
+        </nav>
+        <AuthForm
+          mode={mode}
+          redirect={redirect}
+          busy={busy}
+          error={error}
+          onLogin={onLogin}
+          onSignup={onSignup}
         />
-        <AuthTab
-          label="アカウント作成"
-          to={{ kind: 'signup', redirect }}
-          active={mode === 'signup'}
-          onNavigate={onNavigate}
-        />
-      </nav>
-      <AuthForm
-        mode={mode}
-        redirect={redirect}
-        busy={busy}
-        error={error}
-        onLogin={onLogin}
-        onSignup={onSignup}
-      />
-      <p className="auth-footnote">
-        パスワードはハッシュ化して保存され、平文では保持されません。
-        ログインしなくても銘柄の検索は利用できます。
-      </p>
-    </section>
+        <p className="auth-footnote">
+          パスワードはハッシュ化して保存され、平文では保持されません。
+          ログインしなくても銘柄の検索は利用できます。
+        </p>
+      </section>
+    </div>
   );
 }

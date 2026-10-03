@@ -1,6 +1,8 @@
 /*
  * 色・余白・フォントサイズはトークン化し、コンポーネントに直値を書かない
  * （`.claude/rules/frontend.md`）。トークンの正は `docs/02_design/ui/design-tokens.md`。
+ *
+ * 構成: 1. トークン → 2. ベース → 3. アプリシェル → 4. 汎用部品 → 5. 画面別 → 6. モーション・レスポンシブ
  */
 :root {
   /* 色（design-tokens.md §2.1） */
@@ -22,12 +24,19 @@
   --color-positive: #52a06f;
   --color-negative: #cf6b5c;
 
+  /* 色の追加（design-tokens.md §8.1。試作 README の行ホバー・装飾・ダイアログ面の値） */
+  --color-surface-hover: #1a1f28;
+  --color-surface-dialog: #12161d;
+  --color-text-faint: #4a5563;
+  --color-line-disabled: #3a4452;
+
   /* タイポグラフィ（design-tokens.md §3） */
   --font-ui: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', Consolas, 'Courier New', monospace;
 
   --font-size-hero: 3.25rem;
   --font-size-display: 2.375rem;
+  --font-size-title: 2rem;
   --font-size-score: 1.4375rem;
   --font-size-xl: 1.1875rem;
   --font-size-lg: 1.0625rem;
@@ -38,6 +47,9 @@
   --font-size-2xs: 0.6875rem;
   --font-size-3xs: 0.625rem;
 
+  --tracking-tight: -0.02em;
+  --tracking-label: 0.16em;
+
   /* 余白・角丸・レイアウト（design-tokens.md §4） */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -45,15 +57,21 @@
   --space-4: 1rem;
   --space-5: 1.5rem;
   --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
 
   --radius-sm: 0.5rem;
   --radius-md: 0.625rem;
   --radius-lg: 0.75rem;
   --radius-xl: 0.875rem;
   --radius-2xl: 1rem;
+  --radius-full: 999px;
 
   --content-max: 72.5rem;
   --width-auth-card: 25rem;
+  --control-height: 2.5rem;
+  --control-height-compact: 2rem;
+  --header-height: 4rem;
   --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.6);
 
   /*
@@ -65,81 +83,295 @@
   --dialog-scrim-color: rgba(6, 8, 12, 0.74);
   --dialog-scrim-blur: 0.1875rem; /* 3px */
   --dialog-max-width: 58.75rem; /* 940px */
+  --dialog-compact-max-width: 30rem; /* 480px  フォーム・確認用の小さいダイアログ */
+
+  /* モーション（design-tokens.md §8.4。prefers-reduced-motion で無効化する） */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 140ms;
+  --duration-base: 220ms;
+  --duration-slow: 560ms;
+
+  /* ネイティブのフォーム部品・スクロールバーもダークで描かせる */
+  color-scheme: dark;
 }
 
-* {
+/* ───────────────────────── 2. ベース ───────────────────────── */
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scrollbar-gutter: stable;
 }
 
 body {
   margin: 0;
+  min-height: 100vh;
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-ui);
-  line-height: 1.6;
+  font-size: var(--font-size-base);
+  line-height: 1.7;
+  /* 和文の約物を詰めて組む。等幅（数値）には効かせない（.numeric / .mono で解除） */
+  font-feature-settings: 'palt';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/*
+ * 背景の環境光。面の分離は影ではなくヘアラインで行う（design-tokens.md §4）ため、
+ * 奥行きはページ全体のごく弱い光だけで出す。--color-action は「操作」の意味を持つ色なので
+ * 使わず、中立の --color-data を極薄で使う。
+ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      60rem 32rem at 12% -8%,
+      color-mix(in srgb, var(--color-data) 7%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      48rem 28rem at 100% 0%,
+      color-mix(in srgb, var(--color-data) 4%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--color-line-row) 40%, transparent) 1px,
+      transparent 1px
+    );
+  background-size:
+    auto,
+    auto,
+    var(--space-8) 100%;
+  mask-image: linear-gradient(to bottom, black, transparent 36rem);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-action) 38%, transparent);
+  color: var(--color-text);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-block: 0;
+}
+
+h2 {
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+}
+
+h3 {
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+
+p + p {
+  margin-top: var(--space-2);
+}
+
+a {
+  color: var(--color-action);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+a:hover {
+  color: color-mix(in srgb, var(--color-action) 75%, var(--color-text));
+}
+
+/* キーボードフォーカスは全要素で同じ見た目にする（--color-action は「操作できる」の意味） */
+:focus-visible {
+  outline: 2px solid var(--color-action);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 main {
   max-width: var(--content-max);
   margin: 0 auto;
-  padding: var(--space-4) var(--space-3);
+  padding: var(--space-6) var(--space-6) var(--space-7);
 }
 
 section {
   margin-block: var(--space-4);
-  padding: var(--space-3);
+  padding: var(--space-5);
   background: var(--color-surface);
+  border: 1px solid var(--color-line);
   border-radius: var(--radius-lg);
 }
 
 fieldset {
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-md);
-  margin-block: var(--space-3);
-  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  margin: 0 0 var(--space-5);
+  padding: var(--space-5);
+  background: var(--color-surface-dim);
 }
 
 legend {
+  padding-inline: var(--space-2);
   color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-label);
 }
 
 label {
   display: inline-flex;
   flex-direction: column;
   gap: var(--space-1);
-  margin: var(--space-1) var(--space-3) var(--space-1) 0;
+  margin: var(--space-1) var(--space-4) var(--space-3) 0;
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
+  font-weight: 500;
 }
 
 label.inline {
   flex-direction: row;
   align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  font-weight: 400;
 }
 
-input {
-  padding: var(--space-1) var(--space-2);
+input,
+select,
+textarea {
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-sm);
   background: var(--color-surface-inset);
   color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-base);
   min-width: 6rem;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
 }
 
-button {
-  padding: var(--space-2) var(--space-3);
-  margin-right: var(--space-2);
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--color-action);
-  color: var(--color-on-action);
-  font-weight: 700;
+textarea {
+  line-height: 1.6;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--color-text-tertiary);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-action) 55%, transparent);
+  outline-offset: 0;
+  border-color: var(--color-action);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--color-text-tertiary);
+  border-color: var(--color-line);
+  background: var(--color-surface-dim);
+  cursor: not-allowed;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  min-width: 0;
+  min-height: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  accent-color: var(--color-action);
   cursor: pointer;
 }
 
+input[type='number'],
+input[inputmode='decimal'],
+input[inputmode='numeric'] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: normal;
+}
+
+/* セレクトは矢印を CSS で描く（画像を使わない） */
+select {
+  appearance: none;
+  padding-right: var(--space-6);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-text-secondary) 50%),
+    linear-gradient(135deg, var(--color-text-secondary) 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.05rem) 50%,
+    calc(100% - 0.75rem) 50%;
+  background-size: 0.3rem 0.3rem;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-4);
+  margin-right: var(--space-2);
+  border: 1px solid var(--color-action);
+  border-radius: var(--radius-sm);
+  background: var(--color-action);
+  color: var(--color-on-action);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-action) 86%, var(--color-text));
+  border-color: color-mix(in srgb, var(--color-action) 86%, var(--color-text));
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 button:disabled {
-  opacity: 0.6;
-  cursor: progress;
+  border-color: var(--color-line-disabled);
+  background: transparent;
+  color: var(--color-line-disabled);
+  cursor: not-allowed;
 }
 
 /* 副次ボタン（枠線）。指標カスタマイズ画面の「初期設定に戻す」（design_mock §5「枠線」） */
@@ -149,12 +381,151 @@ button:disabled {
   color: var(--color-text);
 }
 
-/* ヘッダー: タイトルと認証エリアを両端に配置する */
+.button-outline:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  border-color: var(--color-text-tertiary);
+}
+
+/* 三次ボタン（枠も塗りも無い）。一覧の「削除」など、主操作の隣で目立たせたくない操作 */
+.button-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+}
+
+.button-ghost:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  border-color: var(--color-line);
+  color: var(--color-text);
+}
+
+.button-compact {
+  min-height: var(--control-height-compact);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-xs);
+}
+
+/* ボタンの見た目を持つリンク（ヘッダーの「ログイン」） */
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height-compact);
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-action);
+  color: var(--color-on-action);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.button-link:hover {
+  background: color-mix(in srgb, var(--color-action) 86%, var(--color-text));
+  color: var(--color-on-action);
+}
+
+/* 主操作・副操作を並べる行（フォーム末尾） */
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-line-row);
+}
+
+.form-actions button {
+  margin-right: 0;
+}
+
+/* ───────────────────────── 3. アプリシェル ───────────────────────── */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app > main {
+  flex: 1 0 auto;
+  width: 100%;
+}
+
+/*
+ * ヘッダー: ブランド・画面切り替え・認証エリアを1行に置き、スクロールしても上に残す。
+ * 背景は半透明＋ぼかし（影は使わない。下端はヘアラインで区切る）。
+ */
 .app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--color-bg) 78%, transparent);
+  backdrop-filter: saturate(140%) blur(var(--space-3));
+}
+
+.app-header-inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-6);
+  max-width: var(--content-max);
+  min-height: var(--header-height);
+  margin: 0 auto;
+  padding: 0 var(--space-6);
+}
+
+.brand {
+  flex: none;
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.brand a {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  column-gap: var(--space-3);
+  align-items: center;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.brand a:hover {
+  color: var(--color-text);
+}
+
+/* ロゴのアクセントバー（9×26px）。--color-brand の唯一の用途（design-tokens.md §2.2） */
+.brand-mark {
+  grid-row: 1 / span 2;
+  flex: none;
+  display: inline-block;
+  width: 0.5625rem;
+  height: 1.625rem;
+  border-radius: var(--radius-full);
+  background: var(--color-brand);
+}
+
+.brand-name {
+  font-size: var(--font-size-md);
+  letter-spacing: var(--tracking-tight);
+}
+
+.brand-sub {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-3xs);
+  font-weight: 400;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+/* 認証エリアは右端へ寄せる（ナビの残り幅を押し出す） */
+.app-header .auth-status {
+  margin-left: auto;
 }
 
 /* ヘッダー右側の認証エリア（未ログイン: ログインリンク／ログイン済み: メール＋バッジ＋ログアウト） */
@@ -165,69 +536,215 @@ button:disabled {
   font-size: var(--font-size-sm);
 }
 
-/* ログイン/アカウント作成カード（`docs/02_design/ui/pages/login-page.md` §3） */
-.auth-card {
-  max-width: var(--width-auth-card);
-  margin-inline: auto;
-  border-radius: var(--radius-xl);
+.auth-status button {
+  margin-right: 0;
 }
 
-/* セグメント切替（/login ⇄ /signup）。`.nav` と同じ「下線＋色」で現在地を示す */
-.auth-tabs {
-  display: flex;
-  gap: var(--space-2);
-  border-bottom: 1px solid var(--color-line-strong);
-  margin-bottom: var(--space-3);
-}
-
-.auth-tabs a {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 3px solid transparent;
+/* メールの頭文字アバター。中立色（操作でも評価でもない） */
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  width: var(--control-height-compact);
+  height: var(--control-height-compact);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
   color: var(--color-text-secondary);
-  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
   font-weight: 700;
 }
 
-.auth-tabs a[aria-current='page'] {
-  border-bottom-color: var(--color-action);
-  color: var(--color-action);
-}
-
-/* パスワードのハッシュ化文言（ログイン/アカウント作成カードの脚注） */
-.auth-footnote {
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-2xs);
+.auth-email {
+  max-width: 14rem;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ヘッダーの「管理者」バッジ専用。常に caution 色（design-tokens.md §2.2） */
 .role-badge {
   padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-caution) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-caution) 45%, transparent);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-caution) 14%, transparent);
   color: var(--color-caution);
   font-size: var(--font-size-2xs);
   font-weight: 700;
+  line-height: 1;
 }
 
-/* 画面切り替え。現在地は下線と背景の両方で示す（色だけに依存させない） */
+/* 画面切り替え。現在地は下線・文字色・太さの3つで示す（色だけに依存させない） */
 .nav {
   display: flex;
-  gap: var(--space-2);
-  border-bottom: 1px solid var(--color-line-strong);
+  align-self: stretch;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .nav a {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 3px solid transparent;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-3);
   color: var(--color-text-secondary);
-  text-decoration: none;
+  font-size: var(--font-size-sm);
   font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+/* 下線インジケータ。現在地では幅いっぱいに伸びる */
+.nav a::after {
+  content: '';
+  position: absolute;
+  right: var(--space-3);
+  bottom: -1px;
+  left: var(--space-3);
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--color-action);
+  transform: scaleX(0);
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.nav a:hover {
+  color: var(--color-text);
 }
 
 .nav a[aria-current='page'] {
-  border-bottom-color: var(--color-action);
-  background: var(--color-surface);
-  color: var(--color-action);
+  color: var(--color-text);
+}
+
+.nav a[aria-current='page']::after {
+  transform: scaleX(1);
+}
+
+.nav a:focus-visible {
+  outline-offset: -4px;
+}
+
+/* アプリ全体のエラー（一覧取得失敗など）。赤は評価損益専用のため caution＋枠線で示す（§2.3） */
+.app-alert {
+  margin-bottom: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--color-caution) 40%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-caution) 8%, transparent);
+}
+
+.app-alert::before {
+  content: '⚠ ';
+}
+
+footer {
+  margin-top: var(--space-4);
+  color: var(--color-text-tertiary);
+}
+
+.app-footer {
+  margin-top: 0;
+  border-top: 1px solid var(--color-line-row);
+}
+
+.app-footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-6);
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-6) var(--space-6);
+}
+
+.app-footer-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+}
+
+.app-footer-brand .brand-mark {
+  width: 0.3125rem;
+  height: 0.875rem;
+}
+
+.app-footer small {
+  max-width: 44rem;
+  font-size: var(--font-size-2xs);
+  line-height: 1.8;
+}
+
+/* ───────────────────────── 4. 汎用部品 ───────────────────────── */
+
+/* 画面の器。見出しは面の外（キャンバス上）、本体はパネルに載せる */
+section.page {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+
+.panel {
+  padding: var(--space-5);
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-text) 2.5%, transparent),
+      transparent 8rem
+    ),
+    var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+}
+
+/* `<PageHeader>`（components.md §1・design-tokens.md §8.3） */
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-6);
+}
+
+.page-header-text {
+  max-width: 44rem;
+}
+
+.page-eyebrow {
+  margin-bottom: var(--space-3);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.page-title {
+  font-size: var(--font-size-title);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: var(--tracking-tight);
+}
+
+.page-lead {
+  margin-top: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-base);
+  line-height: 1.9;
+}
+
+.page-header-aside {
+  flex: none;
 }
 
 /* 一覧で表示中の行。操作列のボタン文言（「表示中」）と併用する */
@@ -235,33 +752,77 @@ button:disabled {
   background: color-mix(in srgb, var(--color-action) 12%, transparent);
 }
 
-/* 表は横スクロールさせる。狭い画面で本文ごと横に伸びるのを防ぐ */
+/*
+ * 表。広い画面では幅いっぱい、狭い画面では横スクロール（§6 のメディアクエリで切り替え）。
+ * 本文ごと横に伸びるのを防ぐ。
+ */
 .metric-table,
 .input-table {
   width: 100%;
   border-collapse: collapse;
-  display: block;
-  overflow-x: auto;
   white-space: nowrap;
+}
+
+caption {
+  padding-bottom: var(--space-3);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-label);
+  text-align: left;
 }
 
 th,
 td {
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-3) var(--space-3);
   border-bottom: 1px solid var(--color-line-row);
   text-align: left;
+  vertical-align: middle;
+}
+
+thead th {
+  padding-block: var(--space-2);
+  border-bottom-color: var(--color-line);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+tbody th {
+  font-weight: 500;
+}
+
+tbody tr:last-child > * {
+  border-bottom: none;
+}
+
+tbody tr {
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+tbody tr:hover {
+  background: var(--color-surface-hover);
 }
 
 .numeric {
   text-align: right;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: normal;
+}
+
+/* 数値列の見出しは値と同じく右に揃える。書体は見出し（UI フォント）のまま */
+thead th.numeric {
+  font-family: var(--font-ui);
+  font-feature-settings: 'palt';
 }
 
 /* 銘柄コード・日付など、右寄せは不要だが等幅フォントは必須の表示に使う（design-tokens.md §3.1） */
 .mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: normal;
 }
 
 /* 一覧行のコード表示専用（search-page.md §4「コード」欄の書式）。.mono は
@@ -275,7 +836,10 @@ td {
  * --color-text-secondary」。一覧行の .company-code は --color-text-tertiary のまま維持する。
  * fe-review-round2.md NEW-2 是正、ユーザー決定: 実装を設計書に合わせる） */
 .dialog-header .company-code {
+  margin-left: var(--space-2);
   color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
 }
 
 /* 判定不能の行。色だけに依存させないため、備考欄に必ず文言を出している */
@@ -329,74 +893,121 @@ input[aria-invalid='true'] {
   border-color: var(--color-caution);
 }
 
-/*
- * 検索行（`docs/02_design/ui/pages/search-page.md` §3）。検索ボックス＋件数ラベル＋
- * ソートを1行、折り返さない。件数・ソートは幅を伸縮させない（`flex: none`）
- */
-.search-bar {
+/* 空状態カード（破線枠。`search-page.md` §5） */
+.empty-state {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  flex-wrap: nowrap;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  padding: var(--space-7) var(--space-5);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-dim);
+  text-align: center;
+}
+
+/* 空のレーダーを模した装飾（同心の輪）。文言が意味を担うので SR からは隠れる */
+.empty-state::before {
+  content: '';
+  width: var(--space-7);
+  height: var(--space-7);
   margin-bottom: var(--space-3);
+  border-radius: var(--radius-full);
+  background:
+    radial-gradient(
+      circle,
+      var(--color-text-faint) 0 2px,
+      transparent 2.5px 30%,
+      var(--color-line-strong) 31% 32.5%,
+      transparent 33.5% 63%,
+      var(--color-line-strong) 64% 65.5%,
+      transparent 66.5%
+    ),
+    conic-gradient(from 0deg, var(--color-line) 0 1deg, transparent 1deg 72deg);
+  opacity: 0.9;
 }
 
-.search-bar input[type='search'] {
-  flex: 1 1 auto;
-  min-width: 0;
+.empty-state-heading {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-weight: 700;
 }
 
-.search-count {
-  flex: none;
-  white-space: nowrap;
+.empty-state-description {
+  margin: 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
 
-.search-sort {
-  flex: none;
-  white-space: nowrap;
+.empty-state button {
+  margin: var(--space-3) 0 0;
 }
 
-/* 一覧の銘柄セル（銘柄名＋コード） */
-.company-cell {
+/* ページング（`components.md` §3 `<Pagination>`）。前後端は button:disabled の既存スタイル */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.pagination button {
+  margin: 0;
+  background: transparent;
+  border-color: var(--color-line-strong);
+  color: var(--color-text);
+}
+
+.pagination button:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  border-color: var(--color-text-tertiary);
+}
+
+.pagination button:disabled {
+  border-color: var(--color-line-disabled);
+  color: var(--color-line-disabled);
+}
+
+.pagination-status {
+  min-width: 5rem;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+/* ロード中のプレースホルダ（`search-page.md` §6）。実データと同じ行高を確保する */
+.skeleton {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
 }
 
-.company-name {
-  display: inline-block;
-  max-width: 16rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 500;
+.skeleton-row {
+  height: 2.75rem;
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--color-text) 4%, transparent) 50%,
+      transparent 100%
+    ),
+    var(--color-surface-dim);
+  background-size:
+    200% 100%,
+    auto;
+  background-repeat: no-repeat;
+  animation: shimmer 1.6s linear infinite;
 }
 
-/* 総合点セル。`<ScoreBar>` ＋ 数値 ＋ 有効指標数（`search-page.md` §4）。
- * 総合点が最大の視覚的要素になるよう、他の数値列より大きく太くする */
-.score-cell {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+.skeleton-row:nth-child(n + 6) {
+  opacity: 0.6;
 }
 
-.score-value {
-  font-size: var(--font-size-score);
-  font-weight: 700;
-}
-
-/* 「点」は数値と同じ行内に置きつつ、太さ・大きさだけ弱める（search-page.md §4） */
-.score-unit {
-  font-size: var(--font-size-base);
-  font-weight: 400;
-  color: var(--color-text-tertiary);
-}
-
-.score-effective {
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-3xs);
+.skeleton-row:nth-child(n + 10) {
+  opacity: 0.3;
 }
 
 /* `<ScoreBar>`（`components.md` §2）。塗りは常に `--color-data`（緑・赤は使わない） */
@@ -407,15 +1018,35 @@ input[aria-invalid='true'] {
 .score-bar-track {
   display: block;
   height: var(--space-1);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   background: var(--color-line);
   overflow: hidden;
+}
+
+/* 10%刻みの目盛り。計器の目盛りとして読ませる装飾（値の判断は含まない） */
+.score-bar-track {
+  position: relative;
+}
+
+.score-bar-track::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to right,
+    transparent 0 calc(10% - 1px),
+    var(--color-surface-dim) calc(10% - 1px) 10%
+  );
+  pointer-events: none;
 }
 
 .score-bar-fill {
   display: block;
   height: 100%;
+  border-radius: inherit;
   background: var(--color-data);
+  transform-origin: left center;
+  animation: bar-grow var(--duration-slow) var(--ease-out) backwards;
 }
 
 /* 配当性向・株価は二次情報（`search-page.md` §4） */
@@ -423,254 +1054,14 @@ input[aria-invalid='true'] {
   color: var(--color-text-secondary);
 }
 
-/* 空状態カード（破線枠。`search-page.md` §5） */
-.empty-state {
-  padding: var(--space-5);
-  border: 1px dashed var(--color-line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-dim);
-  text-align: center;
-}
-
-.empty-state-heading {
-  margin: 0 0 var(--space-2);
-  color: var(--color-text);
-  font-weight: 700;
-}
-
-.empty-state-description {
-  margin: 0 0 var(--space-3);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-/* ページング（`components.md` §3 `<Pagination>`）。前後端は button:disabled の既存スタイル */
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-}
-
-.pagination-status {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-/* ロード中のプレースホルダ（`search-page.md` §6）。実データと同じ行高を確保する */
-.skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.skeleton-row {
-  height: 2.5rem;
-  border-radius: var(--radius-md);
-  background: var(--color-surface-dim);
-}
-
-footer {
-  margin-top: var(--space-4);
-  color: var(--color-text-tertiary);
-}
-
-/*
- * 解析ダイアログ（T-096・`docs/02_design/ui/pages/analysis-dialog.md` §3、
- * `components.md` §3 `<Dialog>`）。scrim はフルビューポート固定、カードは中央寄せ。
- */
-.dialog-scrim {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  overflow-y: auto;
-  padding: var(--space-5);
-  background: var(--dialog-scrim-color);
-  backdrop-filter: blur(var(--dialog-scrim-blur));
-}
-
-.dialog-card {
-  width: 100%;
-  max-width: var(--dialog-max-width);
-  margin-block: var(--space-6);
-  padding: var(--space-4);
-  border-radius: var(--radius-2xl);
-  background: var(--color-surface);
-  /* このアプリで唯一シャドウを使う場所（design-tokens.md §4） */
-  box-shadow: var(--shadow-dialog);
-}
-
-/* ダイアログの見出し行（銘柄名 ＋ ✕ ボタン。`analysis-dialog.md` §3） */
-.dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.dialog-header h2 {
-  margin: 0;
-  font-size: var(--font-size-lg);
-  font-weight: 700;
-}
-
-/* ✕ ボタンは副次ボタンの見た目にする（`--color-action` の塗りつぶしを使わない） */
-.dialog-close {
-  padding: var(--space-1) var(--space-2);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-weight: 400;
-}
-
-/* 総合スコアカード内のヒーロー行（株価・配当利回り・PER・PBR。`analysis-dialog.md` §4.1） */
-.dialog-hero {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin-block: var(--space-3);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--color-line-row);
-}
-
-.dialog-hero-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-  font-size: var(--font-size-sm);
-}
-
-.dialog-hero-row dt {
-  color: var(--color-text-secondary);
-}
-
-.dialog-hero-row dd {
-  margin: 0;
-}
-
-/*
- * ヒーロー行の2カラムグリッド（analysis-dialog.md §3「ヒーロー行は2列グリッド
- * （左270px固定・右は残り幅）」。fe-review.md CR-5 是正）。
- * Manager決定（T-096 fe-fix-plan CR-5, 2026-08-20）: 案B採用。新規トークンは追加せず、
- * 既存 --space-*（4/8/12/16/24/32px、すべて4の倍数）の組み合わせで近似する。
- * 270px は 4の倍数ではない（270 mod 4 = 2）ため --space-* の合計だけでは厳密には作れない。
- * 最も自然な式 var(--space-6)×8 + var(--space-4) = 256px + 16px = 272px を採用する
- * （目標270pxとの差は +2px。940px幅のカードに対し約0.2%で視覚的に無視できる差）。
- * .dialog-summary-score / .dialog-summary-chart 自体には新規スタイルを追加しない
- * （`<p>`/`<dl>` の余白はブラウザ既定のマージンのままにし、挙動変更を最小にする）
- */
-.dialog-summary {
-  display: grid;
-  grid-template-columns: calc(var(--space-6) * 8 + var(--space-4)) 1fr;
-  gap: var(--space-4);
-  align-items: start;
-}
-
-/*
- * 指標行クリックの stretched button（`search-page.md` §4.1 と同じパターン）。
- * 実体の `<button>` はセル内の見出しテキストを表示するだけの見た目（`background: none`）で、
- * `::after` を `position: absolute; inset: 0` にして行全体（`.metric-row`。
- * `position: relative` を持つ最も近い祖先）まで当たり判定を広げる。
- */
-.metric-row {
-  position: relative;
-}
-
-.metric-row-button {
-  padding: 0;
-  margin: 0;
-  border: none;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.metric-row-button::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-}
-
-/* キーボードフォーカス時、行全体の当たり判定に沿って可視のフォーカスリングを出す
- * （`search-page.md` §4.1「フォーカス時は box-shadow: inset 3px 0 0 var(--color-action)」）。
- * ここの 3px は色・余白・フォントサイズのデザイントークンではなく、フォーカスリングの
- * 太さという UI実装上の固定値であり、design-tokens.md §6「直値禁止」の対象外として扱う
- * （.sr-only の 1px と同じ整理。Manager決定: T-096 fe-review CR-6, 2026-08-20） */
-.metric-row-button:focus-visible::after {
-  box-shadow: inset 3px 0 0 var(--color-action);
-}
-
-/*
- * 評価基準タブ（`/criteria`、T-099）。`docs/02_design/ui/pages/criteria-tab.md` §2.0。
- * カード外観は「影は使わない。面の分離はフラットな面＋ヘアライン枠線」（design-tokens.md §4）。
- */
-.criteria-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-5);
-}
-
-.criteria-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4);
-}
-
-.criteria-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
-}
-
-.criteria-card-header h3 {
-  margin: 0;
-  font-size: var(--font-size-md);
-  font-weight: 700;
-}
-
-.criteria-description {
-  font-size: var(--font-size-sm);
-}
-
-.criteria-formula {
-  margin: var(--space-3) 0;
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-inset);
-  color: var(--color-text);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-sm);
-  white-space: pre-wrap;
-}
-
-/* §2.3: 境界値の解釈（下限以上・上限未満）を毎カードに明記する */
-.criteria-note {
-  margin-top: var(--space-2);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-/* 「自動計算済」＝ --color-text-secondary の枠線バッジ、「未実装」＝ --color-caution（§2.2） */
-.implementation-badge {
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-text-secondary);
-  border-radius: var(--radius-sm);
+/* MIX係数（設定不可）の静的チップ */
+.chip {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-full);
   color: var(--color-text-secondary);
   font-size: var(--font-size-2xs);
-  font-weight: 700;
-}
-
-.implementation-badge[data-status='pending'] {
-  border-color: var(--color-caution);
-  color: var(--color-caution);
+  white-space: nowrap;
 }
 
 /* 視覚上隠すが SR には読ませる（標準的な visually-hidden パターン）。
@@ -689,34 +1080,660 @@ footer {
   border: 0;
 }
 
+/* ───────────────────────── 5. 画面別 ───────────────────────── */
+
+/* ── 検索（`docs/02_design/ui/pages/search-page.md`） ── */
+
 /*
- * 指標カスタマイズ画面（`/indicators`、T-101）。
- * `docs/02_design/ui/pages/indicator-custom-page.md` §2。
+ * 検索行（`docs/02_design/ui/pages/search-page.md` §3）。検索ボックス＋件数ラベル＋
+ * ソートを1行、折り返さない。件数・ソートは幅を伸縮させない（`flex: none`）
  */
-.indicator-counter {
+.search-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.search-bar input[type='search'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding-left: 2.5rem;
+  /* 虫眼鏡（円＋柄）を CSS で描く。装飾のみ */
+  background-image:
+    radial-gradient(
+      circle at 1.15rem 1.25rem,
+      transparent 0.34rem,
+      var(--color-text-tertiary) 0.35rem 0.44rem,
+      transparent 0.45rem
+    ),
+    linear-gradient(
+      45deg,
+      transparent calc(50% - 1px),
+      var(--color-text-tertiary) calc(50% - 1px) calc(50% + 1px),
+      transparent calc(50% + 1px)
+    );
+  background-position:
+    0 0,
+    1.42rem 1.55rem;
+  background-size:
+    auto,
+    0.38rem 0.38rem;
+  background-repeat: no-repeat;
+}
+
+.search-count {
+  flex: none;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.search-sort {
+  flex: none;
+  white-space: nowrap;
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.search-sort select {
+  min-width: 10rem;
+}
+
+/* 一覧の銘柄セル（銘柄名＋コード） */
+/* セル自体は table-cell のまま。flex にすると表の列から外れて崩れるため、子を縦に積む */
+.company-cell > * {
+  display: block;
+}
+
+.company-name {
+  display: inline-block;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  vertical-align: bottom;
+}
+
+/* 総合点セル。`<ScoreBar>` ＋ 数値 ＋ 有効指標数（`search-page.md` §4）。
+ * 総合点が最大の視覚的要素になるよう、他の数値列より大きく太くする */
+.score-cell {
+  min-width: 8rem;
+}
+
+.score-cell > * {
+  display: block;
+}
+
+.score-cell .score-bar {
+  margin-block: var(--space-2) var(--space-1);
+}
+
+.score-value {
+  font-size: var(--font-size-score);
   font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--tracking-tight);
+  text-align: left;
+}
+
+/* 「点」は数値と同じ行内に置きつつ、太さ・大きさだけ弱める（search-page.md §4） */
+.score-unit {
+  font-size: var(--font-size-base);
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+}
+
+.score-effective {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-3xs);
+}
+
+/* 操作列。行の右端に寄せる */
+.row-actions {
+  text-align: right;
+}
+
+/*
+ * 行全体で「表示」を押せるようにする（試作 README §2「whole row opens the dialog」）。
+ * 指標表と同じ stretched button パターンを、既存の「表示」ボタンに CSS で当てる。
+ * ボタンを増やさないので、SR から見える操作は従来どおり「表示」「削除」の2つだけ。
+ */
+tbody tr:has(> .row-actions) {
+  position: relative;
+  cursor: pointer;
+}
+
+.row-actions button:first-child::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.row-actions button:first-child:focus-visible {
+  outline: none;
+}
+
+.row-actions button:first-child:focus-visible::after {
+  box-shadow: inset 3px 0 0 var(--color-action);
+  background: color-mix(in srgb, var(--color-action) 6%, transparent);
+}
+
+/* 「削除」は行の当たり判定より前面に出す（押し間違いで表示にならないように） */
+.row-actions button + button {
+  position: relative;
+  z-index: 1;
+}
+
+.row-actions button:last-child {
+  margin-right: 0;
+}
+
+/* ── 解析ダイアログ（T-096・`docs/02_design/ui/pages/analysis-dialog.md` §3、`components.md` §3 `<Dialog>`）── */
+
+/* scrim はフルビューポート固定、カードは中央寄せ。 */
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-5);
+  background: var(--dialog-scrim-color);
+  backdrop-filter: blur(var(--dialog-scrim-blur));
+  animation: fade-in var(--duration-base) var(--ease-out) backwards;
+}
+
+.dialog-card {
+  width: 100%;
+  max-width: var(--dialog-max-width);
+  margin-block: var(--space-6);
+  padding: var(--space-6);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-2xl);
+  background: var(--color-surface-dialog);
+  /* このアプリで唯一シャドウを使う場所（design-tokens.md §4） */
+  box-shadow: var(--shadow-dialog);
+  animation: dialog-rise var(--duration-slow) var(--ease-out) backwards;
+}
+
+.dialog-card:focus-visible {
+  outline: none;
+}
+
+/* 解析ダイアログ以外（フォーム・確認）は小さいカードにする。見出し行（.dialog-header）を
+ * 持たないかどうかで見分ける */
+.dialog-card:not(:has(.dialog-header)) {
+  max-width: var(--dialog-compact-max-width);
+  margin-block: 12vh var(--space-6);
+}
+
+.dialog-card:not(:has(.dialog-header)) > h2,
+.dialog-card:not(:has(.dialog-header)) form > h2 {
+  margin-bottom: var(--space-4);
+  font-size: var(--font-size-lg);
+}
+
+.dialog-card:not(:has(.dialog-header)) > p {
+  margin-bottom: var(--space-5);
+  color: var(--color-text-secondary);
+}
+
+.dialog-card form label {
+  display: flex;
+  margin-right: 0;
+}
+
+/* ダイアログの見出し行（銘柄名 ＋ ✕ ボタン。`analysis-dialog.md` §3） */
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.dialog-header h2 {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+}
+
+.dialog-header h2:focus-visible {
+  outline-offset: 4px;
+}
+
+/* ✕ ボタンは副次ボタンの見た目にする（`--color-action` の塗りつぶしを使わない） */
+.dialog-close {
+  flex: none;
+  width: var(--control-height);
+  min-height: var(--control-height);
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-weight: 400;
+}
+
+.dialog-close:hover:not(:disabled) {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+/* 見出し直下の付帯情報（採用した配当・入力日時） */
+.dialog-header + .meta {
+  margin-bottom: var(--space-5);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+/*
+ * ヒーロー行の2カラムグリッド（analysis-dialog.md §3「ヒーロー行は2列グリッド
+ * （左270px固定・右は残り幅）」。fe-review.md CR-5 是正）。
+ * Manager決定（T-096 fe-fix-plan CR-5, 2026-08-20）: 案B採用。新規トークンは追加せず、
+ * 既存 --space-*（4/8/12/16/24/32px、すべて4の倍数）の組み合わせで近似する。
+ * 270px は 4の倍数ではない（270 mod 4 = 2）ため --space-* の合計だけでは厳密には作れない。
+ * 最も自然な式 var(--space-6)×8 + var(--space-4) = 256px + 16px = 272px を採用する
+ * （目標270pxとの差は +2px。940px幅のカードに対し約0.2%で視覚的に無視できる差）。
+ */
+.dialog-summary {
+  display: grid;
+  grid-template-columns: calc(var(--space-6) * 8 + var(--space-4)) 1fr;
+  gap: var(--space-4);
+  align-items: stretch;
+  margin-bottom: var(--space-5);
+}
+
+.dialog-summary-score,
+.dialog-summary-chart {
+  padding: var(--space-5);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.dialog-summary-score {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* 総合点はダイアログの主役（試作 README §Design Principles 1）。数値だけを特大にし、
+ * 「総合点」「/ 100 点」は小さく弱く添える */
+.dialog-summary-score .total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.1;
+}
+
+.dialog-summary-score .total strong {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-size-hero);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.dialog-summary-score .total .effective {
+  flex-basis: 100%;
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.dialog-summary-score > .meta {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+  line-height: 1.7;
+}
+
+.dialog-summary-score .score-bar-track {
+  height: var(--space-2);
+}
+
+/* 総合スコアカード内のヒーロー行（株価・配当利回り・PER・PBR。`analysis-dialog.md` §4.1） */
+.dialog-hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-block: var(--space-2);
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--color-line-row);
+  border-bottom: 1px solid var(--color-line-row);
+}
+
+.dialog-hero-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.dialog-hero-row dt {
+  color: var(--color-text-secondary);
+}
+
+.dialog-hero-row dd {
+  margin: 0;
+}
+
+.dialog-summary-score label.inline {
+  margin: 0;
+  font-size: var(--font-size-xs);
+}
+
+/* レーダー・線グラフの器 */
+.radar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.radar-title {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.radar-title-note {
+  color: var(--color-text-tertiary);
+  font-weight: 400;
+}
+
+.radar .recharts-polar-angle-axis-tick text {
+  font-size: var(--font-size-md);
+}
+
+.radar .recharts-polar-radius-axis-tick text,
+.radar .recharts-cartesian-axis-tick text {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-3xs);
+}
+
+.radar-note {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+}
+
+/*
+ * 指標行クリックの stretched button（`search-page.md` §4.1 と同じパターン）。
+ * 実体の `<button>` はセル内の見出しテキストを表示するだけの見た目（`background: none`）で、
+ * `::after` を `position: absolute; inset: 0` にして行全体（`.metric-row`。
+ * `position: relative` を持つ最も近い祖先）まで当たり判定を広げる。
+ */
+.metric-row {
+  position: relative;
+  cursor: pointer;
+}
+
+.metric-row-button {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.metric-row-button:hover:not(:disabled) {
+  background: none;
+  border: none;
+}
+
+.metric-row-button:active:not(:disabled) {
+  transform: none;
+}
+
+.metric-row-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+/* キーボードフォーカス時、行全体の当たり判定に沿って可視のフォーカスリングを出す
+ * （`search-page.md` §4.1「フォーカス時は box-shadow: inset 3px 0 0 var(--color-action)」）。
+ * ここの 3px は色・余白・フォントサイズのデザイントークンではなく、フォーカスリングの
+ * 太さという UI実装上の固定値であり、design-tokens.md §6「直値禁止」の対象外として扱う
+ * （.sr-only の 1px と同じ整理。Manager決定: T-096 fe-review CR-6, 2026-08-20） */
+.metric-row-button:focus-visible {
+  outline: none;
+}
+
+.metric-row-button:focus-visible::after {
+  box-shadow: inset 3px 0 0 var(--color-action);
+  background: color-mix(in srgb, var(--color-action) 6%, transparent);
+}
+
+/* 備考列（5列目）だけは折り返す。③の内訳など長い文言でカードからはみ出さないように */
+.metric-row > td:nth-child(5) {
+  min-width: 14rem;
+  white-space: normal;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* 行末の「›」。行ホバーで右へ少し動き、押せることを示す */
+.metric-row > td:last-child[aria-hidden='true'] {
+  color: var(--color-text-faint);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+}
+
+.metric-row:hover > td:last-child[aria-hidden='true'] {
+  color: var(--color-text-secondary);
+  transform: translateX(3px);
+}
+
+/* 指標表のスコア列。バーと点数を横に並べる（セルは table-cell のまま、バーを行内に置く） */
+.metric-row > td .score-bar {
+  display: inline-block;
+  /* <ScoreBar> は既定で style="width:100%" を持つ。幅が自動の表セル内で 100% にすると
+   * 列幅が決まらず隣の列へはみ出すため、ここだけ固定幅で上書きする */
+  width: 4.5rem !important;
+  margin-right: var(--space-3);
+  vertical-align: middle;
+}
+
+/* 指標詳細モードの「← 指標一覧へ戻る」 */
+.dialog-header ~ button:not(.dialog-close):first-of-type {
+  margin-block: var(--space-2) var(--space-4);
+  background: transparent;
+  border-color: var(--color-line-strong);
+  color: var(--color-text);
+}
+
+.dialog-header ~ button:not(.dialog-close):first-of-type:hover {
+  background: var(--color-surface-hover);
+}
+
+.dialog-header ~ .total {
+  margin-bottom: var(--space-4);
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+}
+
+.dialog-header ~ .total .effective {
+  display: block;
+  margin: var(--space-1) 0 0;
+  font-weight: 400;
+}
+
+/* ── 評価基準タブ（`/criteria`、T-099。`docs/02_design/ui/pages/criteria-tab.md` §2.0）── */
+
+/* カード外観は「影は使わない。面の分離はフラットな面＋ヘアライン枠線」（design-tokens.md §4）。 */
+.criteria-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-5);
+}
+
+.criteria-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  transition: border-color var(--duration-base) var(--ease-out);
+}
+
+.criteria-card:hover {
+  border-color: var(--color-line-strong);
+}
+
+.criteria-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: 0;
+}
+
+.criteria-card-header h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+}
+
+.criteria-description {
+  font-size: var(--font-size-sm);
+  line-height: 1.8;
+}
+
+.criteria-formula {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-line-row);
+  border-left: 2px solid var(--color-data);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-inset);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.criteria-card .metric-table {
+  margin-top: var(--space-2);
+}
+
+/* 区分表の点数セル: バー＋点数を横に並べる（セルは table-cell のまま） */
+.band-points .score-bar {
+  display: inline-block;
+  width: 5rem !important; /* <ScoreBar> の style="width:100%" を上書き（指標表と同じ理由） */
+  margin-right: var(--space-3);
+  vertical-align: middle;
+}
+
+.criteria-card .metric-table td {
+  padding-block: var(--space-2);
+}
+
+/* §2.3: 境界値の解釈（下限以上・上限未満）を毎カードに明記する */
+.criteria-note {
+  margin-top: auto;
+  padding-top: var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+}
+
+/* 「自動計算済」＝ --color-text-secondary の枠線バッジ、「未実装」＝ --color-caution（§2.2） */
+.implementation-badge {
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-3xs);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.implementation-badge[data-status='pending'] {
+  border-color: var(--color-caution);
+  color: var(--color-caution);
+}
+
+/* ── 指標カスタマイズ画面（`/indicators`、T-101。`indicator-custom-page.md` §2）── */
+
+.indicator-counter {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.indicator-counter .numeric {
+  color: var(--color-text);
+  font-size: var(--font-size-lg);
 }
 
 /* 選択数が5未満のとき amber化（§2。エラーではなく注意のため --color-caution） */
 .indicator-counter-low {
+  border-color: color-mix(in srgb, var(--color-caution) 45%, transparent);
+  color: var(--color-caution);
+}
+
+.indicator-counter-low .numeric {
   color: var(--color-caution);
 }
 
 .indicator-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  margin-block: var(--space-3);
+  gap: var(--space-2);
+  margin-block: var(--space-5) 0;
 }
 
 .indicator-row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3);
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   background: var(--color-surface-dim);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-md);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.indicator-row:has(.indicator-toggle[aria-pressed='true']) {
+  background: var(--color-surface);
+  border-color: var(--color-line-strong);
+}
+
+.indicator-row:hover {
+  border-color: var(--color-text-faint);
 }
 
 /* トグル: 22×22px 角丸スクエア。選択時のみ --color-action で塗る（§2） */
@@ -724,6 +1741,7 @@ footer {
   flex: none;
   width: 1.375rem; /* 22px */
   height: 1.375rem; /* 22px */
+  min-height: 0;
   padding: 0;
   margin: 0;
   display: flex;
@@ -734,7 +1752,13 @@ footer {
   border-radius: var(--radius-sm);
 }
 
-.indicator-toggle[aria-pressed='true'] {
+.indicator-toggle:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  border-color: var(--color-text-tertiary);
+}
+
+.indicator-toggle[aria-pressed='true'],
+.indicator-toggle[aria-pressed='true']:hover:not(:disabled) {
   background: var(--color-action);
   border-color: var(--color-action);
 }
@@ -753,34 +1777,41 @@ footer {
 .indicator-row-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 0;
   flex: 1;
+  min-width: 0;
+}
+
+.indicator-row-body .meta {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
 }
 
 .indicator-row-label {
   font-weight: 700;
 }
 
-/* MIX係数（設定不可）の静的チップ */
-.chip {
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-text-secondary);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-2xs);
-  white-space: nowrap;
+.indicator-row input {
+  width: 8rem;
+  min-width: 0;
+  text-align: right;
 }
 
-/*
- * ポートフォリオ画面（`/portfolio`、T-103）。
- * `docs/02_design/ui/pages/portfolio-page.md` §3・§4。
- */
+/* ── ポートフォリオ画面（`/portfolio`、T-103。`portfolio-page.md` §3・§4）── */
+
 .portfolio-tabs {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.portfolio-tabs button {
+  min-height: var(--control-height-compact);
+  margin: 0;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-full);
 }
 
 /*
@@ -801,26 +1832,77 @@ footer {
   color: var(--color-text);
 }
 
+.portfolio-tabs button:not([aria-current='true']):not(.portfolio-tabs-add):hover {
+  background: var(--color-surface-hover);
+}
+
+.portfolio-tabs .meta {
+  margin-left: var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+/* 集計: 評価額合計を主役にしたタイル（試作 README §4「2列ヒーロー＋3列の副次サマリ」） */
 .portfolio-summary {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--space-3);
+  margin-block: var(--space-4) var(--space-3);
+}
+
+.portfolio-summary > div {
+  grid-column: span 2;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-5);
-  margin-block: var(--space-3);
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-dim);
+}
+
+.portfolio-summary > div:nth-child(-n + 2) {
+  grid-column: span 3;
+  min-height: 7.5rem;
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
 }
 
 .portfolio-summary dt {
   color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
 }
 
 .portfolio-summary dd {
   margin: 0;
+  font-size: var(--font-size-lg);
+  text-align: left;
 }
 
-/* 評価額合計（§3「--font-size-display（38px）/700」。design-tokens.md §3.2 唯一の用途） */
+/* 評価損益は評価額合計に次ぐ2番手。評価額より一段小さくする */
+.portfolio-summary > div:nth-child(2) dd {
+  font-size: var(--font-size-score);
+  font-weight: 700;
+}
+
+.portfolio-summary dd .meta {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+  font-family: var(--font-ui);
+}
+
+/* 評価額合計（§3「--font-size-display（38px）/700」。design-tokens.md §3.2 唯一の用途）。
+ * .portfolio-summary dd より詳細度を上げないと汎用の dd サイズに負ける */
+.portfolio-summary dd.portfolio-total-value,
 .portfolio-total-value {
   font-size: var(--font-size-display);
   font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: var(--tracking-tight);
 }
 
 /* 評価損益専用の色（design-tokens.md §2.2「スコア・利回り・増配率には使わない」）。
@@ -837,7 +1919,39 @@ footer {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  margin-top: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+/* 上側の「ポートフォリオを削除」は右端へ寄せ、ヒーロー集計と並べない */
+/* 上側の「ポートフォリオを削除」はタブ列と同じ行の右端に載せる（タブ列の高さぶん持ち上げる） */
+.portfolio-tabs + .portfolio-footer {
+  justify-content: flex-end;
+  margin: calc((var(--control-height-compact) + var(--space-5)) * -1) 0 var(--space-5) auto;
+  width: max-content;
+}
+
+.portfolio-tabs + .portfolio-footer button {
+  min-height: var(--control-height-compact);
+  margin: 0;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.portfolio-tabs + .portfolio-footer button:hover:not(:disabled) {
+  border-color: var(--color-line-strong);
+  color: var(--color-text);
+}
+
+section.page .metric-table {
+  margin-top: var(--space-4);
+}
+
+section.page > .meta,
+section.page > p.meta {
+  margin-top: var(--space-4);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
 }
 
 /*
@@ -849,4 +1963,427 @@ footer {
 .holding-row-actions {
   position: relative;
   z-index: 1;
+}
+
+.holding-row-actions button {
+  min-height: var(--control-height-compact);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-xs);
+}
+
+/* ── 指標カスタマイズ・ポートフォリオなど、パネルを持たない画面の本体 ── */
+section.page > .portfolio-tabs {
+  margin-top: 0;
+}
+
+/* ── 銘柄登録（`/input`） ── */
+.company-form fieldset > p.meta {
+  margin-block: var(--space-2);
+  font-size: var(--font-size-xs);
+}
+
+/* フォーム内の補助操作（取り込み・年度追加）は枠線ボタン。塗りは「解析して保存」だけにして、
+ * 主操作が1つに見えるようにする */
+.company-form button[type='button'] {
+  background: transparent;
+  border-color: var(--color-line-strong);
+  color: var(--color-text);
+}
+
+.company-form button[type='button']:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  border-color: var(--color-text-tertiary);
+}
+
+.company-form > button[type='submit'] {
+  min-width: 12rem;
+  min-height: 2.75rem;
+}
+
+.company-form .warning[role='alert'] {
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--color-caution) 40%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-caution) 6%, transparent);
+}
+
+.company-form textarea {
+  width: 100%;
+  min-height: 8rem;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-feature-settings: normal;
+}
+
+.input-table input {
+  min-width: 5.5rem;
+  width: 100%;
+}
+
+.input-table td,
+.input-table th {
+  padding: var(--space-1) var(--space-2);
+}
+
+/* ── ログイン / アカウント作成（`docs/02_design/ui/pages/login-page.md` §3） ── */
+
+.auth-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--width-auth-card);
+  align-items: center;
+  gap: var(--space-8);
+  min-height: calc(100vh - var(--header-height) - 14rem);
+  padding-block: var(--space-6);
+}
+
+.auth-intro-title {
+  font-size: var(--font-size-hero);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.auth-intro .page-lead {
+  max-width: 30rem;
+  margin-top: var(--space-5);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: var(--width-auth-card);
+  margin: 0;
+  margin-inline: auto;
+  padding: var(--space-6);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.auth-card label {
+  display: flex;
+  margin: 0 0 var(--space-3);
+}
+
+.auth-card button[type='submit'] {
+  width: 100%;
+  margin: var(--space-2) 0 0;
+}
+
+/* セグメント切替（/login ⇄ /signup）。ピル型で現在地を塗りと太さで示す */
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-1);
+  margin-bottom: var(--space-5);
+  padding: var(--space-1);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-inset);
+}
+
+.auth-tabs a {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.auth-tabs a:hover {
+  color: var(--color-text);
+}
+
+.auth-tabs a[aria-current='page'] {
+  background: var(--color-surface-hover);
+  box-shadow: inset 0 0 0 1px var(--color-action);
+  color: var(--color-text);
+}
+
+/* パスワードのハッシュ化文言（ログイン/アカウント作成カードの脚注） */
+.auth-footnote {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-line-row);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-2xs);
+  line-height: 1.8;
+}
+
+/* ───────────────────────── 6. モーション・レスポンシブ ───────────────────────── */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-3));
+  }
+}
+
+@keyframes dialog-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-4)) scale(0.985);
+  }
+}
+
+@keyframes bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position:
+      200% 0,
+      0 0;
+  }
+  to {
+    background-position:
+      -200% 0,
+      0 0;
+  }
+}
+
+/* 画面の入場。見出し→本体の順に少しずつ遅らせる */
+main > section,
+main > .auth-layout {
+  animation: rise-in var(--duration-slow) var(--ease-out) backwards;
+}
+
+.page-header {
+  animation: rise-in var(--duration-slow) var(--ease-out) backwards;
+}
+
+.page-header ~ :not(.dialog-scrim) {
+  animation: rise-in var(--duration-slow) var(--ease-out) 80ms backwards;
+}
+
+.criteria-card,
+.indicator-row {
+  animation: rise-in var(--duration-slow) var(--ease-out) backwards;
+}
+
+.criteria-card:nth-child(2n) {
+  animation-delay: 60ms;
+}
+
+.indicator-row:nth-child(n + 4) {
+  animation-delay: 60ms;
+}
+
+.indicator-row:nth-child(n + 7) {
+  animation-delay: 120ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/*
+ * レスポンシブ（screen-list.md §10）。ブレークポイントは2つだけ:
+ * - 960px 未満: ヘッダーを2段（ブランド＋認証／ナビ）にし、2列グリッドを1列にする
+ * - 640px 未満: 余白を詰め、表を横スクロールにし、検索行を折り返す
+ */
+@media (max-width: 60rem) {
+  .app-header-inner {
+    flex-wrap: wrap;
+    row-gap: 0;
+    padding: var(--space-2) var(--space-5) 0;
+  }
+
+  .app-header .nav {
+    order: 3;
+    flex-basis: 100%;
+    min-height: 2.75rem;
+    margin-inline: calc(var(--space-3) * -1);
+  }
+
+  main {
+    padding-inline: var(--space-5);
+  }
+
+  .criteria-grid,
+  .dialog-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-layout {
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+    min-height: 0;
+  }
+
+  .auth-intro-title {
+    font-size: var(--font-size-display);
+  }
+
+  .auth-card {
+    margin-inline: 0;
+  }
+
+  .portfolio-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .portfolio-summary > div,
+  .portfolio-summary > div:nth-child(-n + 2) {
+    grid-column: span 1;
+  }
+
+  .portfolio-summary > div:first-child {
+    grid-column: span 2;
+  }
+
+  .portfolio-tabs + .portfolio-footer {
+    margin: calc(var(--space-2) * -1) 0 var(--space-4) auto;
+  }
+}
+
+@media (max-width: 40rem) {
+  .app-header-inner,
+  .app-footer-inner {
+    padding-inline: var(--space-4);
+  }
+
+  .brand-sub,
+  .auth-email,
+  .avatar {
+    display: none;
+  }
+
+  /* ブランドと認証エリアを1行に収める。長いときはブランド名を省略記号で切る */
+  .brand {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .brand a {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+
+  .brand-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-header-inner {
+    column-gap: var(--space-3);
+  }
+
+  /* ナビが横にはみ出すとき、右端をフェードさせて続きがあることを示す */
+  .app-header .nav {
+    mask-image: linear-gradient(to right, black calc(100% - var(--space-6)), transparent);
+  }
+
+  .portfolio-summary > div:nth-child(2) dd {
+    font-size: var(--font-size-lg);
+  }
+
+  .portfolio-summary > div:nth-child(2),
+  .portfolio-summary > div:last-child {
+    grid-column: span 2;
+  }
+
+  .brand a {
+    grid-template-rows: auto;
+  }
+
+  .brand-mark {
+    grid-row: auto;
+  }
+
+  main {
+    padding: var(--space-5) var(--space-4) var(--space-6);
+  }
+
+  .page-title {
+    font-size: var(--font-size-score);
+  }
+
+  .panel,
+  .dialog-card,
+  .criteria-card,
+  .dialog-summary-score,
+  .dialog-summary-chart,
+  .auth-card {
+    padding: var(--space-4);
+  }
+
+  .dialog-scrim {
+    padding: var(--space-2);
+  }
+
+  .dialog-card {
+    margin-block: var(--space-2);
+  }
+
+  .search-bar {
+    flex-wrap: wrap;
+  }
+
+  .search-bar input[type='search'] {
+    flex-basis: 100%;
+  }
+
+  .search-sort {
+    margin-left: auto;
+  }
+
+  /* 横スクロールにするのは列の多い表（5列以上）と入力表だけ。2〜4列の表は幅いっぱいのまま */
+  .metric-table:has(th:nth-child(5)),
+  .input-table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  fieldset {
+    padding: var(--space-4);
+  }
+
+  .indicator-row {
+    flex-wrap: wrap;
+  }
+
+  .indicator-row-body {
+    flex-basis: calc(100% - var(--space-7));
+  }
+
+  .indicator-row input,
+  .indicator-row .chip {
+    margin-left: calc(1.375rem + var(--space-4));
+  }
+
+  .portfolio-summary > div:nth-child(2) dd,
+  .portfolio-total-value {
+    font-size: var(--font-size-title);
+  }
 }

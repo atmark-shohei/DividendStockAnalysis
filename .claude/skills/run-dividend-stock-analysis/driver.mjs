@@ -219,11 +219,14 @@ class Cdp {
     await cdp.#connect(page.webSocketDebuggerUrl);
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
+    // DSA_VIEWPORT_WIDTH / DSA_VIEWPORT_HEIGHT で狭い画面（レスポンシブ）の確認ができる
+    const width = Number(process.env.DSA_VIEWPORT_WIDTH ?? 1280);
+    const height = Number(process.env.DSA_VIEWPORT_HEIGHT ?? 900);
     await cdp.send('Emulation.setDeviceMetricsOverride', {
-      width: 1280,
-      height: 900,
+      width,
+      height,
       deviceScaleFactor: 1,
-      mobile: false,
+      mobile: width < 768,
     });
     return cdp;
   }

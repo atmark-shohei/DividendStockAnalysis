@@ -786,139 +786,168 @@ export function App() {
       });
   };
 
+  const homePath = routeToPath(createListRoute());
+
   return (
-    <main>
+    <div className="app">
       <header className="app-header">
-        <h1>高配当銘柄スコアリング</h1>
-        <AuthStatus
-          user={user}
-          currentPath={routeToPath(route)}
-          onNavigate={navigate}
-          onLogout={handleLogout}
-        />
+        <div className="app-header-inner">
+          <h1 className="brand">
+            <a
+              href={homePath}
+              onClick={(event) => {
+                // 修飾キー付きのクリックはブラウザ本来の動作（別タブ・別窓）に任せる
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                navigate(createListRoute());
+              }}
+            >
+              {/* ロゴのアクセントバー。--color-brand の唯一の用途（design-tokens.md §2.2） */}
+              <span className="brand-mark" aria-hidden="true" />
+              <span className="brand-name">高配当銘柄スコアリング</span>
+              <span className="brand-sub" aria-hidden="true">
+                Dividend Scoring
+              </span>
+            </a>
+          </h1>
+          <NavBar current={route} user={user} onNavigate={navigate} />
+          <AuthStatus
+            user={user}
+            currentPath={routeToPath(route)}
+            onNavigate={navigate}
+            onLogout={handleLogout}
+          />
+        </div>
       </header>
-      <NavBar current={route} user={user} onNavigate={navigate} />
 
-      {error !== null && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
+      <main>
+        {error !== null && (
+          <p className="error app-alert" role="alert">
+            {error}
+          </p>
+        )}
 
-      {route.kind === 'input' ? (
-        <InputPage onSubmit={handleSubmit} disabled={busy} />
-      ) : route.kind === 'criteria' ? (
-        <CriteriaPage bands={criteriaBands} loading={loadingCriteria} />
-      ) : route.kind === 'indicators' ? (
-        <IndicatorCustomPage
-          bands={criteriaBands}
-          settings={indicatorSettings}
-          loading={loadingCriteria || loadingIndicatorSettings}
-          saving={savingIndicatorSettings}
-          saveError={indicatorSettingsError}
-          onSave={handleSaveIndicatorSettings}
-        />
-      ) : route.kind === 'login' || route.kind === 'signup' ? (
-        <AuthPage
-          mode={route.kind}
-          redirect={route.redirect}
-          busy={authBusy}
-          error={authError}
-          onNavigate={navigate}
-          onLogin={handleLogin}
-          onSignup={handleSignup}
-        />
-      ) : route.kind === 'portfolio' ? (
-        <PortfolioPage
-          portfolios={{
-            items: portfolios?.portfolios ?? [],
-            // BE 既定値（`portfolio-api.md` §GET /api/portfolios）と同じ値の意図的な重複
-            // （`EMPTY_COMPANY_LIST` の `perPage: 15` と同じ方針。未取得時のみ使う既定値）
-            maxPortfolios: portfolios?.maxPortfolios ?? 10,
-            loading: loadingPortfolios,
-          }}
-          activePortfolioId={activePortfolioId}
-          detail={{ data: portfolioDetail, loading: loadingPortfolioDetail }}
-          actions={{
-            onSelectPortfolio: handleSelectPortfolio,
-            onCreatePortfolio: handleCreatePortfolio,
-            onAddHolding: handleAddHolding,
-            onOpenHolding: handleOpenHolding,
-            onEditHolding: handleOpenEditHolding,
-            onUpdateHolding: handleUpdateHolding,
-            onRemoveHolding: handleRemoveHolding,
-            onDeletePortfolio: handleDeletePortfolio,
-          }}
-          addPortfolioDialog={{
-            open: isAddPortfolioOpen,
-            onOpen: handleOpenAddPortfolio,
-            onClose: handleCloseAddPortfolio,
-            submitting: savingPortfolio,
-            error: addPortfolioError,
-          }}
-          addHoldingDialog={{
-            open: isAddHoldingOpen,
-            onOpen: handleOpenAddHolding,
-            onClose: handleCloseAddHolding,
-            submitting: savingHolding,
-            error: addHoldingError,
-          }}
-          editHoldingDialog={{
-            open: editingHolding !== null,
-            // 編集は HoldingsTable の行内ボタンから開く（`+`ボタンが無い）ため no-op
-            // （`EditHoldingDialogState` の JSDoc 参照）
-            onOpen: () => {},
-            onClose: handleCloseEditHolding,
-            submitting: savingHolding,
-            error: holdingActionError,
-            holding: editingHolding,
-          }}
-          deletingPortfolio={deletingPortfolio}
-          selected={{ code: selectedCode, scoring, loading: loadingScoring }}
-          payoutRatioSourceControl={{
-            checked: useActualForScoring,
-            onToggle: handleToggleUseActualForScoring,
-          }}
-          activeMetricParam={activeMetricParam}
-          dialogHandlers={dialogHandlers}
-          dividendHistory={{ data: dividendHistory, loading: loadingDividendHistory }}
-        />
-      ) : (
-        <ListPage
-          companies={companies.companies}
-          selected={{ code: selectedCode, scoring, loading: loadingScoring }}
-          payoutRatioSourceControl={{
-            checked: useActualForScoring,
-            onToggle: handleToggleUseActualForScoring,
-          }}
-          searchControl={{
-            q,
-            sort,
-            page,
-            perPage: companies.perPage,
-            total: companies.total,
-            loading: loadingCompanies,
-            onSearchChange: handleSearchChange,
-            onSortChange: handleSortChange,
-            onPageChange: handlePageChange,
-            showRegisterCta: isAdmin(user),
-            onNavigateToInput: () => {
-              navigate({ kind: 'input' });
-            },
-          }}
-          rowActions={{ onSelect: handleSelect, onDelete: handleDelete }}
-          activeMetricParam={activeMetricParam}
-          dialogHandlers={dialogHandlers}
-          dividendHistory={{ data: dividendHistory, loading: loadingDividendHistory }}
-        />
-      )}
+        {route.kind === 'input' ? (
+          <InputPage onSubmit={handleSubmit} disabled={busy} />
+        ) : route.kind === 'criteria' ? (
+          <CriteriaPage bands={criteriaBands} loading={loadingCriteria} />
+        ) : route.kind === 'indicators' ? (
+          <IndicatorCustomPage
+            bands={criteriaBands}
+            settings={indicatorSettings}
+            loading={loadingCriteria || loadingIndicatorSettings}
+            saving={savingIndicatorSettings}
+            saveError={indicatorSettingsError}
+            onSave={handleSaveIndicatorSettings}
+          />
+        ) : route.kind === 'login' || route.kind === 'signup' ? (
+          <AuthPage
+            mode={route.kind}
+            redirect={route.redirect}
+            busy={authBusy}
+            error={authError}
+            onNavigate={navigate}
+            onLogin={handleLogin}
+            onSignup={handleSignup}
+          />
+        ) : route.kind === 'portfolio' ? (
+          <PortfolioPage
+            portfolios={{
+              items: portfolios?.portfolios ?? [],
+              // BE 既定値（`portfolio-api.md` §GET /api/portfolios）と同じ値の意図的な重複
+              // （`EMPTY_COMPANY_LIST` の `perPage: 15` と同じ方針。未取得時のみ使う既定値）
+              maxPortfolios: portfolios?.maxPortfolios ?? 10,
+              loading: loadingPortfolios,
+            }}
+            activePortfolioId={activePortfolioId}
+            detail={{ data: portfolioDetail, loading: loadingPortfolioDetail }}
+            actions={{
+              onSelectPortfolio: handleSelectPortfolio,
+              onCreatePortfolio: handleCreatePortfolio,
+              onAddHolding: handleAddHolding,
+              onOpenHolding: handleOpenHolding,
+              onEditHolding: handleOpenEditHolding,
+              onUpdateHolding: handleUpdateHolding,
+              onRemoveHolding: handleRemoveHolding,
+              onDeletePortfolio: handleDeletePortfolio,
+            }}
+            addPortfolioDialog={{
+              open: isAddPortfolioOpen,
+              onOpen: handleOpenAddPortfolio,
+              onClose: handleCloseAddPortfolio,
+              submitting: savingPortfolio,
+              error: addPortfolioError,
+            }}
+            addHoldingDialog={{
+              open: isAddHoldingOpen,
+              onOpen: handleOpenAddHolding,
+              onClose: handleCloseAddHolding,
+              submitting: savingHolding,
+              error: addHoldingError,
+            }}
+            editHoldingDialog={{
+              open: editingHolding !== null,
+              // 編集は HoldingsTable の行内ボタンから開く（`+`ボタンが無い）ため no-op
+              // （`EditHoldingDialogState` の JSDoc 参照）
+              onOpen: () => {},
+              onClose: handleCloseEditHolding,
+              submitting: savingHolding,
+              error: holdingActionError,
+              holding: editingHolding,
+            }}
+            deletingPortfolio={deletingPortfolio}
+            selected={{ code: selectedCode, scoring, loading: loadingScoring }}
+            payoutRatioSourceControl={{
+              checked: useActualForScoring,
+              onToggle: handleToggleUseActualForScoring,
+            }}
+            activeMetricParam={activeMetricParam}
+            dialogHandlers={dialogHandlers}
+            dividendHistory={{ data: dividendHistory, loading: loadingDividendHistory }}
+          />
+        ) : (
+          <ListPage
+            companies={companies.companies}
+            selected={{ code: selectedCode, scoring, loading: loadingScoring }}
+            payoutRatioSourceControl={{
+              checked: useActualForScoring,
+              onToggle: handleToggleUseActualForScoring,
+            }}
+            searchControl={{
+              q,
+              sort,
+              page,
+              perPage: companies.perPage,
+              total: companies.total,
+              loading: loadingCompanies,
+              onSearchChange: handleSearchChange,
+              onSortChange: handleSortChange,
+              onPageChange: handlePageChange,
+              showRegisterCta: isAdmin(user),
+              onNavigateToInput: () => {
+                navigate({ kind: 'input' });
+              },
+            }}
+            rowActions={{ onSelect: handleSelect, onDelete: handleDelete }}
+            activeMetricParam={activeMetricParam}
+            dialogHandlers={dialogHandlers}
+            dividendHistory={{ data: dividendHistory, loading: loadingDividendHistory }}
+          />
+        )}
+      </main>
 
-      <footer>
-        <small>
-          本アプリケーションは株式情報の分析・可視化を目的としたものであり、投資助言・投資勧誘を
-          行うものではありません。投資判断はご自身の責任で行ってください。
-        </small>
+      <footer className="app-footer">
+        <div className="app-footer-inner">
+          <p className="app-footer-brand">
+            <span className="brand-mark" aria-hidden="true" />
+            高配当銘柄スコアリング
+          </p>
+          <small>
+            本アプリケーションは株式情報の分析・可視化を目的としたものであり、投資助言・投資勧誘を
+            行うものではありません。投資判断はご自身の責任で行ってください。
+          </small>
+        </div>
       </footer>
-    </main>
+    </div>
   );
 }

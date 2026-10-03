@@ -56,6 +56,16 @@ describe('style.css のトークン網羅性（design-tokens.md §2〜§4）', (
     ['--radius-2xl', '1rem'],
     ['--content-max', '72.5rem'],
     ['--width-auth-card', '25rem'],
+    // デザイン刷新（design-tokens.md §8）で追加したトークン
+    ['--color-surface-hover', '#1a1f28'],
+    ['--color-surface-dialog', '#12161d'],
+    ['--color-text-faint', '#4a5563'],
+    ['--color-line-disabled', '#3a4452'],
+    ['--font-size-title', '2rem'],
+    ['--space-7', '3rem'],
+    ['--space-8', '4.5rem'],
+    ['--control-height', '2.5rem'],
+    ['--header-height', '4rem'],
   ];
 
   it.each(expectedTokens)('%s が %s で :root に定義されている', (name, value) => {
@@ -84,17 +94,20 @@ describe('style.css のトークン網羅性（design-tokens.md §2〜§4）', (
     expect(styleCss).toMatch(/--dialog-max-width:\s*58\.75rem;/);
   });
 
-  it('トークンは47個（色17 + フォント族2 + フォントサイズ11 + 余白6 + 角丸5 + content-max1 + width-auth-card1 + shadow-dialog1 + dialog専用3）', () => {
+  it('トークンは65個（色21 + フォント族2 + フォントサイズ12 + 字間2 + 余白8 + 角丸6 + レイアウト5 + shadow-dialog1 + dialog専用4 + モーション4）', () => {
     // fe-plan.md は「42トークン」と記載していたが、内訳（17+2+11+6+5+1+1）を計算すると43。
     // その後 CR-3（T-091 FEレビュー）で `--width-auth-card` を追加したため44になった。
     // T-096 で dialog 専用トークン（scrim-color/scrim-blur/max-width）を3個追加し47になった。
-    // design-tokens.md §2〜§4 のトークンは漏れなく:root に定義されているので、
-    // ここでは実際の定義数（47）を正として検証する。
+    // デザイン刷新（design-tokens.md §8・2026-10-04）で、色4・--font-size-title・字間2・
+    // --space-7/8・--radius-full・--control-height(-compact)・--header-height・
+    // --dialog-compact-max-width・モーション4 の計18個を追加し65になった。
+    // design-tokens.md §2〜§5 のトークンは漏れなく:root に定義されているので、
+    // ここでは実際の定義数（65）を正として検証する。
     const rootBlockMatch = styleCss.match(/:root\s*\{([\s\S]*?)\n\}/);
     expect(rootBlockMatch).not.toBeNull();
     const rootBlock = rootBlockMatch?.[1] ?? '';
     const declarationCount = (rootBlock.match(/--[a-z0-9-]+:\s*[^;]+;/g) ?? []).length;
-    expect(declarationCount).toBe(47);
+    expect(declarationCount).toBe(65);
   });
 });
 
@@ -207,6 +220,8 @@ describe('frontend/**/*.tsx に色・rgba直値が無い（design-tokens.md §6 
     '../../frontend/components/CreatePortfolioForm.tsx',
     // T-103 fe-review CR-3: 保有銘柄編集フォーム
     '../../frontend/components/EditHoldingForm.tsx',
+    // デザイン刷新: 画面見出し
+    '../../frontend/components/PageHeader.tsx',
   ];
 
   it.each(tsxFiles)('%s に #RRGGBB / rgba( の直値が無い', (relativePath) => {

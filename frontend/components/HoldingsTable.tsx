@@ -59,13 +59,27 @@ export function HoldingsTable({
         <thead>
           <tr>
             <th scope="col">銘柄</th>
-            <th scope="col">保有数量</th>
-            <th scope="col">取得単価</th>
-            <th scope="col">現在株価</th>
-            <th scope="col">評価額</th>
-            <th scope="col">評価損益</th>
-            <th scope="col">利回り</th>
-            <th scope="col">スコア</th>
+            <th scope="col" className="numeric">
+              保有数量
+            </th>
+            <th scope="col" className="numeric">
+              取得単価
+            </th>
+            <th scope="col" className="numeric">
+              現在株価
+            </th>
+            <th scope="col" className="numeric">
+              評価額
+            </th>
+            <th scope="col" className="numeric">
+              評価損益
+            </th>
+            <th scope="col" className="numeric">
+              利回り
+            </th>
+            <th scope="col" className="numeric">
+              スコア
+            </th>
             <th scope="col">操作</th>
           </tr>
         </thead>
