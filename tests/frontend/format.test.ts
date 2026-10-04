@@ -715,20 +715,28 @@ describe('formatSen（解析ダイアログの株価表示）', () => {
 
 /** 配当推移グラフの金額軸（`DividendLineChart`）。銭のまま「6000」と出していた誤読の再発防止 */
 describe('formatSenAxisTick（グラフの金額軸の目盛り）', () => {
-  it('銭を円に直す（6000銭 → 60 円。銭のまま出さない）', () => {
-    expect(formatSenAxisTick(6_000)).toBe('60 円');
+  it('銭を円に直す（6000銭 → 60.00 円。銭のまま出さない）', () => {
+    expect(formatSenAxisTick(6_000)).toBe('60.00 円');
   });
 
-  it('0銭（無配）は「0 円」', () => {
-    expect(formatSenAxisTick(0)).toBe('0 円');
+  it('0銭（無配）は「0.00 円」', () => {
+    expect(formatSenAxisTick(0)).toBe('0.00 円');
   });
 
-  it('端数がある目盛りだけ小数第2位まで出す', () => {
+  it('端数がある目盛りも小数第2位まで出す', () => {
     expect(formatSenAxisTick(2_550)).toBe('25.50 円');
   });
 
   it('3桁区切りを付ける', () => {
-    expect(formatSenAxisTick(1_234_500)).toBe('12,345 円');
+    expect(formatSenAxisTick(1_234_500)).toBe('12,345.00 円');
+  });
+
+  it.each([
+    [[0, 100, 300], ['0.00 円', '1.00 円', '3.00 円']],
+    [[0, 150, 300], ['0.00 円', '1.50 円', '3.00 円']],
+    [[0, 1, 99, 100], ['0.00 円', '0.01 円', '0.99 円', '1.00 円']],
+  ])('同一軸の境界値で小数桁が揃う: %j', (ticks, expected) => {
+    expect(ticks.map(formatSenAxisTick)).toEqual(expected);
   });
 });
 

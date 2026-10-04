@@ -243,11 +243,24 @@ export function ListPage({
                     const isSelected = company.code === selected.code;
                     return (
                       // 選択行は色だけで示さない（色覚多様性）。操作列にも文言を出す
-                      <tr key={company.code} className={isSelected ? 'is-selected' : undefined}>
+                      <tr
+                        key={company.code}
+                        className={isSelected ? 'company-row is-selected' : 'company-row'}
+                      >
                         <th scope="row" className="company-cell">
-                          <span className="company-name" title={company.name}>
+                          <button
+                            type="button"
+                            className="company-name company-name-button"
+                            title={company.name}
+                            aria-label={`${company.name}（${company.code}）の解析結果を表示`}
+                            onClick={(event) => {
+                              if (event.detail > 0 && window.getSelection()?.isCollapsed === false)
+                                return;
+                              rowActions.onSelect(company.code);
+                            }}
+                          >
                             {company.name}
-                          </span>
+                          </button>
                           <span className="mono company-code">{company.code}</span>
                         </th>
                         <td className="score-cell">
@@ -276,6 +289,7 @@ export function ListPage({
                           <button
                             type="button"
                             className="button-compact"
+                            aria-label={`${company.name}（${company.code}）の解析結果を表示`}
                             onClick={() => {
                               rowActions.onSelect(company.code);
                             }}

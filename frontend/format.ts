@@ -67,13 +67,12 @@ export function formatSen(sen: number | null): string {
 }
 
 /**
- * グラフの金額軸の目盛り（銭 → 「60 円」）。目盛りは点の上のラベル（`formatSen`）より
- * 狭い場所に出すので、端数を持つときだけ小数を残し、整数円なら小数を省く。
+ * グラフの金額軸の目盛り（銭 → 「60.00 円」）。自動生成された目盛りにも
+ * 小数第2位を常に表示し、同じ軸で整数円と端数の桁数が混在しないようにする。
  * 銭のまま描くと「6000」が 60 円に読めないため、軸も必ず円に直す。
  */
 export function formatSenAxisTick(sen: number): string {
-  const fractionDigits = sen % 100 === 0 ? 0 : 2;
-  return `${grouped(sen / 100, fractionDigits)} 円`;
+  return `${grouped(sen / 100, 2)} 円`;
 }
 
 /**

@@ -67,6 +67,7 @@ export default tseslint.config(
       '.next/**',
       // Claude 向けのツール（skill のドライバ等）。アプリのコードではない
       '.claude/**',
+      '.agents/**',
       // `wrangler types` の生成物。手で直さないので lint しない
       'worker-configuration.d.ts',
     ],
