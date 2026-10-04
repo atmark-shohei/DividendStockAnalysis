@@ -1,6 +1,11 @@
-# 銘柄・ウォッチリスト API 仕様
+# 銘柄・ウォッチリスト API 仕様（旧draft・不採用）
 
-> ステータス: 🟡 draft — エンドポイントの形は仮。DB 設計の確定後に見直す。
+> ステータス: 🔴 **不採用（2026-07-28）。実装は [company-api.md](./company-api.md) を見ること。**
+>
+> この下書きは DB 製品未確定の時期に書いたもので、`/api/stocks`・`/api/watchlist` という
+> 想定は実装（`/api/companies`）と一致しない。ウォッチリスト機能自体、要件定義
+> （`docs/01_requirements/features.md`）に対応する項目が無く、実装計画にも無い。
+> 参照価値があるとすれば「エラー形式・ページングの案」程度。**新しい実装の参照先にしないこと。**
 
 ## 共通仕様
 
@@ -18,13 +23,13 @@
 
 内部情報（SQL・パス・スタックトレース）を含めない。
 
-| ステータス | code | 意味 |
-|---|---|---|
-| 400 | `invalid_request` | 入力形式不正 |
-| 404 | `not_found` | 対象なし |
-| 409 | `already_exists` | 重複追加 |
-| 502 | `upstream_unavailable` | 外部データ源の障害 |
-| 500 | `internal_error` | 想定外 |
+| ステータス | code                   | 意味               |
+| ---------- | ---------------------- | ------------------ |
+| 400        | `invalid_request`      | 入力形式不正       |
+| 404        | `not_found`            | 対象なし           |
+| 409        | `already_exists`       | 重複追加           |
+| 502        | `upstream_unavailable` | 外部データ源の障害 |
+| 500        | `internal_error`       | 想定外             |
 
 ---
 
@@ -36,16 +41,17 @@
 
 クエリパラメータ:
 
-| 名前 | 型 | 既定 | 説明 |
-|---|---|---|---|
-| `minYield` | number | — | 配当利回りの下限（%） |
-| `maxPayoutRatio` | number | — | 配当性向の上限（%） |
-| `sector` | string | — | 業種 |
-| `sort` | string | `yield_desc` | `yield_desc` / `code_asc` |
-| `page` | int | 1 | |
-| `perPage` | int | 50 | 最大 100 |
+| 名前             | 型     | 既定         | 説明                      |
+| ---------------- | ------ | ------------ | ------------------------- |
+| `minYield`       | number | —            | 配当利回りの下限（%）     |
+| `maxPayoutRatio` | number | —            | 配当性向の上限（%）       |
+| `sector`         | string | —            | 業種                      |
+| `sort`           | string | `yield_desc` | `yield_desc` / `code_asc` |
+| `page`           | int    | 1            |                           |
+| `perPage`        | int    | 50           | 最大 100                  |
 
 レスポンス（200）:
+
 ```json
 {
   "items": [

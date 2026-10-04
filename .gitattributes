@@ -1,0 +1,8 @@
+# .prettierrc sets endOfLine: "lf", but core.autocrlf=true was checking files
+# out as CRLF, so `npm run format:check` failed on any file git had just
+# written. Pin the working tree to LF so the formatter and git agree.
+* text=auto eol=lf
+
+# Keep the legacy snapshot out of diff/merge heuristics — it is reference
+# material, not code we edit.
+reference/legacy-web/** linguist-vendored

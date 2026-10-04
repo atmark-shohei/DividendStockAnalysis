@@ -3,11 +3,7 @@
     "bgIsolation": "none"
   },
   "permissions": {
-    "deny": [
-      "Read(./.env)",
-      "Read(./.env.*)",
-      "Edit(./package-lock.json)"
-    ],
+    "deny": ["Read(./.env)", "Read(./.env.*)", "Edit(./package-lock.json)"],
     "allow": [
       "Bash(npm run dev:*)",
       "Bash(npm run build:*)",

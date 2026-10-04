@@ -1,0 +1,1 @@
+DROP INDEX `idx_edinet_document_index_company`;

@@ -1,0 +1,261 @@
+import { describe, expect, it } from 'vitest';
+
+import { type Company } from '@/domain/company/company';
+import {
+  type CompanyListResult,
+  type CompanyRepository,
+} from '@/domain/company/company-repository';
+import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document-index';
+import { type EdinetHistorySource } from '@/domain/company/edinet-history-source';
+import { type FinancialSource } from '@/domain/company/financial-source';
+import {
+  type MarketData,
+  type MarketDataError,
+  type MarketDataSource,
+} from '@/domain/company/market-data-source';
+import { type Result, err, ok } from '@/domain/shared/result';
+import { createApp } from '@/handler/app';
+
+import {
+  TEST_ADMIN_SESSION_COOKIE,
+  TEST_USER_SESSION_COOKIE,
+  buildAuthTestDependencies,
+} from './support/build-app-dependencies';
+
+/**
+ * GET /api/market-data/:code の結線テスト。
+ * 仕様: docs/02_design/logic/market-data-source.md
+ *
+ * D1 を使わない（このルートはリポジトリに触らない）ので unit プロジェクトで動く。
+ * **実 API を叩かない**（`.claude/rules/backend.md`）。`MarketDataSource` を差し替える。
+ *
+ * admin限定（T-107）。データ取得成功系のテストは admin セッションCookieを付けて呼ぶ。
+ * ロールガード自体の確認は末尾の describe（`GET /api/market-data/:code — ロールガード`）で行う。
+ */
+
+/** このファイルの正常系テストで共通して使う admin セッションのリクエストヘッダ */
+const ADMIN_HEADERS = { cookie: TEST_ADMIN_SESSION_COOKIE };
+
+function unusedRepository(): CompanyRepository {
+  const fail = (): never => {
+    throw new Error('このテストでリポジトリが呼ばれるのは想定外');
+  };
+  return {
+    save: (): Promise<void> => fail(),
+    findByCode: (): Promise<Company | null> => fail(),
+    listSummaries: (): Promise<CompanyListResult> => fail(),
+    deleteByCode: (): Promise<void> => fail(),
+    listFiscalYearEndMonths: (): Promise<readonly number[]> => fail(),
+  };
+}
+
+function unusedFinancialSource(): FinancialSource {
+  return {
+    fetchByCode: (): never => {
+      throw new Error('このテストで FinancialSource が呼ばれるのは想定外');
+    },
+  };
+}
+
+function unusedEdinetHistorySource(): EdinetHistorySource {
+  return {
+    fetchHistory: (): never => {
+      throw new Error('このテストで EdinetHistorySource が呼ばれるのは想定外');
+    },
+  };
+}
+
+function unusedEdinetDocumentIndexLookup(): EdinetDocumentIndexLookup {
+  const fail = (): never => {
+    throw new Error('このテストで EdinetDocumentIndexLookup が呼ばれるのは想定外');
+  };
+  return { findDocId: fail, findLatest: fail };
+}
+
+function stubSource(
+  result: Result<MarketData, MarketDataError>,
+): MarketDataSource & { calls: { code: string; query: unknown }[] } {
+  const calls: { code: string; query: unknown }[] = [];
+  return {
+    calls,
+    fetchByCode: (code: string) => {
+      calls.push({ code, query: undefined });
+      return Promise.resolve(result);
+    },
+  };
+}
+
+function rawApp(marketDataSource: MarketDataSource) {
+  return createApp({
+    repository: unusedRepository(),
+    financialSource: unusedFinancialSource(),
+    marketDataSource,
+    edinetHistorySource: unusedEdinetHistorySource(),
+    edinetDocumentIndexLookup: unusedEdinetDocumentIndexLookup(),
+    ...buildAuthTestDependencies(),
+    now: () => new Date('2026-08-03T00:00:00.000Z'),
+  });
+}
+
+/**
+ * 正常系・エラー変換のテストは取り込みロジックの検証が主眼であり、ロールガードは
+ * 対象外（末尾の describe で別途尽くす）。そのため `request()` に admin セッション
+ * Cookie を自動付与するラッパーにし、既存の呼び出し箇所を1つずつ書き換えない。
+ */
+function app(marketDataSource: MarketDataSource) {
+  const honoApp = rawApp(marketDataSource);
+  return {
+    request: (input: string, init?: RequestInit) =>
+      honoApp.request(input, {
+        ...init,
+        headers: { ...ADMIN_HEADERS, ...(init?.headers as Record<string, string> | undefined) },
+      }),
+  };
+}
+
+const SAMPLE: MarketData = {
+  code: '9433',
+  name: 'KDDI Corporation',
+  priceSen: 290_300,
+  priceAsOf: '2026-08-03T06:30:00.000Z',
+  dividendPayments: [
+    { exDividendDate: '2025-09-29', amountYenText: '40' },
+    { exDividendDate: '2026-03-30', amountYenText: '40' },
+  ],
+  splits: [{ date: '2025-03-28', numerator: 2, denominator: 1 }],
+  diagnostics: [],
+};
+
+describe('GET /api/market-data/:code', () => {
+  it('fiscalYearEndMonth 未指定なら 200。配当は集計しない', async () => {
+    const response = await app(stubSource(ok(SAMPLE))).request('/api/market-data/9433');
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as {
+      code: string;
+      name: string | null;
+      priceSen: number | null;
+      dividendRecords: unknown[];
+      dividendAggregated: boolean;
+      splits: unknown[];
+    };
+    expect(body.code).toBe('9433');
+    expect(body.name).toBe('KDDI Corporation');
+    expect(body.priceSen).toBe(290_300);
+    expect(body.dividendRecords).toEqual([]);
+    expect(body.dividendAggregated).toBe(false);
+    expect(body.splits).toEqual([{ date: '2025-03-28', numerator: 2, denominator: 1 }]);
+  });
+
+  it('fiscalYearEndMonth=3 を指定すると配当を決算年度へ集計する', async () => {
+    const response = await app(stubSource(ok(SAMPLE))).request(
+      '/api/market-data/9433?fiscalYearEndMonth=3',
+    );
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as {
+      dividendRecords: { fiscalYear: number; annualAmountSen: number | null }[];
+      dividendAggregated: boolean;
+    };
+    expect(body.dividendAggregated).toBe(true);
+    expect(body.dividendRecords).toEqual([{ fiscalYear: 2026, annualAmountSen: 8_000 }]);
+  });
+
+  it('fiscalYearEndMonth が範囲外（13）なら 400', async () => {
+    const response = await app(stubSource(ok(SAMPLE))).request(
+      '/api/market-data/9433?fiscalYearEndMonth=13',
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it('fiscalYearEndMonth が数値でないなら 400', async () => {
+    const response = await app(stubSource(ok(SAMPLE))).request(
+      '/api/market-data/9433?fiscalYearEndMonth=abc',
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it('要求した銘柄コードをそのまま MarketDataSource へ渡す', async () => {
+    const source = stubSource(ok(SAMPLE));
+    await app(source).request('/api/market-data/9433');
+    expect(source.calls.map((c) => c.code)).toEqual(['9433']);
+  });
+
+  it('診断（パース・集計の両方）をそのまま返す。捨てない', async () => {
+    const withDiagnostics: MarketData = {
+      ...SAMPLE,
+      diagnostics: [
+        {
+          block: '株価',
+          fiscalYearKey: '',
+          column: '株価',
+          reason: 'unparsable-value',
+          raw: 'N/A',
+        },
+      ],
+    };
+    const response = await app(stubSource(ok(withDiagnostics))).request(
+      '/api/market-data/9433?fiscalYearEndMonth=3',
+    );
+    const body = (await response.json()) as {
+      diagnostics: unknown[];
+      dividendDiagnostics: unknown[];
+    };
+    expect(body.diagnostics).toHaveLength(1);
+    expect(Array.isArray(body.dividendDiagnostics)).toBe(true);
+  });
+
+  it.each([
+    ['invalid-code' as const, 400, { kind: 'invalid-code', code: 'abc' } as const],
+    ['source-not-found' as const, 404, { kind: 'source-not-found', code: '9999' } as const],
+    ['source-unreachable' as const, 502, { kind: 'source-unreachable', detail: 'boom' } as const],
+    ['malformed-response' as const, 502, { kind: 'malformed-response', detail: 'boom' } as const],
+    ['unexpected-shape' as const, 502, { kind: 'unexpected-shape', detail: 'boom' } as const],
+  ])('%s は %i を返す', async (_kind, status, error) => {
+    const response = await app(stubSource(err(error))).request('/api/market-data/9433');
+    expect(response.status).toBe(status);
+  });
+
+  it('失敗時のエラー本文に内部情報（detail・スタックトレース）を含めない', async () => {
+    const response = await app(
+      stubSource(err({ kind: 'source-unreachable', detail: 'TimeoutError: secret internal path' })),
+    ).request('/api/market-data/9433');
+
+    const body = (await response.json()) as { error: string };
+    expect(JSON.stringify(body)).not.toContain('secret internal path');
+    expect(JSON.stringify(body)).not.toMatch(/\.ts:\d|node_modules/);
+  });
+
+  it('保存しない。リポジトリの save は一度も呼ばれない', async () => {
+    // unusedRepository() は save が呼ばれた瞬間に throw するので、
+    // 例外にならず 200 が返ることそのものが「保存していない」ことの証拠
+    const response = await app(stubSource(ok(SAMPLE))).request('/api/market-data/9433');
+    expect(response.status).toBe(200);
+  });
+});
+
+/**
+ * ロールガード（T-107）。外部データ源を実際に呼び出すこのエンドポイントは、
+ * `POST/DELETE /api/companies` と同じ `adminOnly` で保護する
+ * （`docs/03_tasks/design-mock-alignment.md` T-107）。
+ */
+describe('GET /api/market-data/:code — ロールガード（admin限定）', () => {
+  it('未ログイン（Cookie無し）は401', async () => {
+    const response = await rawApp(stubSource(ok(SAMPLE))).request('/api/market-data/9433');
+    expect(response.status).toBe(401);
+  });
+
+  it('role=user は403（adminではない）', async () => {
+    const response = await rawApp(stubSource(ok(SAMPLE))).request('/api/market-data/9433', {
+      headers: { cookie: TEST_USER_SESSION_COOKIE },
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it('role=admin は通過する（200）', async () => {
+    const response = await rawApp(stubSource(ok(SAMPLE))).request('/api/market-data/9433', {
+      headers: ADMIN_HEADERS,
+    });
+    expect(response.status).toBe(200);
+  });
+});

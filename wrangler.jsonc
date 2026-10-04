@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dividend-stock-analysis",
+  "main": "src/index.ts",
+  // インストール済みの workerd に合わせる。将来日付にすると wrangler が起動を拒否する
+  "compatibility_date": "2026-07-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": {
+    // サインアップ受付の ON/OFF・上限人数（ADR-0013 §決定2）。秘密情報ではないので vars で管理する。
+    // 未設定なら安全側（受付停止）に倒す（src/index.ts の signupConfigOf）
+    "SIGNUP_ENABLED": "false",
+    "SIGNUP_MAX_USERS": "5",
+    // Cookie の Secure 属性。未設定/"false"以外は常に true（安全側）。
+    // ローカル http で手動確認する場合だけ .dev.vars に "false" を上書きする
+    "COOKIE_SECURE": "true",
+  },
+  // React アプリ（Vite の出力）。API 以外のパスはここへ流す
+  "assets": {
+    "directory": "./dist/frontend",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dividend-stock-analysis",
+      // ✅ 2026-08-08: `wrangler d1 create dividend-stock-analysis` で採番した実ID
+      "database_id": "a46f0e15-f367-4981-aaa0-0679468d3d64",
+      "migrations_dir": "db/migrations",
+    },
+  ],
+  "triggers": {
+    // EDINET docIDインデックスの日次バッチ（"refresh-edinet-document-index"）。
+    // UTC 21:00 = JST 翌06:00（Cron は常に UTC。実装者の提案値。設計書§8-5が未決のため
+    // 本番反映後に運用状況を見て調整の余地あり。
+    // docs/02_design/logic/edinet-history-import.md §4.4）
+    "crons": ["0 21 * * *"],
+  },
+}

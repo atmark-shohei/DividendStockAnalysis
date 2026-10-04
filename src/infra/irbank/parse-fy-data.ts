@@ -1,0 +1,712 @@
+/**
+ * IRバンクの銘柄別 JSON（`fy-data-all.json`）を取り込み用の形へ正規化する。
+ *
+ * 仕様: `docs/02_design/logic/irbank-json-import.md`
+ * 決定: `docs/adr/0007-irbank-json-direct-fetch.md`
+ *
+ * **純粋関数。ネットワークにも DB にも触らない。** 取得は別ファイルの責務。
+ *
+ * ⚠️ **銘柄名はこの JSON に含まれない**（`meta` は `code` / `type` / `item` だけ）。
+ * 名前はユーザーが入力する。
+ *
+ * ⚠️ 金額を `Sen`（検証済みを表す branded type）にしないのは、これが
+ * **未検証の入力**だからである（`domain/company/dividend-record.ts` と同じ理由）。
+ */
+
+import { type FinancialRecord } from '../../domain/company/company';
+import { type DividendRecord } from '../../domain/company/dividend-record';
+import { deriveOperatingMarginPercent } from '../../domain/company/operating-margin';
+import {
+  type TotalLiabilitiesDerivation,
+  deriveTotalLiabilities,
+} from '../../domain/company/total-liabilities';
+import {
+  type FinancialSourceError,
+  type ImportDiagnostic,
+  type ImportedAmount,
+  type ImportedFinancials,
+} from '../../domain/company/financial-source';
+import { type Result, err, ok } from '../../domain/shared/result';
+
+/**
+ * ブロック名・列名。**`src/domain/company/import-review.ts` が同じ値を
+ * 独立に持っている**（domain は infra を import できないため。`.claude/CLAUDE.md`
+ * 依存ルール）。`export` しているのは、両者が食い違っていないことを
+ * `tests/domain/company/import-review-constants.test.ts` で機械的に検査するため。
+ */
+export const BLOCK_PERFORMANCE = '業績';
+export const BLOCK_BALANCE = '財務';
+export const BLOCK_DIVIDEND = '配当';
+
+export const COLUMN_YEAR = '年度';
+export const COLUMN_REVENUE = '売上高';
+const COLUMN_OPERATING_INCOME = '営業利益';
+export const COLUMN_EPS = 'EPS';
+export const COLUMN_ROE = 'ROE';
+const COLUMN_BPS = 'BPS';
+export const COLUMN_DIVIDEND_PER_SHARE = '一株配当';
+/** ⑥ 用（`docs/02_design/logic/balance-sheet-derivation.md`）。負債総額は総資産 − 純資産で導出する */
+export const COLUMN_TOTAL_ASSETS = '総資産';
+export const COLUMN_NET_ASSETS = '純資産';
+export const COLUMN_DIVIDEND_TOTAL = '剰余金の配当';
+
+/** 予想行にだけ付く注記。この値以外は素性が分からないので採用しない（§3.3） */
+const NOTE_KEY = '備考';
+const NOTE_FORECAST = '予想';
+
+/** 欠損を表す値。`null` ではなくこの文字列で来る（§3.1） */
+const MISSING = '-';
+
+/** 数値文字列。同じ列でも年度によって `number` と文字列が混在する（§3.1） */
+const NUMERIC_TEXT = /^-?\d+(\.\d+)?$/;
+
+/** 決算期のキー。`2026/03` の先頭4桁を決算年度にする（§3.2） */
+const FISCAL_YEAR_KEY = /^(\d{4})\/(\d{2})$/;
+
+const MIN_FISCAL_YEAR = 1900;
+const MAX_FISCAL_YEAR = 2200;
+
+/**
+ * `Math.round` の結果が「本当の丸め」か「double の誤差」かを分ける閾値。
+ *
+ * `150.01 * 100` は `15000.999999999998` になるが、これは丸めではない。
+ * 一方 `1.005 * 100` は `100.49999…` で、実際に第3位を落としている。
+ */
+const FLOAT_NOISE = 1e-6;
+
+/**
+ * 株式分割の反映漏れを疑う前年比の閾値（§5.3）。**超えたときだけ**記録する
+ * （ちょうど 80% は記録しない）。
+ */
+const SUSPICIOUS_JUMP_RATIO = 0.8;
+
+/**
+ * パース段階で起こりうる失敗だけを取り出したもの（§5.1）。
+ * 通信の失敗（`source-unreachable` など）はここでは起きない。
+ */
+export type ParseFyDataError = Extract<
+  FinancialSourceError,
+  { kind: 'unexpected-shape' | 'code-mismatch' | 'no-usable-year' }
+>;
+
+/** 1年度ぶんの行。列名で引けるようにしたもの */
+interface BlockRow {
+  readonly fiscalYearKey: string;
+  readonly isForecast: boolean;
+  readonly values: ReadonlyMap<string, unknown>;
+}
+
+type Block = ReadonlyMap<number, BlockRow>;
+
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * セルの生値を「数値 / 数値文字列 / 欠損 / 読めない」に分ける。
+ *
+ * **全列で3種すべてを受け入れる**（§3.1）。特定の列だけ `typeof === 'number'` を
+ * 前提にすると、別の銘柄で必ず落ちる。
+ */
+type NumericCell =
+  | { readonly kind: 'number'; readonly value: number }
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'invalid'; readonly raw: string };
+
+function readNumeric(raw: unknown): NumericCell {
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw)
+      ? { kind: 'number', value: raw }
+      : { kind: 'invalid', raw: String(raw) };
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed === '' || trimmed === MISSING) return { kind: 'missing' };
+    if (NUMERIC_TEXT.test(trimmed)) return { kind: 'text', text: trimmed };
+    return { kind: 'invalid', raw: trimmed };
+  }
+  if (raw === undefined || raw === null) return { kind: 'missing' };
+  return { kind: 'invalid', raw: typeof raw };
+}
+
+interface SenConversion {
+  readonly sen: number;
+  readonly rounded: boolean;
+}
+
+/**
+ * 数値文字列を銭へ。**小数点を文字列のままずらす**（`parseFloat` を経由しない）。
+ *
+ * 浮動小数点を挟むと金額がずれる（`.claude/skills/import-financials/SKILL.md`）。
+ * 小数第3位以下は四捨五入し、丸めたことを呼び出し側へ返す。
+ */
+function senFromText(text: string): SenConversion | null {
+  const negative = text.startsWith('-');
+  const body = negative ? text.slice(1) : text;
+  const dot = body.indexOf('.');
+  const integerPart = dot === -1 ? body : body.slice(0, dot);
+  const fractionPart = dot === -1 ? '' : body.slice(dot + 1);
+
+  const truncated = Number(integerPart + `${fractionPart}00`.slice(0, 2));
+  if (!Number.isSafeInteger(truncated)) return null;
+
+  const dropped = fractionPart.slice(2);
+  if (dropped === '') return { sen: negative ? -truncated : truncated, rounded: false };
+
+  const carried = Number(dropped[0]) >= 5 ? truncated + 1 : truncated;
+  if (!Number.isSafeInteger(carried)) return null;
+  return { sen: negative ? -carried : carried, rounded: true };
+}
+
+/**
+ * `number` で来た値を銭へ。
+ *
+ * `JSON.parse` が既に double にしているので文字列へ戻す手段が無い。実測した
+ * 小数桁は EPS・BPS が2桁、一株配当が1桁で、この範囲では `Math.round` の結果は
+ * 厳密に正しい（§3.4）。
+ */
+function senFromNumber(value: number): SenConversion | null {
+  const scaled = value * 100;
+  const sen = Math.round(scaled);
+  if (!Number.isSafeInteger(sen)) return null;
+  return { sen, rounded: Math.abs(scaled - sen) > FLOAT_NOISE };
+}
+
+/** 診断を貯めながら読むための入れ物 */
+interface Reader {
+  readonly diagnostics: ImportDiagnostic[];
+}
+
+function record(reader: Reader, entry: ImportDiagnostic): void {
+  reader.diagnostics.push(entry);
+}
+
+/** 金額列を銭で読む。欠損は `null`。**0 と混同しない** */
+function senAt(reader: Reader, block: string, row: BlockRow, column: string): number | null {
+  const cell = readNumeric(row.values.get(column));
+  if (cell.kind === 'missing') return null;
+
+  const context = { block, fiscalYearKey: row.fiscalYearKey, column };
+  if (cell.kind === 'invalid') {
+    record(reader, { ...context, reason: 'unparsable-value', raw: cell.raw });
+    return null;
+  }
+
+  const raw = cell.kind === 'text' ? cell.text : String(cell.value);
+  const converted = cell.kind === 'text' ? senFromText(cell.text) : senFromNumber(cell.value);
+  if (converted === null) {
+    // 銀行の総資産のように、銭にすると MAX_SAFE_INTEGER を超える金額がある（§3.4）
+    record(reader, { ...context, reason: 'unsafe-integer', raw });
+    return null;
+  }
+  if (converted.rounded) record(reader, { ...context, reason: 'rounded', raw });
+  return converted.sen;
+}
+
+/**
+ * 金額列を**円のまま**読む。銭化しない。欠損は `null`。
+ *
+ * 総資産・純資産は先に銭化すると桁あふれる（7203 の総資産は銭で 1.06e16）。
+ * 円で引いてから差だけを銭にする必要があるため、銭化前の生値を返す口が要る
+ * （`docs/02_design/logic/balance-sheet-derivation.md` §3.2）。
+ *
+ * **整数性・安全整数の判定はここでやらない。** `deriveTotalLiabilities()` が
+ * `not-integer` / `unsafe-integer` として返すので、判定を二重に持たない。
+ */
+function yenAt(reader: Reader, block: string, row: BlockRow, column: string): number | null {
+  const cell = readNumeric(row.values.get(column));
+  if (cell.kind === 'missing') return null;
+  if (cell.kind === 'invalid') {
+    // 「読めない文字列」は既存 `senAt()` と同型に倒し、壊れた**その列**について
+    // `unparsable-value` を1件記録して `null` を返す。後段の `deriveTotalLiabilities` は
+    // `input-missing` になり診断を出さないので、診断はその列につき1件で二重にならない。
+    // **総資産・純資産の両方が壊れていれば2件出る**（列ごとに1件。合計が常に1件ではない）。
+    // 仕様: `docs/02_design/logic/balance-sheet-derivation.md` §5.1
+    // （ユーザー承認済み 2026-08-06。設計書 §5.1 の表は入力が `null` か非整数かしか
+    //   書いていなかったため、この扱いを実装時に決めて承認を得た）
+    record(reader, {
+      block,
+      fiscalYearKey: row.fiscalYearKey,
+      column,
+      reason: 'unparsable-value',
+      raw: cell.raw,
+    });
+    return null;
+  }
+  // NUMERIC_TEXT を通っているので Number() で落ちない（7203 の純資産は数値文字列で来る）
+  const value = cell.kind === 'text' ? Number(cell.text) : cell.value;
+  return Number.isFinite(value) ? value : null;
+}
+
+/** 比率列（%・倍）。金額ではないので実数のままでよい */
+function ratioAt(reader: Reader, block: string, row: BlockRow, column: string): number | null {
+  const cell = readNumeric(row.values.get(column));
+  if (cell.kind === 'missing') return null;
+  if (cell.kind === 'invalid') {
+    record(reader, {
+      block,
+      fiscalYearKey: row.fiscalYearKey,
+      column,
+      reason: 'unparsable-value',
+      raw: cell.raw,
+    });
+    return null;
+  }
+  const value = cell.kind === 'text' ? Number(cell.text) : cell.value;
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * 前年からの変化が大きすぎる値を記録する（§5.3 の桁チェック）。
+ *
+ * 株式分割が反映されていない年が混ざると、EPS・一株配当が桁ごとずれる。
+ * 正しい急変（記念配当・業績の急回復）と機械的に区別できないので
+ * **除外はしない。値はそのまま採用し、人が気づけるように記録だけ残す。**
+ *
+ * 前年が `null`（データなし）や 0 のときは変化率を定義できないので何も出さない。
+ * 比較不能・ゼロ除算を「異常」として誤検出しない。
+ */
+function recordSuspiciousJump(
+  reader: Reader,
+  block: string,
+  row: BlockRow,
+  column: string,
+  previousSen: number | null,
+  currentSen: number | null,
+): void {
+  if (previousSen === null || currentSen === null || previousSen === 0) return;
+  // 金額そのものではなく比率なので実数でよい（営業利益率と同じ扱い）
+  const change = Math.abs(currentSen - previousSen) / Math.abs(previousSen);
+  if (change <= SUSPICIOUS_JUMP_RATIO) return;
+  record(reader, {
+    block,
+    fiscalYearKey: row.fiscalYearKey,
+    column,
+    reason: 'suspicious-jump',
+    raw: `${String(previousSen)} -> ${String(currentSen)}`,
+  });
+}
+
+/**
+ * 1ブロックを「決算年度 → 行」に正規化する。
+ *
+ * **予想年度だけ配列ではなくオブジェクトで来る**（§3.3）。`Array.isArray` で
+ * 分岐しないと落ちる。
+ */
+function normalizeBlock(
+  reader: Reader,
+  blockName: string,
+  raw: unknown,
+): Block | { readonly error: string } {
+  if (!isRecordObject(raw)) return { error: `${blockName} がオブジェクトでない` };
+
+  const meta = raw['meta'];
+  if (!isRecordObject(meta)) return { error: `${blockName}.meta がオブジェクトでない` };
+  const metaItem = meta['item'];
+  if (!isRecordObject(metaItem)) return { error: `${blockName}.meta.item がオブジェクトでない` };
+  const columns = metaItem[COLUMN_YEAR];
+  if (!Array.isArray(columns) || columns.some((column) => typeof column !== 'string')) {
+    return { error: `${blockName}.meta.item.${COLUMN_YEAR} が列名の配列でない` };
+  }
+  const item = raw['item'];
+  if (!isRecordObject(item)) return { error: `${blockName}.item がオブジェクトでない` };
+
+  const rows = new Map<number, BlockRow>();
+  const duplicated = new Set<number>();
+
+  for (const [fiscalYearKey, rowRaw] of Object.entries(item)) {
+    const matched = FISCAL_YEAR_KEY.exec(fiscalYearKey);
+    const fiscalYear = matched === null ? Number.NaN : Number(matched[1]);
+    if (
+      !Number.isInteger(fiscalYear) ||
+      fiscalYear < MIN_FISCAL_YEAR ||
+      fiscalYear > MAX_FISCAL_YEAR
+    ) {
+      record(reader, {
+        block: blockName,
+        fiscalYearKey,
+        column: COLUMN_YEAR,
+        reason: 'year-out-of-range',
+        raw: fiscalYearKey,
+      });
+      continue;
+    }
+
+    const isArray = Array.isArray(rowRaw);
+    if (!isArray && !isRecordObject(rowRaw)) {
+      record(reader, {
+        block: blockName,
+        fiscalYearKey,
+        column: COLUMN_YEAR,
+        reason: 'unparsable-value',
+        raw: typeof rowRaw,
+      });
+      continue;
+    }
+
+    let isForecast = false;
+    if (!isArray) {
+      const note = rowRaw[NOTE_KEY];
+      if (note === NOTE_FORECAST) {
+        isForecast = true;
+      } else if (note !== undefined) {
+        // 素性の分からない年を平均や CAGR に混ぜると投資判断が変わる（§3.3）
+        record(reader, {
+          block: blockName,
+          fiscalYearKey,
+          column: NOTE_KEY,
+          reason: 'unknown-note',
+          raw: typeof note === 'string' ? note : typeof note,
+        });
+        continue;
+      }
+    }
+
+    const values = new Map<string, unknown>();
+    columns.forEach((column, index) => {
+      values.set(String(column), isArray ? rowRaw[index] : rowRaw[String(index)]);
+    });
+
+    if (rows.has(fiscalYear)) {
+      // どちらが正か機械的に決められないので、後勝ちにせず両方落とす（§3.2）
+      duplicated.add(fiscalYear);
+      record(reader, {
+        block: blockName,
+        fiscalYearKey,
+        column: COLUMN_YEAR,
+        reason: 'duplicate-year',
+        raw: fiscalYearKey,
+      });
+      continue;
+    }
+    rows.set(fiscalYear, { fiscalYearKey, isForecast, values });
+  }
+
+  for (const fiscalYear of duplicated) rows.delete(fiscalYear);
+  return rows;
+}
+
+/**
+ * 決算月の診断用の区画名・列名。
+ *
+ * 🔴 推測: 設計書（`docs/02_design/logic/market-data-source.md` §3.2）は
+ * 「reason: 'unknown-note' 相当の診断を残す」とだけ決めており、`block`/`column` に
+ * 何を入れるかは明記していない。業績・配当・財務のどれか1つに紐づく話ではない
+ * （複数ブロックの年度キーをまたいで比較した結果）ため、既存の3ブロック名
+ * （`業績`/`配当`/`財務`）を流用せず、決算期専用の区画名を新設した。
+ */
+const BLOCK_FISCAL_YEAR_END_MONTH = '決算期';
+const COLUMN_FISCAL_YEAR_END_MONTH = '決算月';
+
+/**
+ * 決算月を「業績・配当・財務の各ブロックに現れた年度キーの月」から導出する
+ * （`docs/02_design/logic/market-data-source.md` §3.2）。
+ *
+ * ちょうど1つの月に定まれば決算月。0個（年度キーが無い）または2個以上
+ * （決算期変更の疑い）なら `null` にして推測しない。2個以上のときは決算期変更の
+ * 可能性を示す診断を1件残す（穴のある集計を黙って通さない）。
+ */
+function deriveFiscalYearEndMonth(reader: Reader, blocks: readonly Block[]): number | null {
+  const months = new Set<number>();
+  const keys: string[] = [];
+  for (const block of blocks) {
+    for (const row of block.values()) {
+      const matched = FISCAL_YEAR_KEY.exec(row.fiscalYearKey);
+      if (matched === null) continue;
+      months.add(Number(matched[2]));
+      keys.push(row.fiscalYearKey);
+    }
+  }
+
+  if (months.size === 1) return [...months][0] ?? null;
+  if (months.size >= 2) {
+    record(reader, {
+      block: BLOCK_FISCAL_YEAR_END_MONTH,
+      fiscalYearKey: keys.join(', '),
+      column: COLUMN_FISCAL_YEAR_END_MONTH,
+      reason: 'unknown-note',
+      raw: [...months]
+        .sort((a, b) => a - b)
+        .map(String)
+        .join('/'),
+    });
+  }
+  return null;
+}
+
+/**
+ * 算出できなかった理由 → 診断の種別（`docs/02_design/logic/balance-sheet-derivation.md` §5.1 の表）。
+ *
+ * `input-missing` は診断を出さない（正常な欠損）ので、この表に持たせない。
+ */
+const DERIVATION_REASON = {
+  'not-integer': 'unparsable-value',
+  'negative-liabilities': 'inconsistent-value',
+  'unsafe-integer': 'unsafe-integer',
+} as const satisfies Record<
+  Exclude<TotalLiabilitiesDerivation['kind'], 'derived' | 'input-missing'>,
+  ImportDiagnostic['reason']
+>;
+
+/**
+ * 負債総額（総資産 − 純資産）を財務ブロックから読む
+ * （`docs/02_design/logic/balance-sheet-derivation.md` §2.3）。
+ *
+ * **実績行を決算年度の降順に走査し、両方が読めて算出まで成功した最初の年度を採る。**
+ * 片方だけ読めた年度・算出に失敗した年度はその年度ごと飛ばす。値と年度は必ず対で
+ * 確定させる（片方だけ埋まると画面が「2026年3月期・データなし」という無意味な組を出す）。
+ *
+ * 飛ばした年度ごとに診断が残る。**診断が出た＝値が無い、ではない**（最新年度が
+ * 桁あふれでも1つ前で算出できれば、診断を残したまま値は返る）。
+ *
+ * 走査の規則は既存の `latestActualBpsSen` と同じ。BPS は1列なので、
+ * 「両方読めた年度」の条件だけが本項の追加分である。
+ */
+function readTotalLiabilities(reader: Reader, balance: Block): ImportedAmount | null {
+  for (const fiscalYear of [...balance.keys()].sort((a, b) => b - a)) {
+    const row = balance.get(fiscalYear);
+    if (row === undefined || row.isForecast) continue;
+
+    const totalAssetsYen = yenAt(reader, BLOCK_BALANCE, row, COLUMN_TOTAL_ASSETS);
+    const netAssetsYen = yenAt(reader, BLOCK_BALANCE, row, COLUMN_NET_ASSETS);
+    const derivation = deriveTotalLiabilities(totalAssetsYen, netAssetsYen);
+
+    if (derivation.kind === 'derived') return { valueSen: derivation.valueSen, fiscalYear };
+    // 正常な欠損。診断は出さない（§5.1）。`yenAt` が既に記録した場合はそちらが1件残る
+    if (derivation.kind === 'input-missing') continue;
+
+    // 2列から1つの値を作るので、診断の `column` は先に読んだ「総資産」へ寄せ、
+    // `raw` に両方を残して原因調査で追えるようにする（§2.2.1）
+    record(reader, {
+      block: BLOCK_BALANCE,
+      fiscalYearKey: row.fiscalYearKey,
+      column: COLUMN_TOTAL_ASSETS,
+      reason: DERIVATION_REASON[derivation.kind],
+      raw: `${String(totalAssetsYen)} - ${String(netAssetsYen)}`,
+    });
+  }
+  return null;
+}
+
+/**
+ * 前期末の配当総額（「剰余金の配当」）を配当ブロックから読む（同 §2.2 / §2.3）。
+ *
+ * 既存の `senAt()` を**包む**。`senAt()` 自体は業績・財務・配当の全金額列で共有され、
+ * 営業利益は営業赤字で正当に負を取るため、**「負なら `null`」に変えてはいけない**。
+ * 負の検査はこの列にだけ被せる（同 §2.2 の 🔴）。
+ *
+ * 0（無配）は 0 のまま返す。**`null` に丸めない**（ゼロ除算の判断は ⑥ の責務。§5.5）。
+ */
+function readPreviousDividendTotal(reader: Reader, dividend: Block): ImportedAmount | null {
+  for (const fiscalYear of [...dividend.keys()].sort((a, b) => b - a)) {
+    const row = dividend.get(fiscalYear);
+    if (row === undefined || row.isForecast) continue;
+
+    const valueSen = senAt(reader, BLOCK_DIVIDEND, row, COLUMN_DIVIDEND_TOTAL);
+    if (valueSen === null) continue;
+    if (valueSen >= 0) return { valueSen, fiscalYear };
+
+    // 配当総額が負は制度上ありえない。データ不良として値を採らない（§5.5）
+    //
+    // `raw` は銭化後（-100）ではなく原文（-1）を残す。`ImportDiagnostic.raw` の定義
+    // 「元の値。原因調査のためそのまま残す」に従う。原典と突き合わせるのは人なので、
+    // 原文のほうが照合しやすい。
+    // 仕様: `docs/02_design/logic/balance-sheet-derivation.md` §5.5
+    // （ユーザー承認済み 2026-08-06。設計書 §5.5 は `raw` の形式を定めていなかったため、
+    //   この扱いを実装時に決めて承認を得た）
+    record(reader, {
+      block: BLOCK_DIVIDEND,
+      fiscalYearKey: row.fiscalYearKey,
+      column: COLUMN_DIVIDEND_TOTAL,
+      reason: 'inconsistent-value',
+      raw: String(row.values.get(COLUMN_DIVIDEND_TOTAL)),
+    });
+  }
+  return null;
+}
+
+function metaCodeOf(raw: Record<string, unknown>): string | null {
+  for (const blockName of [BLOCK_PERFORMANCE, BLOCK_DIVIDEND, BLOCK_BALANCE]) {
+    const block = raw[blockName];
+    if (!isRecordObject(block)) continue;
+    const meta = block['meta'];
+    if (!isRecordObject(meta)) continue;
+    const code = meta['code'];
+    if (typeof code === 'string' && code !== '') return code;
+  }
+  return null;
+}
+
+/**
+ * IRバンクの `fy-data-all.json` を取り込み用の形へ正規化する。
+ *
+ * @param raw `JSON.parse` 済みの値。形の検査はここで行う
+ * @param expectedCode 要求した銘柄コード。`meta.code` と一致するか検査する
+ */
+export function parseFyData(
+  raw: unknown,
+  expectedCode: string,
+): Result<ImportedFinancials, ParseFyDataError> {
+  if (!isRecordObject(raw)) {
+    return err({ kind: 'unexpected-shape', detail: 'ルートがオブジェクトでない' });
+  }
+
+  const actualCode = metaCodeOf(raw);
+  if (actualCode === null) {
+    return err({ kind: 'unexpected-shape', detail: 'meta.code が見つからない' });
+  }
+  if (actualCode !== expectedCode) {
+    return err({ kind: 'code-mismatch', expected: expectedCode, actual: actualCode });
+  }
+
+  const reader: Reader = { diagnostics: [] };
+
+  const performance = normalizeBlock(reader, BLOCK_PERFORMANCE, raw[BLOCK_PERFORMANCE]);
+  if ('error' in performance) return err({ kind: 'unexpected-shape', detail: performance.error });
+  const dividend = normalizeBlock(reader, BLOCK_DIVIDEND, raw[BLOCK_DIVIDEND]);
+  if ('error' in dividend) return err({ kind: 'unexpected-shape', detail: dividend.error });
+
+  // 財務は BPS（⑨ PBR）と負債総額（⑥）に使う。欠けていても取り込みは成立させる
+  // （`totalLiabilities` が `null` になるだけ。balance-sheet-derivation.md §10-2）
+  const balanceResult = normalizeBlock(reader, BLOCK_BALANCE, raw[BLOCK_BALANCE]);
+  const balance = 'error' in balanceResult ? null : balanceResult;
+
+  const fiscalYears = [...new Set([...performance.keys(), ...dividend.keys()])].sort(
+    (a, b) => a - b,
+  );
+
+  const records: FinancialRecord[] = [];
+  const dividends: DividendRecord[] = [];
+  /** 前年比の桁チェック用。1株配当は `dividends` にしか無い（ADR-0009） */
+  const dividendSenByYear = new Map<number, number | null>();
+
+  for (const fiscalYear of fiscalYears) {
+    const performanceRow = performance.get(fiscalYear);
+    const dividendRow = dividend.get(fiscalYear);
+
+    const dividendPerShareSen =
+      dividendRow === undefined
+        ? null
+        : senAt(reader, BLOCK_DIVIDEND, dividendRow, COLUMN_DIVIDEND_PER_SHARE);
+
+    const revenueSen =
+      performanceRow === undefined
+        ? null
+        : senAt(reader, BLOCK_PERFORMANCE, performanceRow, COLUMN_REVENUE);
+    const operatingIncomeSen =
+      performanceRow === undefined
+        ? null
+        : senAt(reader, BLOCK_PERFORMANCE, performanceRow, COLUMN_OPERATING_INCOME);
+
+    records.push({
+      fiscalYear,
+      isForecast: (performanceRow?.isForecast ?? false) || (dividendRow?.isForecast ?? false),
+      epsSen:
+        performanceRow === undefined
+          ? null
+          : senAt(reader, BLOCK_PERFORMANCE, performanceRow, COLUMN_EPS),
+      roePercent:
+        performanceRow === undefined
+          ? null
+          : ratioAt(reader, BLOCK_PERFORMANCE, performanceRow, COLUMN_ROE),
+      revenueSen,
+      operatingMarginPercent: deriveOperatingMarginPercent(operatingIncomeSen, revenueSen),
+    });
+
+    if (dividendRow !== undefined) {
+      dividendSenByYear.set(fiscalYear, dividendPerShareSen);
+      dividends.push({
+        fiscalYear,
+        // IRバンクは修正を別行にしないので `revised` は生成されない（§3.3）
+        kind: dividendRow.isForecast ? 'forecast' : 'actual',
+        annualAmountSen: dividendPerShareSen,
+      });
+    }
+  }
+
+  // 隣り合う年度どうしで急変を見る（§5.3）。**除外はしない。記録だけ残す**
+  //
+  // ⚠️ `records` は業績と配当の年度の**和集合**で、間の年度が両方の
+  // ブロックに無ければ配列上は隣り合っていても暦年としては隣り合わない
+  // （例: 決算期変更で1年が丸ごと欠ける。§3.2）。「前年比」と謳う以上、
+  // **暦年で1年differenceのときだけ**比較する。2年以上離れた年度を
+  // 1年分の変化率として扱うと、複数年の複利成長を株式分割と誤検出する
+  // （逆に、複数年にまたがった本物の分割の比率が薄まって見逃されることもある）。
+  for (let index = 1; index < records.length; index += 1) {
+    const previous = records[index - 1];
+    const current = records[index];
+    if (previous === undefined || current === undefined) continue;
+    if (current.fiscalYear - previous.fiscalYear !== 1) continue;
+
+    const performanceRow = performance.get(current.fiscalYear);
+    if (performanceRow !== undefined) {
+      recordSuspiciousJump(
+        reader,
+        BLOCK_PERFORMANCE,
+        performanceRow,
+        COLUMN_EPS,
+        previous.epsSen,
+        current.epsSen,
+      );
+    }
+    const dividendRow = dividend.get(current.fiscalYear);
+    if (dividendRow !== undefined) {
+      recordSuspiciousJump(
+        reader,
+        BLOCK_DIVIDEND,
+        dividendRow,
+        COLUMN_DIVIDEND_PER_SHARE,
+        dividendSenByYear.get(previous.fiscalYear) ?? null,
+        dividendSenByYear.get(current.fiscalYear) ?? null,
+      );
+    }
+  }
+
+  if (records.length === 0) return err({ kind: 'no-usable-year' });
+
+  // ⑨ の PER は予想EPSを優先する（§3.5）。無ければ実績EPSで代用
+  const latestForecastRecord = [...records]
+    .reverse()
+    .find((entry) => entry.isForecast && entry.epsSen !== null);
+  const latestActualRecord = [...records]
+    .reverse()
+    .find((entry) => !entry.isForecast && entry.epsSen !== null);
+
+  let latestActualBpsSen: number | null = null;
+  if (balance !== null) {
+    for (const fiscalYear of [...balance.keys()].sort((a, b) => b - a)) {
+      const row = balance.get(fiscalYear);
+      if (row === undefined || row.isForecast) continue;
+      const bps = senAt(reader, BLOCK_BALANCE, row, COLUMN_BPS);
+      if (bps !== null) {
+        latestActualBpsSen = bps;
+        break;
+      }
+    }
+  }
+
+  // ⑥ の入力（`docs/02_design/logic/balance-sheet-derivation.md`）。
+  // 2欄の決算年度が食い違っても取り込みは止めず、診断も出さない（同 §2.3）。
+  // 確定するのは人であり、年度は画面に出して判断してもらう
+  const totalLiabilities = balance === null ? null : readTotalLiabilities(reader, balance);
+  const previousDividendTotal = readPreviousDividendTotal(reader, dividend);
+
+  const fiscalYearEndMonth = deriveFiscalYearEndMonth(
+    reader,
+    balance === null ? [performance, dividend] : [performance, dividend, balance],
+  );
+
+  return ok({
+    code: actualCode,
+    records,
+    dividends,
+    latestForecastEpsSen: latestForecastRecord?.epsSen ?? null,
+    latestActualEpsSen: latestActualRecord?.epsSen ?? null,
+    latestActualBpsSen,
+    fiscalYearEndMonth,
+    totalLiabilities,
+    previousDividendTotal,
+    diagnostics: reader.diagnostics,
+  });
+}

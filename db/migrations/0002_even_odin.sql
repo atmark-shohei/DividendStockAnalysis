@@ -1,0 +1,1 @@
+ALTER TABLE `financial_records` DROP COLUMN `dividend_per_share_sen`;
