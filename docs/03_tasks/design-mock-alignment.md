@@ -522,15 +522,20 @@
 | T-104 | 銘柄登録画面を管理者限定にする                                       | P0     | 🟢   | T-092        |
 | T-105 | アクセシビリティ点検（`<table>`/`<button>`・キーボード・色依存なし） | P1     | 🟢   | T-094, T-096 |
 | T-106 | 実装完了後に設計書を更新する（陳腐化させない）                       | P0     | 🔴   | T-105        |
-| T-108 | 指標詳細：③予想配当性向の計算式と計算根拠（API 拡張＋画面）          | P1     | 🟡   | T-096, T-101 |
+| T-108 | 指標詳細：③予想配当性向の計算式と計算根拠（API 拡張＋画面）          | P1     | 🟢   | T-096, T-101 |
 
-> 🟡 **T-108（2026-09-23 起票。設計済み・未実装）。** 解析ダイアログの③詳細に、計算式と
+> 🟢 **T-108（2026-09-23 起票。完了（2026-09-25））。** 解析ダイアログの③詳細に、計算式と
 > 実際の計算に使った数値（1株配当・EPS・年度）、予想／実績の2カード、区分表の該当行マーカーを出す。
 > 設計: [analysis-dialog.md](../02_design/ui/pages/analysis-dialog.md) §5.3.1 /
 > [payout-ratio-scoring.md](../02_design/logic/payout-ratio-scoring.md) §10 /
 > [company-api.md](../02_design/api/company-api.md)。
 > 進め方: T-108a 設計書（`review-spec`）→ `implement T-108`（BE＋FE）→ `scoring-check` →
 > `run-dividend-stock-analysis` で画面確認 → `spec-impl-drift`
+>
+> ✅ 実際に行った手順（2026-09-25）: `implement T-108`（BE＋FE）→ レビュー2巡（BE-CR-1・FE-CR-1〜3 を是正）→
+> `run-dividend-stock-analysis` で画面確認（ローカル D1 の確認用銘柄）→ 要約行の追加修正
+> （年度の食い違いを「年度が一致しないため判定不能」と表示。ユーザー決定）→ 再レビュー・画面再確認 →
+> 設計書更新（[analysis-dialog.md](../02_design/ui/pages/analysis-dialog.md) §5.3.1・§9.1 ほか）
 
 > 🔴 **NavBar ラベル表記ゆれの申し送り（T-092 FEレビュー CR-1、2026-08-18）。**
 > 実装（`frontend/components/NavBar.tsx`）は `保存済み銘柄`／`データ入力` のままで、

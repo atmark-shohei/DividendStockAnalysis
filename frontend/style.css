@@ -1680,6 +1680,84 @@ tbody tr:has(> .row-actions) {
   color: var(--color-caution);
 }
 
+/*
+ * 解析ダイアログ ③予想配当性向の詳細（T-108・analysis-dialog.md §5.3.1）。
+ * 予想／実績の2カードは2列（狭い画面では §6 のメディアクエリで1列にする。screen-list.md §10）。
+ */
+.payout-ratio-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
+  margin-block: var(--space-4);
+}
+
+/* カード外観は .criteria-card と同じ（影なし・ヘアライン枠線。design-tokens.md §4） */
+.payout-ratio-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+.payout-ratio-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.payout-ratio-card-header h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+
+/*
+ * カード内の計算根拠（1株配当・EPS）。.dialog-hero-row と同じ行組みだが、
+ * カードの中では区切り線と上下の外余白が不要なので .dialog-hero を流用しない（T-108 CR-1）
+ */
+.payout-ratio-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.payout-ratio-evidence-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.payout-ratio-evidence-row dt {
+  color: var(--color-text-secondary);
+}
+
+.payout-ratio-evidence-row dd {
+  margin: 0;
+}
+
+/*
+ * 「採点に採用」バッジ。.implementation-badge と同じ中立の枠線バッジ（T-108 Q6）。
+ * 操作できる要素ではないので --color-action を、スコアの良し悪しではないので
+ * --color-positive を使わない（design-tokens.md §2.2）。文言で意味を示し、色だけにしない
+ */
+.adopted-badge {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-text-secondary);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-3xs);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 /* ── 指標カスタマイズ画面（`/indicators`、T-101。`indicator-custom-page.md` §2）── */
 
 .indicator-counter {
@@ -2367,6 +2445,10 @@ main > .auth-layout {
 
   fieldset {
     padding: var(--space-4);
+  }
+
+  .payout-ratio-cards {
+    grid-template-columns: 1fr;
   }
 
   .indicator-row {

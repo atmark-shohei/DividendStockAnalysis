@@ -40,6 +40,13 @@ export const METRIC_DESCRIPTION: Readonly<Record<MetricKey, string>> = {
 };
 
 /**
+ * ③予想配当性向の記号式。`/criteria`（`METRIC_FORMULA.payoutRatio` の先頭行）と
+ * 解析ダイアログの③詳細（`PayoutRatioDetail.tsx`）で共有する
+ * （`docs/02_design/ui/pages/analysis-dialog.md` §5.3.1「式の文字列を二重に持たない」）。
+ */
+export const PAYOUT_RATIO_FORMULA = '配当性向 = 配当金 ÷ EPS × 100';
+
+/**
  * 計算式（同 §2.0「計算式」）。等幅フォントのブロックで表示する。
  * `docs/02_design/logic/*-scoring.md` §3「計算式」から書き起こした静的テキスト
  * （数値の区分表は含まない。§7確認事項Cと同じ解釈）。
@@ -59,7 +66,7 @@ export const METRIC_FORMULA: Readonly<Record<MetricKey, string>> = {
   consecutiveYears:
     '直近年から過去へ走査し、当年 < 前年 となった時点で打ち切る（当年 = 前年は継続）。',
   payoutRatio:
-    '配当性向 = 配当金 ÷ EPS × 100\n' +
+    `${PAYOUT_RATIO_FORMULA}\n` +
     '予想・実績の両方を算出する。採点には既定で予想を採用し、予想が判定不能なときのみ' +
     '実績にフォールバックする（実績を優先して使うかどうかは解析ダイアログ側で指定できる）。',
   epsCagr:

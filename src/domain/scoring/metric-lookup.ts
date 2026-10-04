@@ -7,19 +7,36 @@
 
 import { type MetricScore, scored, unavailable } from '../shared/metric-score';
 import { scoreFromValidatedBand } from '../shared/score';
-import { type ScoreBand, lookupPointsByValue } from './score-band';
+import { type ScoreBand, lookupBandIndex } from './score-band';
 
 /**
- * 素の数値で区分表を引き、`MetricScore` にして返す。
+ * 素の数値で区分表を引き、`MetricScore` と該当区分の添字を返す（T-108）。
  *
- * 区分表のどこにも該当しなければ `'value-out-of-band'` で**判定不能**にする。
+ * 区分表のどこにも該当しなければ `'value-out-of-band'` で**判定不能**にし、添字は `null`。
  * 最低点に倒さないのは、「表に穴がある」という実装の不具合を
  * 「評価が低い銘柄」として画面に出さないため。
+ *
+ * 比較式は `lookupPointsByValue` と同じ `value - threshold`。
+ */
+export function scoreByBandsWithIndex(
+  bands: readonly ScoreBand[],
+  value: number,
+): { readonly metric: MetricScore; readonly bandIndex: number | null } {
+  const bandIndex = lookupBandIndex(bands, (threshold) => value - threshold);
+  const band = bandIndex === null ? undefined : bands[bandIndex];
+  if (bandIndex === null || band === undefined) {
+    return { metric: unavailable('value-out-of-band'), bandIndex: null };
+  }
+  return { metric: scored(scoreFromValidatedBand(band.points), value), bandIndex };
+}
+
+/**
+ * 素の数値で区分表を引き、`MetricScore` にして返す。`scoreByBandsWithIndex` のラッパー。
+ *
+ * 区分表のどこにも該当しなければ `'value-out-of-band'` で**判定不能**にする。
  */
 export function scoreByBands(bands: readonly ScoreBand[], value: number): MetricScore {
-  const points = lookupPointsByValue(bands, value);
-  if (points === null) return unavailable('value-out-of-band');
-  return scored(scoreFromValidatedBand(points), value);
+  return scoreByBandsWithIndex(bands, value).metric;
 }
 
 /**

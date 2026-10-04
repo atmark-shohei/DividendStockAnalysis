@@ -53,6 +53,7 @@
 > ✅ **2026-09-23 追記（T-108）。** 解析ダイアログの③詳細（計算式と実際に使った数値の表示）の
 > ために、`forecast` / `actual` の各組へ**計算根拠**（生の入力値・年度・該当区分・0点規則）を、
 > 結果全体へ**採点に使った区分表**を追加する。**点数の判定結果は変えない。** 詳細は §10。
+> ✅ **2026-09-25 実装済み（T-108）。**
 
 > `value` / `forecast.value` / `actual.value` はいずれも**配当性向（%）**。丸めていない生値
 > （[dividend-yield-scoring.md](./dividend-yield-scoring.md) §2.2 と同じ
@@ -122,7 +123,7 @@ $$\text{配当性向 (\%)} = \left( \frac{\text{1株配当}}{\text{EPS}} \right)
 | 配当が `null`                                                         | `input-missing`          | `null`         | `—`（データなし）     |
 | EPS または配当が数値として壊れている（`NaN`/`Infinity`/安全整数外）   | `input-invalid`          | `null`         | `—`（データなし）     |
 | EPS が 0                                                              | `division-by-zero`       | `null`         | `—`（ゼロ除算）       |
-| その組の中でEPSと配当の年度が食い違う（予想内、または実績内。次段落） | `input-missing`          | `null`         | `—`（データなし）     |
+| その組の中でEPSと配当の年度が食い違う（予想内、または実績内。次段落） | `input-missing`          | `null`         | `—`（年度が一致しないため判定不能） |
 | **EPS が負（赤字）**                                                  | —（0点。理由コードなし） | **0点**        | 算出値 / 0点（§0.3）  |
 | **無配（配当 0 かつ配当性向 0%）**                                    | —（0点。理由コードなし） | **0点**        | `0.00%` / 0点（§0.4） |
 
@@ -136,6 +137,11 @@ $$\text{配当性向 (\%)} = \left( \frac{\text{1株配当}}{\text{EPS}} \right)
 > forecast と actual は完全に独立した2組）。
 > **年度が食い違っても、`dividendSen` / `epsSen` / 両年度は値のまま結果へ返す**
 > （表示用。呼び出し側が渡した値を `null` に変換することはない。§10.1）。
+
+> ✅ **2026-09-25 変更（T-108）。** 年度の食い違いの画面表示を「`—`（データなし）」から
+> 「`—`（年度が一致しないため判定不能）」に変えた（T-108 の画面確認でユーザーが決定）。
+> 理由コードは `input-missing` のまま変えない。画面は BE が返す `fiscalYearMismatch` で
+> 「データなし」と出し分ける。
 
 ### 5.1 採点への採用（ソース選択。2026-08-06 追記。詳細は §7）
 
@@ -202,6 +208,11 @@ $$\text{配当性向 (\%)} = \left( \frac{\text{1株配当}}{\text{EPS}} \right)
 > ✅ **2026-09-23 変更（R1・T-108）。** 以下の基準はすべて `calculatePayoutRatio`
 > 自身（domain 内部の年度比較）が満たす。呼び出し側は年度を比較しないため、この基準は
 > `tests/domain/scoring/payout-ratio.test.ts` で検証する（usecase 側のテストではない）。
+> ✅ **2026-09-25 実装済み（T-108）。** 主な検証は `tests/domain/scoring/payout-ratio.test.ts`
+> （「§6.4.1 年度突き合わせ（期末日跨ぎ相当）— calculatePayoutRatio の内部で判定する」）。
+> `tests/usecase/score-company.test.ts` の年度突き合わせ（予想・実績）の describe は削除せず残し、
+> usecase が値を null 化せずに渡す**結線**と、判定の置き場所を移しても結果が変わらないことの
+> **end-to-end の回帰**として使う。
 
 - [ ] 実績EPS(FY2026) と 実績配当(FY2026) が揃う → FY2026 で実績配当性向を判定できる
 - [ ] 実績EPS(FY2026) はあるが実績配当が FY2025 にしか無い → **実績側は `null`**
@@ -252,6 +263,7 @@ Yahoo 側のPERが同じ倍率で出るなら、Yahoo が実績ベースであ�
    直近実績の EPS・1株配当に適用する。原典が定義していない拡張だが、③ と同一の指標
    （分類・向き・区分表）を別の期間に適用するだけなので、新しい指標番号は割らない。
 2. **画面には予想・実績の両方を表示する。** ⑩ の `dividendSource` 表示と同じ発想。
+   ✅ 2026-09-25（T-108）: 要約行（`frontend/format.ts` の `payoutRatioBreakdownText`。概要モードの比較表の備考列と詳細画面の要約行で共用）は、年度の食い違い（`fiscalYearMismatch`）を「年度が一致しないため判定不能」と表示する。
 3. **既定（未チェック）は予想を優先し、予想が判定不能なときのみ実績にフォールバックする。**
    これは⑩ の年間配当選択（`dividend-yield-scoring.md` §2.1「予想があれば優先」）と
    同じ優先順で、**既存の挙動を変更する**（変更前は予想が判定不能なら無条件で `null`）。
@@ -310,34 +322,52 @@ Yahoo 側のPERが同じ倍率で出るなら、Yahoo が実績ベースであ�
 旧実装（[reference/legacy-web/](../../../reference/legacy-web/README.md)）は**再利用しない**（T-008）。
 挙動の記録としてのみ参照する。
 
-## 実装（2026-08-06。実績・ソース切替を含めて実装済み）
+## 実装（2026-08-06。実績・ソース切替を含めて実装済み。✅ 2026-09-25 T-108 の計算根拠を含めて更新）
 
 - 判定: `src/domain/scoring/payout-ratio.ts`
-  - `calculatePayoutRatio`（`PayoutRatioInput` → `PayoutRatioResult`。§5.1 のソース選択規則）
+  - `calculatePayoutRatio`（`PayoutRatioInput` → `PayoutRatioResult`。§5.1 のソース選択規則）。
+    ✅ 2026-09-25（T-108）: **年度の突き合わせ（§6.4.1）もこの関数の内部**（非公開の
+    `calculateSidePayoutRatio`）で行い、他のどの検査よりも先に判定する。各組は
+    `PayoutRatioSideResult`（§10.1）、結果全体に `bands`（採点に使った区分表）を返す
   - `payoutRatioToMetricScore`（`PayoutRatioResult` → `MetricScore`。⑩
     `dividendYieldToMetricScore` に相当）
 - 区分表: `src/domain/scoring/bands.ts` の `PAYOUT_RATIO_BANDS`（予想・実績で共有。変更なし）
-- 年度突き合わせ（§6.4.1）:
+- 区分表ルックアップ（✅ 2026-09-25 T-108。§10.2 R3）:
+  - `src/domain/scoring/score-band.ts` の `lookupBandIndex`（添字を返す。`lookupPoints` はこのラッパー）
+  - `src/domain/scoring/metric-lookup.ts` の `scoreByBandsWithIndex`（`{ metric, bandIndex }` を返す。
+    `scoreByBands` はこのラッパー）。③以外の9指標の呼び出しは変更なし
+- 年度突き合わせ（§6.4.1）に使うレコード選択:
   - `src/domain/company/company.ts` の `latestActualRecord`（`latestForecastRecord` の対）
   - `src/domain/company/dividend-record.ts` の `selectLatestActualDividend`
     （`selectLatestForecastDividend` の対。`ActualDividend` を返す）
-- 結線（実績側の年度突き合わせ・`useActualForScoring` の受け渡し・`payoutRatioSource` の付与）:
+- 結線（`useActualForScoring` の受け渡し・`payoutRatioSource` の付与）:
   - `src/usecase/score-company.ts`
+    - ✅ 2026-09-25（T-108）: **年度を比較しない。** 選んだレコードの値と年度を null 化せずに
+      `calculatePayoutRatio` へそのまま渡す。`CompanyScoring` は `payoutRatioForecast` /
+      `payoutRatioActual` を `PayoutRatioSideResult` のまま持ち、`payoutRatioBands` を追加（§10.1）
   - `src/usecase/analyze-company.ts`（`useActualForScoring` を中継。`SCORING_CALC_VERSION`
     も本決定の反映として更新済み）
   - `src/usecase/read-companies.ts`（`getCompanyScoring` が `useActualForScoring` を中継）
 - handler（POST body・GET クエリの両方で `useActualForScoring` を受け取り、
   `ScoringResponse` に `payoutRatioSource`/`payoutRatioForecast`/`payoutRatioActual` を追加）:
   - `src/handler/dto/company-input.ts`
+    - ✅ 2026-09-25（T-108）: `toScoringResponse` 内の `toPayoutRatioSideView` が
+      `PayoutRatioSideResult` を平らな `PayoutRatioSideView` に詰め替える。`ScoringResponse` に
+      `payoutRatioBands` を追加
   - `src/handler/app.ts`
-- テスト: `tests/domain/scoring/payout-ratio.test.ts`（§6.1〜6.4 に加え、
-  **§6.4.1・§6.5（ソース選択）・§6.6（表示用の内訳）も実装・テスト済み**）、
+- テスト: `tests/domain/scoring/payout-ratio.test.ts`（§6.1〜6.6 に加え、
+  ✅ 2026-09-25（T-108）: **§6.4.1（年度突き合わせ）と §10.3 の主な検証はここ**）、
+  `tests/domain/scoring/score-band.test.ts`（新規。`lookupBandIndex` と `lookupPoints` の一致）、
+  `tests/domain/scoring/metric-lookup.test.ts`（新規。`scoreByBandsWithIndex` と `scoreByBands` の一致）、
   `tests/domain/company/dividend-record.test.ts`（`selectLatestActualDividend`）、
   `tests/domain/company/company.test.ts`（`latestActualRecord`/`latestForecastRecord`）、
-  `tests/usecase/score-company.test.ts`（実績側の年度突き合わせ・ソース選択の結線）、
-  `tests/integration/api.test.ts`（POST/GET の `useActualForScoring` 結線）
+  `tests/usecase/score-company.test.ts`（ソース選択・evidence・`payoutRatioBands` の結線と、
+  年度突き合わせの end-to-end の回帰）、
+  `tests/handler/company-input.test.ts`（新規。`toScoringResponse` の平坦化・`payoutRatioBands`）、
+  `tests/handler/company-routes.test.ts`（T-101 上書き時の `payoutRatioBands`）、
+  `tests/integration/api.test.ts`（POST/GET の `useActualForScoring` と計算根拠の結線）
 
-## 10. 詳細画面向けの計算根拠（2026-09-23 決定。T-108）
+## 10. 詳細画面向けの計算根拠（2026-09-23 決定。T-108。✅ 2026-09-25 実装済み）
 
 ### 背景
 
@@ -369,9 +399,14 @@ Yahoo 側のPERが同じ倍率で出るなら、Yahoo が実績ベースであ�
 >
 > `PayoutRatioResult.forecast` / `PayoutRatioResult.actual`（§2）はこの型になる
 > （旧 `MetricScore` 直置きから変更。**点数の判定結果 `metric.score`/`metric.value`/
-> `metric.unavailableReason` は変わらない**）。usecase の `CompanyScoring` と
-> handler の DTO `PayoutRatioSideView`（[glossary.md](../../glossary.md)）は、この
-> `PayoutRatioSideResult` を平らにして（`metric` の中身を展開して）画面まで運ぶ。
+> `metric.unavailableReason` は変わらない**）。
+>
+> ✅ **2026-09-25 訂正（T-108 実装時のユーザー決定）。** usecase の `CompanyScoring` は
+> `payoutRatioForecast` / `payoutRatioActual` を **`PayoutRatioSideResult` のまま（ネストのまま）**
+> 持ち、③の区分表は `payoutRatioBands` として持つ。**平らにする（`metric` と `evidence` の中身を
+> 展開する）のは handler の `toScoringResponse` だけ**（`src/handler/dto/company-input.ts` の
+> `toPayoutRatioSideView`）で、DTO `PayoutRatioSideView`（[glossary.md](../../glossary.md)）として
+> 画面まで運ぶ。（旧記述「`CompanyScoring` と DTO は平らにして運ぶ」は誤り）
 
 | 項目（`evidence` 配下） | 型                                        | 単位       | 意味                                                                                                                                                                  |
 | :----------------------- | :----------------------------------------- | :--------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -417,6 +452,12 @@ Yahoo 側のPERが同じ倍率で出るなら、Yahoo が実績ベースであ�
 
 ### 10.3 受入基準（追加）
 
+> ✅ **2026-09-25 実装済み（T-108）。** 以下は主に `tests/domain/scoring/payout-ratio.test.ts`
+> （`§10 matchedBandIndex` / `§10 bands` / `§10 zeroScoreRule` / `§10 evidence` / `§6.4.1` の describe）で
+> 検証する。usecase の結線（`payoutRatioBands`・evidence を null 化しない）は
+> `tests/usecase/score-company.test.ts`、R4 は `tests/domain/scoring/score-band.test.ts`・
+> `metric-lookup.test.ts`、DTO の平坦化は `tests/handler/company-input.test.ts`。
+
 - [ ] 各組について、`matchedBandIndex !== null` ならば `bands[matchedBandIndex].points === metric.score`
       （§6.1 の全境界値 `0` / `24.999…` / `25.0` / `60.0` / `69.999…` / `70.0` で確認する）
 - [ ] 区分表を上書きした場合（T-101）、`bands` が上書き後の表になり、`matchedBandIndex` もその表の添字になる
@@ -435,7 +476,9 @@ Yahoo 側のPERが同じ倍率で出るなら、Yahoo が実績ベースであ�
       期待値を変えずに全パスする
 - [ ] **（Y2）** 配当 0 かつ EPS 負（赤字かつ無配）→ `zeroScoreRule: 'negative-eps'`
       （`payout-ratio.ts` の現行の判定順どおり、EPS 負の判定が無配判定より先に来るため
-      赤字を優先する。§0.3 と §0.4 が両方成立する唯一のケース）
+      赤字を優先する。§0.3 と §0.4 が両方成立する唯一のケース）。
+      ✅ 2026-09-25（T-108）: このとき `metric.value` は `-0`（`(0 / 負) * 100`。JSON では `0`）になる。
+      結果不変のため変更しない（テストは `toEqual(-0)` で比べる）
 - [ ] **（Y2）** 配当が負の値 → `unavailableReason: 'input-invalid'`、`zeroScoreRule: null`、
       `matchedBandIndex: null`。`evidence.dividendSen`/`evidence.epsSen` の値・年度は
       そのまま返る（配当性向そのものは計算せず `metric.value` は `null`）

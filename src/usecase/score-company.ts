@@ -31,12 +31,16 @@ import {
 import { calculateEpsCagr } from '../domain/scoring/eps-cagr';
 import { calculateMixCoefficient } from '../domain/scoring/mix-coefficient';
 import { calculateOperatingMargin } from '../domain/scoring/operating-margin';
-import { calculatePayoutRatio, payoutRatioToMetricScore } from '../domain/scoring/payout-ratio';
+import {
+  type PayoutRatioSideResult,
+  calculatePayoutRatio,
+  payoutRatioToMetricScore,
+} from '../domain/scoring/payout-ratio';
 import { calculateRevenueCagr } from '../domain/scoring/revenue-cagr';
 import { calculateRoeAverage } from '../domain/scoring/roe-average';
+import { type ScoreBand } from '../domain/scoring/score-band';
 import { type ScoreCard, buildScoreCard } from '../domain/scoring/scoring-service';
 import { type MetricKey } from '../domain/shared/metric-key';
-import { type MetricScore } from '../domain/shared/metric-score';
 import { type ResolvedScoringBands } from './resolve-scoring-bands';
 
 /**
@@ -79,10 +83,18 @@ export interface CompanyScoring {
   readonly dividendSource: DividendSource | null;
   /** ③ が採点に採用した出所。画面に「予想」「実績」を併記するため（設計書 §7） */
   readonly payoutRatioSource: 'forecast' | 'actual' | null;
-  /** ③ 予想側の判定結果。採点への採用と無関係に常に持つ（表示用。設計書 §2） */
-  readonly payoutRatioForecast: MetricScore;
-  /** ③ 実績側の判定結果。同上 */
-  readonly payoutRatioActual: MetricScore;
+  /**
+   * ③ 予想側の判定結果と計算根拠。採点への採用と無関係に常に持つ（表示用。設計書 §2 / §10.1）。
+   * ネストのまま運び、画面向けに平らにするのは handler の `toScoringResponse` だけ
+   */
+  readonly payoutRatioForecast: PayoutRatioSideResult;
+  /** ③ 実績側の判定結果と計算根拠。同上 */
+  readonly payoutRatioActual: PayoutRatioSideResult;
+  /**
+   * ③の採点に実際に使った区分表。`calculatePayoutRatio` が返した表をそのまま通す
+   * （組み立て直さない。設計書 §10.1 Y1）。予想・実績で共通
+   */
+  readonly payoutRatioBands: readonly ScoreBand[];
   /** ⑨ PER の出所。保存済みの値をそのまま通す（採点では算出しない） */
   readonly perSource: PerSource | null;
   /** ⑨ PBR の出所 */
@@ -124,30 +136,29 @@ export function scoreCompany(
   const forecast = latestForecastRecord(company);
   const selectedDividend = selectAnnualDividend(company.dividends);
 
-  // ③ は予想EPSと予想配当が別の型に分かれたので年度で結合する。**揃わなければ
-  // 両方 null。** 古い年度へ落とすと「今期予想EPS ÷ 前期の予想配当」になる（ADR-0009）
+  // ③ は予想EPS（FinancialRecord）と予想配当（DividendRecord）が別の型に分かれている（ADR-0009）。
+  // 実績側も同じ4関数の対で最新レコードを選ぶ（設計書 §2 / §6.4.1）
   const forecastDividend = selectLatestForecastDividend(company.dividends);
-  const forecastYearsMatch =
-    forecast !== null &&
-    forecastDividend !== null &&
-    forecast.fiscalYear === forecastDividend.fiscalYear;
-
-  // ③ 実績側も同じ規則で年度を突き合わせる（設計書 §2 / §6.4.1。実績側にも ADR-0009 の
-  // 「決定した結合規則」を適用する）
   const actual = latestActualRecord(company);
   const actualDividend = selectLatestActualDividend(company.dividends);
-  const actualYearsMatch =
-    actual !== null && actualDividend !== null && actual.fiscalYear === actualDividend.fiscalYear;
 
+  // ③ 年度の突き合わせはここでは行わない。選んだレコードの値と年度を null 化せずに渡し、
+  // 判定は calculatePayoutRatio の内部に任せる（T-108 / payout-ratio-scoring.md §2 R1。
+  // ここで比較を復活させると、年度不一致時に画面へ計算根拠を出せなくなる）。
+  // `??` を使う（`||` は無配の 0 を null に化けさせる）
   const payoutRatioResult = calculatePayoutRatio(
     {
       forecast: {
-        dividendSen: forecastYearsMatch ? forecastDividend.amountSen : null,
-        epsSen: forecastYearsMatch ? forecast.epsSen : null,
+        dividendSen: forecastDividend?.amountSen ?? null,
+        dividendFiscalYear: forecastDividend?.fiscalYear ?? null,
+        epsSen: forecast?.epsSen ?? null,
+        epsFiscalYear: forecast?.fiscalYear ?? null,
       },
       actual: {
-        dividendSen: actualYearsMatch ? actualDividend.amountSen : null,
-        epsSen: actualYearsMatch ? actual.epsSen : null,
+        dividendSen: actualDividend?.amountSen ?? null,
+        dividendFiscalYear: actualDividend?.fiscalYear ?? null,
+        epsSen: actual?.epsSen ?? null,
+        epsFiscalYear: actual?.fiscalYear ?? null,
       },
       useActualForScoring,
     },
@@ -225,6 +236,7 @@ export function scoreCompany(
     payoutRatioSource: payoutRatioResult.source,
     payoutRatioForecast: payoutRatioResult.forecast,
     payoutRatioActual: payoutRatioResult.actual,
+    payoutRatioBands: payoutRatioResult.bands,
     perSource: company.multiples.perSource,
     pbrSource: company.multiples.pbrSource,
     priceSen: company.priceSen,

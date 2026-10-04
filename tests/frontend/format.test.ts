@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ScoringResponse } from '../../frontend/api';
 import {
   NO_DATA,
   consecutiveYearsSummaryText,
@@ -9,18 +10,46 @@ import {
   dividendYoyStateLabel,
   fiscalPeriodLabel,
   formatBandRange,
+  formatFetchedAt,
   formatMetricValue,
+  formatPayoutRatioBandRange,
   formatPriceAsOf,
   formatScoreAverage,
   formatSen,
   formatSenAxisTick,
   formatUnrealizedGainLossSen,
+  payoutRatioAdoptedBadgeText,
+  payoutRatioBandMarkerText,
   payoutRatioBreakdownText,
+  payoutRatioEquationText,
+  payoutRatioEvidenceText,
+  payoutRatioSideNoteText,
+  payoutRatioSideScoreText,
   ratioToEditableText,
   reasonText,
   senToEditableText,
   unrealizedGainLossColorClass,
 } from '../../frontend/format';
+
+type PayoutRatioSide = ScoringResponse['payoutRatioForecast'];
+
+/**
+ * ③の片側（`PayoutRatioSideView`）のフィクスチャ。既定値は「通常」の実例
+ * （`company-api.md` T-108 ブロックの JSON 例＝7294 の予想側: 7500 銭 / 12000 銭、FY2027、62.5%・2点）。
+ */
+const buildSide = (overrides: Partial<PayoutRatioSide>): PayoutRatioSide => ({
+  score: 2,
+  value: 62.5,
+  unavailableReason: null,
+  dividendSen: 7_500,
+  dividendFiscalYear: 2027,
+  epsSen: 12_000,
+  epsFiscalYear: 2027,
+  fiscalYearMismatch: false,
+  zeroScoreRule: null,
+  matchedBandIndex: 8,
+  ...overrides,
+});
 
 /**
  * IRバンク取り込みのプレフィル変換。
@@ -125,8 +154,8 @@ describe('fiscalPeriodLabel', () => {
 describe('payoutRatioBreakdownText', () => {
   it('予想・実績とも判定可（EPS赤字で予想0点、実績は正常7点のケース）', () => {
     const text = payoutRatioBreakdownText(
-      { value: 61.79, score: 0, unavailableReason: null },
-      { value: 36.3, score: 7, unavailableReason: null },
+      buildSide({ value: 61.79, score: 0, unavailableReason: null }),
+      buildSide({ value: 36.3, score: 7, unavailableReason: null }),
       'actual',
     );
     expect(text).toBe('予想 61.79% / 0 点／実績 36.30% / 7 点／採用: 実績');
@@ -134,8 +163,8 @@ describe('payoutRatioBreakdownText', () => {
 
   it('予想が判定不能（null）、実績は判定可 → 予想側は NO_DATA + 理由。0.00%/0点にしない', () => {
     const text = payoutRatioBreakdownText(
-      { value: null, score: null, unavailableReason: 'input-missing' },
-      { value: 36.3, score: 7, unavailableReason: null },
+      buildSide({ value: null, score: null, unavailableReason: 'input-missing' }),
+      buildSide({ value: 36.3, score: 7, unavailableReason: null }),
       'actual',
     );
     expect(text).toBe(`予想 ${NO_DATA} / ${NO_DATA}（データなし）／実績 36.30% / 7 点／採用: 実績`);
@@ -145,8 +174,8 @@ describe('payoutRatioBreakdownText', () => {
 
   it('実績が判定不能（null）、予想は判定可 → 実績側は NO_DATA + 理由', () => {
     const text = payoutRatioBreakdownText(
-      { value: 25, score: 9, unavailableReason: null },
-      { value: null, score: null, unavailableReason: 'division-by-zero' },
+      buildSide({ value: 25, score: 9, unavailableReason: null }),
+      buildSide({ value: null, score: null, unavailableReason: 'division-by-zero' }),
       'forecast',
     );
     expect(text).toBe(
@@ -156,8 +185,8 @@ describe('payoutRatioBreakdownText', () => {
 
   it('両方が判定不能（null） → 採用: —（source: null）', () => {
     const text = payoutRatioBreakdownText(
-      { value: null, score: null, unavailableReason: 'input-missing' },
-      { value: null, score: null, unavailableReason: 'input-missing' },
+      buildSide({ value: null, score: null, unavailableReason: 'input-missing' }),
+      buildSide({ value: null, score: null, unavailableReason: 'input-missing' }),
       null,
     );
     expect(text).toBe(
@@ -167,12 +196,458 @@ describe('payoutRatioBreakdownText', () => {
 
   it('無配（配当0・判定可）は 0.00% / 0 点。null 表示（—）と区別する', () => {
     const text = payoutRatioBreakdownText(
-      { value: 0, score: 0, unavailableReason: null },
-      { value: 0, score: 0, unavailableReason: null },
+      buildSide({ value: 0, score: 0, unavailableReason: null }),
+      buildSide({ value: 0, score: 0, unavailableReason: null }),
       'forecast',
     );
     expect(text).toBe('予想 0.00% / 0 点／実績 0.00% / 0 点／採用: 予想');
     expect(text).not.toContain(NO_DATA);
+  });
+
+  /**
+   * 年度の食い違い（T-108）。BE は `unavailableReason: 'input-missing'` を返すが、
+   * `fiscalYearMismatch` が true の側は「データなし」ではなく年度不一致の文言を出す。
+   * FE は判定せず、BE のフラグで出し分けるだけ。
+   */
+  const mismatchSide = buildSide({
+    value: null,
+    score: null,
+    unavailableReason: 'input-missing',
+    dividendSen: 6_000,
+    dividendFiscalYear: 2026,
+    fiscalYearMismatch: true,
+    matchedBandIndex: null,
+  });
+  const actual50 = buildSide({ value: 50, score: 4, matchedBandIndex: 6 });
+  const fiscalYearCases: readonly {
+    readonly name: string;
+    readonly forecast: PayoutRatioSide;
+    readonly actual: PayoutRatioSide;
+    readonly source: 'forecast' | 'actual' | null;
+    readonly expected: string;
+    readonly mustNotContain: string;
+  }[] = [
+    {
+      name: '予想だけ年度不一致・実績 50%/4点 → 予想側は年度不一致の文言（「データなし」にしない）',
+      forecast: mismatchSide,
+      actual: actual50,
+      source: 'actual',
+      expected: `予想 ${NO_DATA} / ${NO_DATA}（年度が一致しないため判定不能）／実績 50.00% / 4 点／採用: 実績`,
+      mustNotContain: 'データなし',
+    },
+    {
+      name: '実績だけ年度不一致 → 実績側に年度不一致の文言が出る',
+      forecast: buildSide({ value: 25, score: 9 }),
+      actual: mismatchSide,
+      source: 'forecast',
+      expected: `予想 25.00% / 9 点／実績 ${NO_DATA} / ${NO_DATA}（年度が一致しないため判定不能）／採用: 予想`,
+      mustNotContain: 'データなし',
+    },
+    {
+      name: 'input-missing でも fiscalYearMismatch: false なら従来どおり「データなし」（回帰防止）',
+      forecast: buildSide({ value: null, score: null, unavailableReason: 'input-missing' }),
+      actual: actual50,
+      source: 'actual',
+      expected: `予想 ${NO_DATA} / ${NO_DATA}（データなし）／実績 50.00% / 4 点／採用: 実績`,
+      mustNotContain: '年度が一致しない',
+    },
+  ];
+
+  for (const { name, forecast, actual, source, expected, mustNotContain } of fiscalYearCases) {
+    it(name, () => {
+      const text = payoutRatioBreakdownText(forecast, actual, source);
+      expect(text).toBe(expected);
+      expect(text).not.toContain(mustNotContain);
+    });
+  }
+});
+
+/**
+ * ③ 予想配当性向の詳細（T-108・`docs/02_design/ui/pages/analysis-dialog.md` §5.3.1）。
+ *
+ * §5.3.1「状態ごとのカード表示」の8状態。BE が返す値（フラグ）だけで状態が決まり、
+ * FE は判定しない。**null（判定不能）→ `—`、0点 → 「0 点」、無配（0銭）→ `0.00 円`** を
+ * 混同しないことが核心。
+ */
+const SIDE_STATES = {
+  normal: buildSide({}),
+  over70: buildSide({ value: 80, score: 0, dividendSen: 9_600, matchedBandIndex: 9 }),
+  negativeEps: buildSide({
+    value: -62.5,
+    score: 0,
+    epsSen: -12_000,
+    zeroScoreRule: 'negative-eps',
+    matchedBandIndex: null,
+  }),
+  noDividend: buildSide({
+    value: 0,
+    score: 0,
+    dividendSen: 0,
+    zeroScoreRule: 'no-dividend',
+    matchedBandIndex: null,
+  }),
+  fiscalYearMismatch: buildSide({
+    value: null,
+    score: null,
+    unavailableReason: 'input-missing',
+    dividendSen: 6_000,
+    dividendFiscalYear: 2026,
+    fiscalYearMismatch: true,
+    matchedBandIndex: null,
+  }),
+  divisionByZero: buildSide({
+    value: null,
+    score: null,
+    unavailableReason: 'division-by-zero',
+    epsSen: 0,
+    matchedBandIndex: null,
+  }),
+  inputInvalid: buildSide({
+    value: null,
+    score: null,
+    unavailableReason: 'input-invalid',
+    dividendSen: -7_500,
+    matchedBandIndex: null,
+  }),
+  epsMissing: buildSide({
+    value: null,
+    score: null,
+    unavailableReason: 'input-missing',
+    epsSen: null,
+    epsFiscalYear: null,
+    matchedBandIndex: null,
+  }),
+} as const satisfies Readonly<Record<string, PayoutRatioSide>>;
+
+describe('formatPayoutRatioBandRange（③詳細の区分表。整数はそのまま・小数は末尾0を省く）', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly minInclusive: number | null;
+    readonly maxExclusive: number | null;
+    readonly expected: string;
+  }[] = [
+    {
+      name: '最下位の区分（0 は 0%）',
+      minInclusive: 0,
+      maxExclusive: 25,
+      expected: '0%以上 25%未満',
+    },
+    { name: '最上位は上が開く', minInclusive: 70, maxExclusive: null, expected: '70%以上' },
+    { name: '下限なし', minInclusive: null, maxExclusive: 25, expected: '25%未満' },
+    {
+      name: '両方 null（不正な行）は —',
+      minInclusive: null,
+      maxExclusive: null,
+      expected: NO_DATA,
+    },
+    {
+      name: '小数第1位は 62.5%（62.50% にしない）',
+      minInclusive: 62.5,
+      maxExclusive: 70,
+      expected: '62.5%以上 70%未満',
+    },
+    {
+      name: '小数第2位はそのまま 62.55%',
+      minInclusive: 62.55,
+      maxExclusive: 70,
+      expected: '62.55%以上 70%未満',
+    },
+    {
+      name: '小数第3位は第2位に丸める',
+      minInclusive: 31.256,
+      maxExclusive: 37.5,
+      expected: '31.26%以上 37.5%未満',
+    },
+    {
+      name: '上書きした表の非整数境界（31.25 / 37.5）',
+      minInclusive: 31.25,
+      maxExclusive: 37.5,
+      expected: '31.25%以上 37.5%未満',
+    },
+    {
+      name: '3桁区切り（1,000%）',
+      minInclusive: 1_000,
+      maxExclusive: null,
+      expected: '1,000%以上',
+    },
+  ];
+
+  for (const { name, minInclusive, maxExclusive, expected } of cases) {
+    it(name, () => {
+      expect(formatPayoutRatioBandRange({ minInclusive, maxExclusive, points: 0 })).toBe(expected);
+    });
+  }
+});
+
+describe('payoutRatioEvidenceText（1株配当・EPS の値と年度）', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly sen: number | null;
+    readonly fiscalYear: number | null;
+    readonly expected: string;
+  }[] = [
+    { name: '通常', sen: 7_500, fiscalYear: 2027, expected: '75.00 円（2027年度）' },
+    { name: '端数の銭', sen: 16_529, fiscalYear: 2026, expected: '165.29 円（2026年度）' },
+    { name: '3桁区切り', sen: 123_456, fiscalYear: 2027, expected: '1,234.56 円（2027年度）' },
+    {
+      name: '0銭（無配）は 0.00 円。— にしない',
+      sen: 0,
+      fiscalYear: 2027,
+      expected: '0.00 円（2027年度）',
+    },
+    { name: '1銭の境界', sen: 1, fiscalYear: 2027, expected: '0.01 円（2027年度）' },
+    {
+      name: '負の EPS はそのまま負で出す',
+      sen: -12_000,
+      fiscalYear: 2027,
+      expected: '-120.00 円（2027年度）',
+    },
+    {
+      name: '値だけ null は値の位置だけ —',
+      sen: null,
+      fiscalYear: 2027,
+      expected: `${NO_DATA}（2027年度）`,
+    },
+    {
+      name: '年度だけ null は年度の位置だけ —',
+      sen: 7_500,
+      fiscalYear: null,
+      expected: `75.00 円（${NO_DATA}）`,
+    },
+    {
+      name: '値も年度も null（レコードなし）は — 1つ（Q3）',
+      sen: null,
+      fiscalYear: null,
+      expected: NO_DATA,
+    },
+  ];
+
+  for (const { name, sen, fiscalYear, expected } of cases) {
+    it(name, () => {
+      expect(payoutRatioEvidenceText(sen, fiscalYear)).toBe(expected);
+    });
+  }
+
+  it('値が null のとき 0.00 円 を出さない（データなしを 0 と表示しない）', () => {
+    expect(payoutRatioEvidenceText(null, 2027)).not.toContain('0.00 円');
+    expect(payoutRatioEvidenceText(null, null)).not.toContain('0');
+  });
+});
+
+describe('payoutRatioEquationText（カードの代入式。右辺は BE の value を整形するだけ）', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly view: PayoutRatioSide;
+    readonly expected: string | null;
+  }[] = [
+    { name: '通常', view: SIDE_STATES.normal, expected: '75.00 円 ÷ 120.00 円 × 100 = 62.50%' },
+    {
+      name: '70%以上で0点',
+      view: SIDE_STATES.over70,
+      expected: '96.00 円 ÷ 120.00 円 × 100 = 80.00%',
+    },
+    {
+      name: '赤字: 負の EPS と負の性向をそのまま出す',
+      view: SIDE_STATES.negativeEps,
+      expected: '75.00 円 ÷ -120.00 円 × 100 = -62.50%',
+    },
+    {
+      name: '無配: 0.00 円 と 0.00%（— にしない）',
+      view: SIDE_STATES.noDividend,
+      expected: '0.00 円 ÷ 120.00 円 × 100 = 0.00%',
+    },
+    {
+      name: '年度の食い違い: 式を出さない（null）',
+      view: SIDE_STATES.fiscalYearMismatch,
+      expected: null,
+    },
+    {
+      name: 'ゼロ除算: ÷ 0.00 円、結果は —',
+      view: SIDE_STATES.divisionByZero,
+      expected: `75.00 円 ÷ 0.00 円 × 100 = ${NO_DATA}`,
+    },
+    {
+      name: 'データ不良（配当が負）: 値はそのまま、結果は —',
+      view: SIDE_STATES.inputInvalid,
+      expected: `-75.00 円 ÷ 120.00 円 × 100 = ${NO_DATA}`,
+    },
+    {
+      name: 'EPS 欠損: 欠けた項目だけ —、結果も —',
+      view: SIDE_STATES.epsMissing,
+      expected: `75.00 円 ÷ ${NO_DATA} × 100 = ${NO_DATA}`,
+    },
+  ];
+
+  for (const { name, view, expected } of cases) {
+    it(name, () => {
+      expect(payoutRatioEquationText(view)).toBe(expected);
+    });
+  }
+
+  it('EPS 欠損は 0.00 円 / 0.00% にしない（ゼロ除算の ÷ 0.00 円 と区別する）', () => {
+    const text = payoutRatioEquationText(SIDE_STATES.epsMissing);
+    expect(text).not.toContain('0.00 円');
+    expect(text).not.toContain('0.00%');
+  });
+
+  it('ゼロ除算の結果を 0.00% にしない', () => {
+    expect(payoutRatioEquationText(SIDE_STATES.divisionByZero)).not.toContain('0.00%');
+  });
+});
+
+describe('payoutRatioSideScoreText（カードのスコア。判定不能は — だけ）', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly score: number | null;
+    readonly expected: string;
+  }[] = [
+    { name: '0点は「0 点」（— にしない）', score: 0, expected: '0 点' },
+    { name: '判定不能（null）は —（理由文を付けない。Q2）', score: null, expected: NO_DATA },
+    { name: '満点', score: 10, expected: '10 点' },
+    { name: '通常', score: 2, expected: '2 点' },
+  ];
+
+  for (const { name, score, expected } of cases) {
+    it(name, () => {
+      expect(payoutRatioSideScoreText(buildSide({ score }))).toBe(expected);
+    });
+  }
+
+  it('判定不能を 0 と表示しない', () => {
+    expect(payoutRatioSideScoreText(buildSide({ score: null }))).not.toContain('0');
+  });
+});
+
+describe('payoutRatioSideNoteText（カードの注記）', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly view: PayoutRatioSide;
+    readonly expected: string;
+  }[] = [
+    { name: '通常は注記なし', view: SIDE_STATES.normal, expected: '' },
+    {
+      name: '70%以上で0点は注記なし（区分表を引いた結果の0点）',
+      view: SIDE_STATES.over70,
+      expected: '',
+    },
+    {
+      name: '赤字',
+      view: SIDE_STATES.negativeEps,
+      expected: '赤字（EPS が負）のため区分表を使わず 0 点',
+    },
+    { name: '無配', view: SIDE_STATES.noDividend, expected: '無配のため 0 点' },
+    {
+      name: '年度の食い違いは年度付きの文言（input-missing の「データなし」より先に判定する）',
+      view: SIDE_STATES.fiscalYearMismatch,
+      expected: '年度が一致しないため判定不能（1株配当 2026年度／EPS 2027年度）',
+    },
+    {
+      name: 'ゼロ除算',
+      view: SIDE_STATES.divisionByZero,
+      expected: '基準値が 0 のため算出できません',
+    },
+    { name: 'データ不良', view: SIDE_STATES.inputInvalid, expected: '入力値が不正です' },
+    { name: '欠損', view: SIDE_STATES.epsMissing, expected: 'データなし' },
+  ];
+
+  for (const { name, view, expected } of cases) {
+    it(name, () => {
+      expect(payoutRatioSideNoteText(view)).toBe(expected);
+    });
+  }
+
+  it('年度の食い違いで片方の年度が null なら、その年度だけ —', () => {
+    const view = buildSide({ ...SIDE_STATES.fiscalYearMismatch, epsFiscalYear: null });
+    expect(payoutRatioSideNoteText(view)).toBe(
+      `年度が一致しないため判定不能（1株配当 2026年度／EPS ${NO_DATA}）`,
+    );
+  });
+});
+
+describe('payoutRatioBandMarkerText（区分表の該当列。添字の一致だけを見る）', () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly index: number;
+    readonly forecastIndex: number | null;
+    readonly actualIndex: number | null;
+    readonly expected: string;
+  }[] = [
+    {
+      name: '予想と実績が同じ行',
+      index: 3,
+      forecastIndex: 3,
+      actualIndex: 3,
+      expected: '予想・実績',
+    },
+    { name: '予想だけ', index: 8, forecastIndex: 8, actualIndex: 5, expected: '予想' },
+    { name: '実績だけ', index: 5, forecastIndex: 8, actualIndex: 5, expected: '実績' },
+    { name: 'どちらでもない行', index: 4, forecastIndex: 8, actualIndex: 5, expected: '' },
+    {
+      name: '両方 null（判定不能・0点規則）はマーカーなし',
+      index: 0,
+      forecastIndex: null,
+      actualIndex: null,
+      expected: '',
+    },
+    {
+      name: 'index 0 と null を混同しない（実績だけ 0）',
+      index: 0,
+      forecastIndex: null,
+      actualIndex: 0,
+      expected: '実績',
+    },
+    {
+      name: '最下位行（70%以上）に予想',
+      index: 9,
+      forecastIndex: 9,
+      actualIndex: 5,
+      expected: '予想',
+    },
+  ];
+
+  for (const { name, index, forecastIndex, actualIndex, expected } of cases) {
+    it(name, () => {
+      expect(payoutRatioBandMarkerText(index, forecastIndex, actualIndex)).toBe(expected);
+    });
+  }
+
+  it('無配（matchedBandIndex: null）は「0%以上 25%未満」の行（index 0）にマーカーを出さない', () => {
+    expect(payoutRatioBandMarkerText(0, SIDE_STATES.noDividend.matchedBandIndex, null)).toBe('');
+  });
+});
+
+describe('payoutRatioAdoptedBadgeText（「採点に採用」バッジ）', () => {
+  const cases: readonly {
+    readonly side: 'forecast' | 'actual';
+    readonly source: 'forecast' | 'actual' | null;
+    readonly expected: string;
+  }[] = [
+    { side: 'forecast', source: 'forecast', expected: '採点に採用' },
+    { side: 'actual', source: 'forecast', expected: '' },
+    { side: 'actual', source: 'actual', expected: '採点に採用' },
+    { side: 'forecast', source: 'actual', expected: '' },
+    { side: 'forecast', source: null, expected: '' },
+    { side: 'actual', source: null, expected: '' },
+  ];
+
+  for (const { side, source, expected } of cases) {
+    it(`side=${side} / source=${String(source)} → "${expected}"`, () => {
+      expect(payoutRatioAdoptedBadgeText(side, source)).toBe(expected);
+    });
+  }
+});
+
+describe('formatFetchedAt（③詳細の入力日時。保存は UTC、表示だけ JST）', () => {
+  it('UTC を JST に変換する', () => {
+    expect(formatFetchedAt('2026-09-01T00:00:00Z')).toBe('2026/9/1 9:00:00（JST）');
+  });
+
+  it('日をまたぐ境界（UTC 15:00 → JST 翌日 0:00。月末跨ぎ）', () => {
+    expect(formatFetchedAt('2026-08-31T15:00:00Z')).toBe('2026/9/1 0:00:00（JST）');
+  });
+
+  it('不正な文字列は —', () => {
+    expect(formatFetchedAt('not-a-date')).toBe(NO_DATA);
   });
 });
 
@@ -464,11 +939,15 @@ describe('ratioToEditableText', () => {
  */
 describe('formatBandRange', () => {
   it('上限無し（最上位区分）は「◯以上」', () => {
-    expect(formatBandRange({ minInclusive: 30, maxExclusive: null }, '%', false)).toBe('30.00%以上');
+    expect(formatBandRange({ minInclusive: 30, maxExclusive: null }, '%', false)).toBe(
+      '30.00%以上',
+    );
   });
 
   it('下限無し（⑤ROE最下段相当）は「◯未満」', () => {
-    expect(formatBandRange({ minInclusive: null, maxExclusive: 20 }, '%', false)).toBe('20.00%未満');
+    expect(formatBandRange({ minInclusive: null, maxExclusive: 20 }, '%', false)).toBe(
+      '20.00%未満',
+    );
   });
 
   it('通常区間は「◯以上 ◯未満」', () => {

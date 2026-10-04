@@ -19,6 +19,7 @@ import {
 import { ConsecutiveYearsList } from './ConsecutiveYearsList';
 import { DividendLineChart } from './DividendLineChart';
 import { MetricTable } from './MetricTable';
+import { PayoutRatioDetail } from './PayoutRatioDetail';
 import { ScoreBar } from './ScoreBar';
 import { ScoreRadar } from './ScoreRadar';
 import { Skeleton } from './Skeleton';
@@ -42,8 +43,8 @@ import { Skeleton } from './Skeleton';
  * ③ 予想配当性向のソース切替チェックボックスは、概要モードのヒーローカードに置く
  * （`analysis-dialog.md` §4.1 の表「実績配当性向トグル…この位置に移設」）。
  *
- * `activeMetric !== null` のときは指標詳細モード。**中身は T-096 のスコープ外**
- * （プレースホルダーのみ。fe-plan.md §0 確認事項A、Manager確認済み: (b) 採用）。
+ * `activeMetric !== null` のときは指標詳細モード。①（T-097）・②（T-098）・③（T-108）は
+ * 専用の詳細を出し、それ以外はプレースホルダー（`analysis-dialog.md` §5）。
  */
 export function AnalysisDialogBody({
   selected,
@@ -155,7 +156,9 @@ export function AnalysisDialogBody({
         {/* T-097: ①増配率（5年CAGR）の線グラフ＋表（`analysis-dialog.md` §5.1）。
             T-098: ②連続非減配年数の年次リスト（同 §5.2）。①②は同じ
             `GET /api/companies/:code/dividends` を共用する（`dividendHistory` state）。
-            ③〜⑩汎用の条件／点数表（`bands.ts` 由来）は T-098 以降のスコープ（fe-plan.md §3-2） */}
+            T-108: ③予想配当性向の計算根拠（同 §5.3.1）。`scoring` だけで描画し、
+            `dividendHistory` は使わない（追加の API 呼び出しは無い）。
+            ④〜⑩汎用の条件／点数表は未実装（プレースホルダー） */}
         {activeMetric.key === 'dividendGrowthRate' ? (
           dividendHistory.loading ? (
             <Skeleton rows={4} />
@@ -189,6 +192,8 @@ export function AnalysisDialogBody({
               consecutiveYears={activeMetric.value}
             />
           )
+        ) : activeMetric.key === 'payoutRatio' ? (
+          <PayoutRatioDetail scoring={scoring} metricLabel={activeMetric.label} />
         ) : (
           <p className="meta">詳細表示は準備中です。</p>
         )}
