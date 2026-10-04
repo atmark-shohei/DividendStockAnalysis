@@ -220,6 +220,10 @@ describe('frontend/**/*.tsx に色・rgba直値が無い（design-tokens.md §6 
     '../../frontend/components/CreatePortfolioForm.tsx',
     // T-103 fe-review CR-3: 保有銘柄編集フォーム
     '../../frontend/components/EditHoldingForm.tsx',
+    // T-108: 解析ダイアログ ③予想配当性向の詳細
+    '../../frontend/components/PayoutRatioDetail.tsx',
+    '../../frontend/components/PayoutRatioSideCard.tsx',
+    '../../frontend/components/PayoutRatioBandTable.tsx',
     // デザイン刷新: 画面見出し
     '../../frontend/components/PageHeader.tsx',
   ];
@@ -455,5 +459,63 @@ describe('style.css: .portfolio-tabs button[aria-current] の選択中スタイ�
     const block = blockMatch?.[1] ?? '';
     expect(block).toContain('var(--color-line-strong)');
     expect(block).toContain('var(--color-text)');
+  });
+});
+
+/**
+ * 解析ダイアログ ③予想配当性向の詳細（T-108・`analysis-dialog.md` §5.3.1）。
+ * 2カード・カード・採用バッジはトークンだけを参照する（design-tokens.md §6）。
+ * 採用バッジは中立の枠線バッジで、`--color-action`（操作）・`--color-positive`/`--color-negative`
+ * （評価損益専用。§2.2）を使わない。色だけで意味を示さない（文言「採点に採用」を併記する）。
+ */
+describe('style.css: ③予想配当性向の詳細のカードと採用バッジ（T-108）', () => {
+  const blockOf = (selector: string): string => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(`\\n${escaped}\\s*\\{([\\s\\S]*?)\\}`).exec(styleCss);
+    expect(match, `${selector} のブロックが無い`).not.toBeNull();
+    return match?.[1] ?? '';
+  };
+
+  it('.payout-ratio-cards は2列のグリッド（狭い画面の1列化は @media 側。screen-list.md §10）', () => {
+    const block = blockOf('.payout-ratio-cards');
+    expect(block).toContain('display: grid;');
+    expect(block).toMatch(/grid-template-columns:\s*repeat\(2, 1fr\);/);
+    expect(block).toContain('var(--space-4)');
+  });
+
+  it.each([
+    '.payout-ratio-cards',
+    '.payout-ratio-card',
+    '.payout-ratio-card-header',
+    '.adopted-badge',
+    '.payout-ratio-evidence',
+    '.payout-ratio-evidence-row',
+    '.payout-ratio-evidence-row dt',
+  ])('%s は色の直値を持たない', (selector) => {
+    const block = blockOf(selector);
+    expect(block).not.toMatch(/#[0-9a-fA-F]{3,6}(?![0-9a-fA-F])/);
+    expect(block).not.toMatch(/rgba\(/);
+  });
+
+  it('.payout-ratio-evidence はカード内で区切り線と上下の外余白を持たない（.dialog-hero と違う。CR-1）', () => {
+    const block = blockOf('.payout-ratio-evidence');
+    expect(block).not.toContain('border-top');
+    expect(block).not.toContain('margin-block');
+  });
+
+  it('.payout-ratio-card は .criteria-card と同じトークン（面＋ヘアライン枠線）', () => {
+    const block = blockOf('.payout-ratio-card');
+    expect(block).toContain('var(--color-surface)');
+    expect(block).toContain('1px solid var(--color-line)');
+    expect(block).toContain('var(--radius-lg)');
+    expect(block).toContain('var(--space-4)');
+  });
+
+  it('.adopted-badge は中立の枠線バッジ（--color-text-secondary）で、action/positive/negative を使わない', () => {
+    const block = blockOf('.adopted-badge');
+    expect(block).toContain('var(--color-text-secondary)');
+    expect(block).not.toContain('--color-action');
+    expect(block).not.toContain('--color-positive');
+    expect(block).not.toContain('--color-negative');
   });
 });

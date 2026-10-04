@@ -13,7 +13,9 @@
 
 ## 変更履歴
 
-- **2026-09-23**（T-108 設計・未実装）: `ScoringResponse` に③の計算根拠を追加する。
+- **2026-09-23**（T-108 設計。🟢 2026-09-25 実装済み。`src/handler/dto/company-input.ts` の
+  `toPayoutRatioSideView` が domain の `PayoutRatioSideResult` を平らにして詰める）:
+  `ScoringResponse` に③の計算根拠を追加する。
   `payoutRatioForecast`/`payoutRatioActual`（`PayoutRatioSideView`）へ `dividendSen`・
   `dividendFiscalYear`・`epsSen`・`epsFiscalYear`・`fiscalYearMismatch`・`zeroScoreRule`・
   `matchedBandIndex` を、トップレベルへ `payoutRatioBands`（採点に実際に使った③の区分表）を追加
@@ -562,7 +564,8 @@ docID インデックス（`edinet_document_index`）は日次バッチが事前
 > [payout-ratio-scoring.md](../logic/payout-ratio-scoring.md) §2）。`metrics[]` 中の
 > ③（`payoutRatio`）は採点に**採用した**側の値のみが入る。
 
-> 🟡 **2026-09-23 設計・未実装（T-108）。** ③の計算根拠を追加する（追加のみ・後方互換）。
+> 🟢 **2026-09-25 実装済み（T-108。2026-09-23 設計）。** ③の計算根拠を追加する（追加のみ・後方互換）。
+> 実装は `src/handler/dto/company-input.ts` の `toPayoutRatioSideView`（`toScoringResponse` 内）。
 > 定義の正は [payout-ratio-scoring.md](../logic/payout-ratio-scoring.md) §10。
 >
 > ```json

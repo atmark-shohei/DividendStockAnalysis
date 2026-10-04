@@ -106,6 +106,7 @@
 html {
   -webkit-text-size-adjust: 100%;
   scrollbar-gutter: stable;
+  scroll-padding-top: calc(var(--header-height) + var(--space-4));
 }
 
 body {
@@ -158,7 +159,7 @@ body::before {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-action) 38%, transparent);
+  background: color-mix(in srgb, var(--color-data) 38%, transparent);
   color: var(--color-text);
 }
 
@@ -372,6 +373,7 @@ button:disabled {
   background: transparent;
   color: var(--color-line-disabled);
   cursor: not-allowed;
+  opacity: 0.6;
 }
 
 /* 副次ボタン（枠線）。指標カスタマイズ画面の「初期設定に戻す」（design_mock §5「枠線」） */
@@ -582,7 +584,8 @@ button:disabled {
   gap: var(--space-1);
   min-width: 0;
   overflow-x: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  overflow-y: hidden;
 }
 
 .nav a {
@@ -603,7 +606,7 @@ button:disabled {
   content: '';
   position: absolute;
   right: var(--space-3);
-  bottom: -1px;
+  bottom: 0;
   left: var(--space-3);
   height: 2px;
   border-radius: var(--radius-full);
@@ -752,12 +755,11 @@ section.page {
   background: color-mix(in srgb, var(--color-action) 12%, transparent);
 }
 
-/*
- * 表。広い画面では幅いっぱい、狭い画面では横スクロール（§6 のメディアクエリで切り替え）。
- * 本文ごと横に伸びるのを防ぐ。
- */
+/* Keep horizontal overflow inside tables at every viewport width. */
 .metric-table,
 .input-table {
+  display: block;
+  overflow-x: auto;
   width: 100%;
   border-collapse: collapse;
   white-space: nowrap;
@@ -783,7 +785,7 @@ td {
 thead th {
   padding-block: var(--space-2);
   border-bottom-color: var(--color-line);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-2xs);
   font-weight: 500;
   letter-spacing: 0.08em;
@@ -801,7 +803,7 @@ tbody tr {
   transition: background-color var(--duration-fast) var(--ease-out);
 }
 
-tbody tr:hover {
+tbody tr:hover:not(.is-selected) {
   background: var(--color-surface-hover);
 }
 
@@ -889,7 +891,8 @@ thead th.numeric {
   white-space: normal;
 }
 
-input[aria-invalid='true'] {
+input[aria-invalid='true'],
+input[aria-invalid='true']:hover:not(:disabled) {
   border-color: var(--color-caution);
 }
 
@@ -1201,9 +1204,9 @@ input[aria-invalid='true'] {
 /*
  * 行全体で「表示」を押せるようにする（試作 README §2「whole row opens the dialog」）。
  * 指標表と同じ stretched button パターンを、既存の「表示」ボタンに CSS で当てる。
- * ボタンを増やさないので、SR から見える操作は従来どおり「表示」「削除」の2つだけ。
+ * The company-name button stays above this overlay for tooltips and text selection.
  */
-tbody tr:has(> .row-actions) {
+.company-row {
   position: relative;
   cursor: pointer;
 }
@@ -1212,6 +1215,35 @@ tbody tr:has(> .row-actions) {
   content: '';
   position: absolute;
   inset: 0;
+  z-index: 1;
+}
+
+.row-actions button:first-child:active:not(:disabled) {
+  transform: none;
+}
+
+.company-name-button {
+  position: relative;
+  z-index: 2;
+  display: block;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  user-select: text;
+}
+
+.company-name-button:hover:not(:disabled) {
+  background: transparent;
+  border: none;
+}
+
+.company-name-button:active:not(:disabled) {
+  transform: none;
 }
 
 .row-actions button:first-child:focus-visible {
@@ -1226,7 +1258,7 @@ tbody tr:has(> .row-actions) {
 /* 「削除」は行の当たり判定より前面に出す（押し間違いで表示にならないように） */
 .row-actions button + button {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 .row-actions button:last-child {
@@ -1276,7 +1308,7 @@ tbody tr:has(> .row-actions) {
 }
 
 .dialog-card:not(:has(.dialog-header)) > h2,
-.dialog-card:not(:has(.dialog-header)) form > h2 {
+.dialog-card:not(:has(.dialog-header)) > div > h2 {
   margin-bottom: var(--space-4);
   font-size: var(--font-size-lg);
 }
@@ -1286,7 +1318,7 @@ tbody tr:has(> .row-actions) {
   color: var(--color-text-secondary);
 }
 
-.dialog-card form label {
+.dialog-card > div > label {
   display: flex;
   margin-right: 0;
 }
@@ -1334,7 +1366,7 @@ tbody tr:has(> .row-actions) {
 /* 見出し直下の付帯情報（採用した配当・入力日時） */
 .dialog-header + .meta {
   margin-bottom: var(--space-5);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
 }
 
@@ -1393,12 +1425,12 @@ tbody tr:has(> .row-actions) {
 .dialog-summary-score .total .effective {
   flex-basis: 100%;
   margin: var(--space-2) 0 0;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
 }
 
 .dialog-summary-score > .meta {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-2xs);
   line-height: 1.7;
 }
@@ -1468,7 +1500,7 @@ tbody tr:has(> .row-actions) {
 }
 
 .radar-note {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-2xs);
 }
 
@@ -1510,6 +1542,7 @@ tbody tr:has(> .row-actions) {
   content: '';
   position: absolute;
   inset: 0;
+  z-index: 1;
 }
 
 /* キーボードフォーカス時、行全体の当たり判定に沿って可視のフォーカスリングを出す
@@ -1526,25 +1559,22 @@ tbody tr:has(> .row-actions) {
   background: color-mix(in srgb, var(--color-action) 6%, transparent);
 }
 
-/* 備考列（5列目）だけは折り返す。③の内訳など長い文言でカードからはみ出さないように */
-.metric-row > td:nth-child(5) {
+/* Only metric notes wrap; numeric holdings columns keep their table formatting. */
+.metric-notes {
   min-width: 14rem;
   white-space: normal;
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
 
-/* 行末の「›」。行ホバーで右へ少し動き、押せることを示す */
+/* Highlight the trailing glyph without creating a transformed stacking context. */
 .metric-row > td:last-child[aria-hidden='true'] {
   color: var(--color-text-faint);
-  transition:
-    color var(--duration-fast) var(--ease-out),
-    transform var(--duration-base) var(--ease-out);
+  transition: color var(--duration-fast) var(--ease-out);
 }
 
 .metric-row:hover > td:last-child[aria-hidden='true'] {
   color: var(--color-text-secondary);
-  transform: translateX(3px);
 }
 
 /* 指標表のスコア列。バーと点数を横に並べる（セルは table-cell のまま、バーを行内に置く） */
@@ -1659,7 +1689,7 @@ tbody tr:has(> .row-actions) {
 .criteria-note {
   margin-top: auto;
   padding-top: var(--space-2);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-2xs);
 }
 
@@ -1678,6 +1708,84 @@ tbody tr:has(> .row-actions) {
 .implementation-badge[data-status='pending'] {
   border-color: var(--color-caution);
   color: var(--color-caution);
+}
+
+/*
+ * 解析ダイアログ ③予想配当性向の詳細（T-108・analysis-dialog.md §5.3.1）。
+ * 予想／実績の2カードは2列（狭い画面では §6 のメディアクエリで1列にする。screen-list.md §10）。
+ */
+.payout-ratio-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
+  margin-block: var(--space-4);
+}
+
+/* カード外観は .criteria-card と同じ（影なし・ヘアライン枠線。design-tokens.md §4） */
+.payout-ratio-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+.payout-ratio-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.payout-ratio-card-header h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+
+/*
+ * カード内の計算根拠（1株配当・EPS）。.dialog-hero-row と同じ行組みだが、
+ * カードの中では区切り線と上下の外余白が不要なので .dialog-hero を流用しない（T-108 CR-1）
+ */
+.payout-ratio-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.payout-ratio-evidence-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.payout-ratio-evidence-row dt {
+  color: var(--color-text-secondary);
+}
+
+.payout-ratio-evidence-row dd {
+  margin: 0;
+}
+
+/*
+ * 「採点に採用」バッジ。.implementation-badge と同じ中立の枠線バッジ（T-108 Q6）。
+ * 操作できる要素ではないので --color-action を、スコアの良し悪しではないので
+ * --color-positive を使わない（design-tokens.md §2.2）。文言で意味を示し、色だけにしない
+ */
+.adopted-badge {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-text-secondary);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-3xs);
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 /* ── 指標カスタマイズ画面（`/indicators`、T-101。`indicator-custom-page.md` §2）── */
@@ -1812,6 +1920,9 @@ tbody tr:has(> .row-actions) {
   margin: 0;
   padding: var(--space-1) var(--space-4);
   border-radius: var(--radius-full);
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -1922,12 +2033,10 @@ tbody tr:has(> .row-actions) {
   margin-top: var(--space-4);
 }
 
-/* 上側の「ポートフォリオを削除」は右端へ寄せ、ヒーロー集計と並べない */
-/* 上側の「ポートフォリオを削除」はタブ列と同じ行の右端に載せる（タブ列の高さぶん持ち上げる） */
+/* Keep deletion on its own row below the portfolio tabs. */
 .portfolio-tabs + .portfolio-footer {
   justify-content: flex-end;
-  margin: calc((var(--control-height-compact) + var(--space-5)) * -1) 0 var(--space-5) auto;
-  width: max-content;
+  margin: 0 0 var(--space-5);
 }
 
 .portfolio-tabs + .portfolio-footer button {
@@ -1950,7 +2059,7 @@ section.page .metric-table {
 section.page > .meta,
 section.page > p.meta {
   margin-top: var(--space-4);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
 }
 
@@ -1962,7 +2071,7 @@ section.page > p.meta {
  */
 .holding-row-actions {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 .holding-row-actions button {
@@ -2000,7 +2109,7 @@ section.page > .portfolio-tabs {
   min-height: 2.75rem;
 }
 
-.company-form .warning[role='alert'] {
+.company-form > .warning[role='alert'] {
   margin-bottom: var(--space-4);
   padding: var(--space-4);
   border: 1px solid color-mix(in srgb, var(--color-caution) 40%, transparent);
@@ -2206,21 +2315,28 @@ main > .auth-layout {
 
 /*
  * レスポンシブ（screen-list.md §10）。ブレークポイントは2つだけ:
- * - 960px 未満: ヘッダーを2段（ブランド＋認証／ナビ）にし、2列グリッドを1列にする
+ * - At 960px and below: brand above navigation/authentication, matching DOM order.
  * - 640px 未満: 余白を詰め、表を横スクロールにし、検索行を折り返す
  */
 @media (max-width: 60rem) {
+  html {
+    scroll-padding-top: calc(var(--header-height) * 2 + var(--space-4));
+  }
   .app-header-inner {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     row-gap: 0;
     padding: var(--space-2) var(--space-5) 0;
   }
 
   .app-header .nav {
-    order: 3;
-    flex-basis: 100%;
-    min-height: 2.75rem;
+    min-width: 0;
+    min-height: var(--control-height);
     margin-inline: calc(var(--space-3) * -1);
+  }
+
+  .app-header .brand {
+    grid-column: 1 / -1;
   }
 
   main {
@@ -2258,10 +2374,6 @@ main > .auth-layout {
   .portfolio-summary > div:first-child {
     grid-column: span 2;
   }
-
-  .portfolio-tabs + .portfolio-footer {
-    margin: calc(var(--space-2) * -1) 0 var(--space-4) auto;
-  }
 }
 
 @media (max-width: 40rem) {
@@ -2276,7 +2388,7 @@ main > .auth-layout {
     display: none;
   }
 
-  /* ブランドと認証エリアを1行に収める。長いときはブランド名を省略記号で切る */
+  /* Truncate long brand names within their grid row. */
   .brand {
     flex: 1 1 auto;
     min-width: 0;
@@ -2297,11 +2409,6 @@ main > .auth-layout {
 
   .app-header-inner {
     column-gap: var(--space-3);
-  }
-
-  /* ナビが横にはみ出すとき、右端をフェードさせて続きがあることを示す */
-  .app-header .nav {
-    mask-image: linear-gradient(to right, black calc(100% - var(--space-6)), transparent);
   }
 
   .portfolio-summary > div:nth-child(2) dd {
@@ -2346,6 +2453,10 @@ main > .auth-layout {
     margin-block: var(--space-2);
   }
 
+  .dialog-card:not(:has(.dialog-header)) {
+    margin-block: var(--space-2);
+  }
+
   .search-bar {
     flex-wrap: wrap;
   }
@@ -2369,6 +2480,10 @@ main > .auth-layout {
     padding: var(--space-4);
   }
 
+  .payout-ratio-cards {
+    grid-template-columns: 1fr;
+  }
+
   .indicator-row {
     flex-wrap: wrap;
   }
@@ -2382,8 +2497,7 @@ main > .auth-layout {
     margin-left: calc(1.375rem + var(--space-4));
   }
 
-  .portfolio-summary > div:nth-child(2) dd,
-  .portfolio-total-value {
+  .portfolio-summary dd.portfolio-total-value {
     font-size: var(--font-size-title);
   }
 }

@@ -67,13 +67,12 @@ export function formatSen(sen: number | null): string {
 }
 
 /**
- * グラフの金額軸の目盛り（銭 → 「60 円」）。目盛りは点の上のラベル（`formatSen`）より
- * 狭い場所に出すので、端数を持つときだけ小数を残し、整数円なら小数を省く。
+ * グラフの金額軸の目盛り（銭 → 「60.00 円」）。自動生成された目盛りにも
+ * 小数第2位を常に表示し、同じ軸で整数円と端数の桁数が混在しないようにする。
  * 銭のまま描くと「6000」が 60 円に読めないため、軸も必ず円に直す。
  */
 export function formatSenAxisTick(sen: number): string {
-  const fractionDigits = sen % 100 === 0 ? 0 : 2;
-  return `${grouped(sen / 100, fractionDigits)} 円`;
+  return `${grouped(sen / 100, 2)} 円`;
 }
 
 /**
@@ -176,11 +175,135 @@ export function payoutRatioBreakdownText(
   const part = (label: string, breakdown: PayoutRatioBreakdown): string => {
     const value = formatMetricValue(breakdown.value, '%', false);
     const score = breakdown.score === null ? NO_DATA : `${String(breakdown.score)} 点`;
-    const reason =
-      breakdown.unavailableReason === null ? '' : `（${reasonText(breakdown.unavailableReason)}）`;
+    // 年度不一致は BE から `input-missing` として届く。`fiscalYearMismatch` フラグで出し分け、『データなし』にしない
+    const reasonLabel = breakdown.fiscalYearMismatch
+      ? FISCAL_YEAR_MISMATCH_TEXT
+      : reasonText(breakdown.unavailableReason);
+    const reason = breakdown.unavailableReason === null ? '' : `（${reasonLabel}）`;
     return `${label} ${value} / ${score}${reason}`;
   };
   return `${part('予想', forecast)}／${part('実績', actual)}／採用: ${dividendSourceText(source)}`;
+}
+
+/*
+ * ---- ③ 予想配当性向の詳細（T-108・`docs/02_design/ui/pages/analysis-dialog.md` §5.3.1）----
+ *
+ * **判定はしない。** 区分の該当は BE の `matchedBandIndex`、0点規則は `zeroScoreRule`、
+ * 年度の食い違いは `fiscalYearMismatch` をそのまま使う（`payout-ratio-scoring.md` §10.2）。
+ * 代入式の右辺も BE の `value` を整形するだけで、FE では割り算をしない。
+ */
+
+/** ③の区分表の1行（`ScoringResponse.payoutRatioBands` の要素）。手書きで再定義しない */
+type PayoutRatioBand = ScoringResponse['payoutRatioBands'][number];
+
+/** 年度の食い違い（BE の `fiscalYearMismatch`）。要約行とカード注記で同一文言にする */
+const FISCAL_YEAR_MISMATCH_TEXT = '年度が一致しないため判定不能';
+const NEGATIVE_EPS_NOTE = '赤字（EPS が負）のため区分表を使わず 0 点';
+const NO_DIVIDEND_NOTE = '無配のため 0 点';
+const ADOPTED_BADGE_TEXT = '採点に採用';
+/** 区分表の境界値の最大小数桁（§5.3.1「小数は小数第2位まで・末尾の0は省く」） */
+const BAND_BOUND_MAX_FRACTION_DIGITS = 2;
+
+/**
+ * 3桁区切り（末尾の0を省く）。`grouped` は桁数固定で `62.50` を出すため別に持つ。
+ * **裸の数字を出さないため、単位は呼び出し側が必ず付ける**
+ */
+function groupedTrimmed(value: number, maxFractionDigits: number): string {
+  return value.toLocaleString('ja-JP', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxFractionDigits,
+  });
+}
+
+/**
+ * ③詳細の区分表の条件列。`formatBandRange` とは境界値の桁が違う
+ * （整数は「25%」、小数は「62.5%」「62.55%」。`62.50%` にしない。§5.3.1 Y4）。
+ * `/criteria` の表示を変えないため、既存の `formatBandRange` は変更しない。
+ */
+export function formatPayoutRatioBandRange(band: PayoutRatioBand): string {
+  const bound = (value: number): string =>
+    `${groupedTrimmed(value, BAND_BOUND_MAX_FRACTION_DIGITS)}%`;
+  const { minInclusive, maxExclusive } = band;
+
+  // `formatBandRange` と同じ理由でネストした if にする（型アサーションを使わず narrowing させる）
+  if (minInclusive === null) {
+    if (maxExclusive === null) return NO_DATA;
+    return `${bound(maxExclusive)}未満`;
+  }
+  if (maxExclusive === null) return `${bound(minInclusive)}以上`;
+  return `${bound(minInclusive)}以上 ${bound(maxExclusive)}未満`;
+}
+
+/**
+ * 1株配当・EPS の値と年度（「75.00 円（2027年度）」）。値・年度が `null` の項目だけ `—`。
+ * レコードが無い（値も年度も `null`）ときは `—（—）` にせず `—` 1つにする（T-108 Q3 ユーザー決定）。
+ * 0銭（無配）は `0.00 円` で、`—` と混同しない。負の EPS はそのまま負で出す。
+ */
+export function payoutRatioEvidenceText(sen: number | null, fiscalYear: number | null): string {
+  if (sen === null && fiscalYear === null) return NO_DATA;
+  return `${formatSen(sen)}（${fiscalPeriodLabel(fiscalYear, null)}）`;
+}
+
+/**
+ * カードの代入式（「75.00 円 ÷ 120.00 円 × 100 = 62.50%」）。
+ * 年度の食い違いでは計算に使っていないので `null`（式の行を出さない）。
+ * 右辺は BE の `value` を整形するだけ。`null`（ゼロ除算・データ不良・欠損）は `—`。
+ */
+export function payoutRatioEquationText(view: PayoutRatioBreakdown): string | null {
+  if (view.fiscalYearMismatch) return null;
+  const result = formatMetricValue(view.value, '%', false);
+  return `${formatSen(view.dividendSen)} ÷ ${formatSen(view.epsSen)} × 100 = ${result}`;
+}
+
+/**
+ * カードのスコア。判定不能は `—` だけ（理由は注記に1回だけ出す。T-108 Q2 ユーザー決定）。
+ * 0点は「0 点」で、`—` と混同しない。
+ */
+export function payoutRatioSideScoreText(view: PayoutRatioBreakdown): string {
+  if (view.score === null) return NO_DATA;
+  return `${String(view.score)} 点`;
+}
+
+/**
+ * カードの注記（§5.3.1「状態ごとのカード表示」の「追加の注記」列）。注記が無ければ空文字。
+ *
+ * 年度の食い違いでは BE の `unavailableReason` が `input-missing` になるため、
+ * 汎用の理由文（「データなし」）より先に判定する。
+ */
+export function payoutRatioSideNoteText(view: PayoutRatioBreakdown): string {
+  if (view.fiscalYearMismatch) {
+    const dividendYear = fiscalPeriodLabel(view.dividendFiscalYear, null);
+    const epsYear = fiscalPeriodLabel(view.epsFiscalYear, null);
+    return `${FISCAL_YEAR_MISMATCH_TEXT}（1株配当 ${dividendYear}／EPS ${epsYear}）`;
+  }
+  if (view.zeroScoreRule === 'negative-eps') return NEGATIVE_EPS_NOTE;
+  if (view.zeroScoreRule === 'no-dividend') return NO_DIVIDEND_NOTE;
+  return reasonText(view.unavailableReason);
+}
+
+/**
+ * 区分表の「該当」列の文言。BE の `matchedBandIndex` と行の添字が等しいかだけを見る
+ * （値と境界を比べない＝区分の判定をしない）。`null` はどの行とも一致しない。
+ */
+export function payoutRatioBandMarkerText(
+  index: number,
+  forecastIndex: number | null,
+  actualIndex: number | null,
+): string {
+  const isForecast = forecastIndex === index;
+  const isActual = actualIndex === index;
+  if (isForecast && isActual) return '予想・実績';
+  if (isForecast) return '予想';
+  if (isActual) return '実績';
+  return '';
+}
+
+/** カード見出しの「採点に採用」バッジ。`payoutRatioSource` と一致する側だけ。`null` ならどちらにも出さない */
+export function payoutRatioAdoptedBadgeText(
+  side: 'forecast' | 'actual',
+  source: 'forecast' | 'actual' | null,
+): string {
+  return side === source ? ADOPTED_BADGE_TEXT : '';
 }
 
 /**

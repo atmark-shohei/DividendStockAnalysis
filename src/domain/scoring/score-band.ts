@@ -21,7 +21,7 @@ export interface ScoreBand {
 }
 
 /**
- * 区分表から点数を引く。
+ * 区分表から該当する区分の**添字**を引く（T-108）。
  *
  * 判定値そのものではなく**比較関数**を受け取るのは、浮動小数点を経由せずに
  * 判定するため。たとえば配当利回りは `配当 / 株価 * 100` だが、この割り算を
@@ -33,7 +33,30 @@ export interface ScoreBand {
  * **先頭の区分（＝最高点）に落ちる**。壊れたデータが満点を取るのが最悪の壊れ方なので、
  * 「条件を満たしたときだけ返す」形にして未知の入力は `null` へ倒す。
  *
+ * 点数ではなく添字を返すのは、画面が「どの行に該当したか」を区分表の上で示すため
+ * （`payout-ratio-scoring.md` §10.2 R3）。点数だけ欲しい呼び出し側は `lookupPoints` を使う。
+ *
  * @param compare `判定値 - threshold` と同じ符号を返す関数。大きさは使わない
+ * @returns 該当する区分の添字。どの区分にも該当しなければ `null`
+ *   （「計算できたが区分の外」であり、最低点とは区別する）
+ */
+export function lookupBandIndex(
+  bands: readonly ScoreBand[],
+  compare: (threshold: number) => number,
+): number | null {
+  for (const [index, band] of bands.entries()) {
+    const atOrAboveMin = band.minInclusive === null || compare(band.minInclusive) >= 0;
+    const belowMax = band.maxExclusive === null || compare(band.maxExclusive) < 0;
+    if (atOrAboveMin && belowMax) return index;
+  }
+  return null;
+}
+
+/**
+ * 区分表から点数を引く。`lookupBandIndex` のラッパー。
+ *
+ * 判定規則（比較関数を受ける理由・肯定形の理由）は `lookupBandIndex` を参照。
+ *
  * @returns 該当する区分の点数。どの区分にも該当しなければ `null`
  *   （「計算できたが区分の外」であり、最低点とは区別する）
  */
@@ -41,12 +64,9 @@ export function lookupPoints(
   bands: readonly ScoreBand[],
   compare: (threshold: number) => number,
 ): number | null {
-  for (const band of bands) {
-    const atOrAboveMin = band.minInclusive === null || compare(band.minInclusive) >= 0;
-    const belowMax = band.maxExclusive === null || compare(band.maxExclusive) < 0;
-    if (atOrAboveMin && belowMax) return band.points;
-  }
-  return null;
+  const index = lookupBandIndex(bands, compare);
+  if (index === null) return null;
+  return bands[index]?.points ?? null;
 }
 
 /**

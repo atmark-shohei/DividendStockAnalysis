@@ -94,7 +94,7 @@ export function MetricTable({
                   </>
                 )}
               </td>
-              <td>
+              <td className="metric-notes">
                 {reasonText(metric.unavailableReason)}
                 {/* ③ だけ予想・実績の内訳と採用元を併記する（既存の行構造は変えない） */}
                 {metric.key === 'payoutRatio' && (

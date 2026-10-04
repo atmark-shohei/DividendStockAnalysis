@@ -1,3 +1,4 @@
+import { createElement } from 'react';
 import {
   PolarAngleAxis,
   PolarGrid,
@@ -22,6 +23,28 @@ const AXIS_ORDINAL: Readonly<Record<number, string>> = {
   9: '⑨',
   10: '⑩',
 };
+
+/** Render only available score markers; the polygon keeps its existing zero fallback. */
+export function renderScoreRadarDot({
+  cx,
+  cy,
+  payload,
+}: {
+  readonly cx?: number;
+  readonly cy?: number;
+  readonly payload?: { readonly score: number; readonly unavailable: boolean };
+}) {
+  if (payload === undefined || payload.unavailable) return createElement('g');
+  return createElement('circle', {
+    cx,
+    cy,
+    r: 2.5,
+    fill: 'var(--color-data)',
+    strokeWidth: 0,
+    className: 'radar-score-dot',
+    'data-score': payload.score,
+  });
+}
 
 /**
  * 10指標のレーダーチャート。
@@ -63,7 +86,7 @@ export function ScoreRadar({ metrics }: { readonly metrics: ScoringResponse['met
             stroke="var(--color-data)"
             strokeWidth={1.5}
             fillOpacity={0.18}
-            dot={{ r: 2.5, fill: 'var(--color-data)', strokeWidth: 0 }}
+            dot={renderScoreRadarDot}
             animationDuration={700}
           />
         </RadarChart>

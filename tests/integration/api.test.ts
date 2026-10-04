@@ -9,6 +9,7 @@ import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document
 import { type EdinetHistorySource } from '@/domain/company/edinet-history-source';
 import { type FinancialSource } from '@/domain/company/financial-source';
 import { type MarketDataSource } from '@/domain/company/market-data-source';
+import { PAYOUT_RATIO_BANDS } from '@/domain/scoring/bands';
 import { createApp } from '@/handler/app';
 import { WebCryptoPasswordHasher } from '@/infra/auth/webcrypto-password-hasher';
 import { WebCryptoSessionTokenGenerator } from '@/infra/auth/webcrypto-session-token-generator';
@@ -462,6 +463,31 @@ describe('POST /api/companies — useActualForScoring', () => {
     expect(body.payoutRatioSource).toBe('actual');
     expect(body.metrics.find((m) => m.key === 'payoutRatio')?.score).toBe(8);
   });
+
+  it('③ の計算根拠と採点に使った区分表がレスポンスに載る（T-108。POST は常にデフォルトの表）', async () => {
+    const body = (await (await post(payoutRatioSamplePayload())).json()) as ScoringResponse;
+    expect(body.payoutRatioForecast).toMatchObject({
+      score: 9,
+      dividendSen: 5_000,
+      dividendFiscalYear: 2026,
+      epsSen: 20_000,
+      epsFiscalYear: 2026,
+      fiscalYearMismatch: false,
+      zeroScoreRule: null,
+    });
+    const index = body.payoutRatioForecast.matchedBandIndex;
+    expect(index).not.toBeNull();
+    expect(body.payoutRatioBands[index ?? -1]?.points).toBe(9);
+    expect(body.payoutRatioBands).toEqual(PAYOUT_RATIO_BANDS);
+    expect(body.payoutRatioActual).toMatchObject({
+      score: 8,
+      dividendSen: 9_000,
+      dividendFiscalYear: 2025,
+      epsSen: 30_000,
+      epsFiscalYear: 2025,
+      fiscalYearMismatch: false,
+    });
+  });
 });
 
 describe('GET /api/companies/:code — useActualForScoring', () => {
@@ -477,6 +503,23 @@ describe('GET /api/companies/:code — useActualForScoring', () => {
       await app().request('/api/companies/9433')
     ).json()) as ScoringResponse;
     expect(withoutActual.payoutRatioSource).toBe('forecast');
+  });
+
+  it('③ 保存済み生データからの再採点でも計算根拠と区分表が返る（T-108）', async () => {
+    await post(payoutRatioSamplePayload());
+    const body = (await (await app().request('/api/companies/9433')).json()) as ScoringResponse;
+    expect(body.payoutRatioForecast).toMatchObject({
+      score: 9,
+      dividendSen: 5_000,
+      dividendFiscalYear: 2026,
+      epsSen: 20_000,
+      epsFiscalYear: 2026,
+      fiscalYearMismatch: false,
+      zeroScoreRule: null,
+    });
+    const index = body.payoutRatioForecast.matchedBandIndex;
+    expect(body.payoutRatioBands[index ?? -1]?.points).toBe(9);
+    expect(body.payoutRatioBands).toEqual(PAYOUT_RATIO_BANDS);
   });
 
   it('不正なクエリ値（true/false 以外）は 400', async () => {
@@ -675,9 +718,7 @@ describe('DELETE /api/companies/:code', () => {
       error: 'この銘柄は誰かのポートフォリオに保有されているため削除できません',
     });
 
-    const remaining = await env.DB.prepare(
-      'SELECT COUNT(*) AS count FROM companies WHERE code = ?',
-    )
+    const remaining = await env.DB.prepare('SELECT COUNT(*) AS count FROM companies WHERE code = ?')
       .bind('9433')
       .first<{ count: number }>();
     expect(remaining?.count).toBe(1);
@@ -840,7 +881,9 @@ describe('指標カスタマイズ: GET/PUT /api/indicator-settings、GET /api/c
     // ⑩配当利回りのデフォルト基準値は `%` 小数（5.5%）。DBと同じ単位系（BE計画 §4）
     expect(body.basisValues.dividendYield).toBe(5.5);
     // ⑨MIX係数は設定不可なので basisValues に現れない
-    expect((body.basisValues as Record<string, number | undefined>)['mixCoefficient']).toBeUndefined();
+    expect(
+      (body.basisValues as Record<string, number | undefined>)['mixCoefficient'],
+    ).toBeUndefined();
   });
 
   it('PUT → GET で保存内容が往復する。5指標に絞ると GET /api/companies/:code の満点も50になる', async () => {

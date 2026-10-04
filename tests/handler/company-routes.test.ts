@@ -6,6 +6,9 @@ import {
   type CompanyRepository,
 } from '@/domain/company/company-repository';
 import { type PortfolioRepository } from '@/domain/portfolio/portfolio-repository';
+import { scaleBands } from '@/domain/scoring/band-scaling';
+import { PAYOUT_RATIO_BANDS } from '@/domain/scoring/bands';
+import { METRIC_KEYS } from '@/domain/shared/metric-key';
 import { type UserIndicatorSettings } from '@/domain/scoring/user-indicator-settings';
 import { type UserIndicatorSettingsRepository } from '@/domain/scoring/user-indicator-settings-repository';
 import { type EdinetDocumentIndexLookup } from '@/domain/company/edinet-document-index';
@@ -210,6 +213,38 @@ describe('GET /api/companies/:code — 指標カスタマイズの反映（T-101
     const response = await app(repository).request('/api/companies/0000');
     expect(response.status).toBe(404);
   });
+
+  it('③ ゲストの payoutRatioBands はデフォルトの区分表（T-108）', async () => {
+    const repository = fakeUserIndicatorSettingsRepository({});
+    const response = await app(repository).request('/api/companies/9433');
+    const body = (await response.json()) as ScoringResponse;
+    expect(body.payoutRatioBands).toEqual(PAYOUT_RATIO_BANDS);
+  });
+
+  it('③ 基準値を上書きしたユーザーの payoutRatioBands は上書き後の表で、matchedBandIndex もその表の添字（T-108 / §10.3）', async () => {
+    const payoutRatioBasis = 50;
+    const settings: UserIndicatorSettings = {
+      selectedKeys: METRIC_KEYS,
+      basisValues: { payoutRatio: payoutRatioBasis },
+    };
+    const repository = fakeUserIndicatorSettingsRepository({ [TEST_USER_USER.id]: settings });
+    // 期待値は resolveScoringBands と同じ導出で得る（数値をハードコードしない）
+    const scaled = scaleBands(PAYOUT_RATIO_BANDS, payoutRatioBasis);
+    if (!scaled.ok) throw new Error('テストの基準値が不正');
+
+    const response = await app(repository).request('/api/companies/9433', {
+      headers: { cookie: TEST_USER_SESSION_COOKIE },
+    });
+    const body = (await response.json()) as ScoringResponse;
+    expect(body.payoutRatioBands).toEqual(scaled.value);
+    expect(body.payoutRatioBands).not.toEqual(PAYOUT_RATIO_BANDS);
+
+    // SAMPLE_COMPANY は予想レコードが無く、実績 FY2025（EPS 100円・配当 64円）が揃う
+    const index = body.payoutRatioActual.matchedBandIndex;
+    expect(index).not.toBeNull();
+    expect(body.payoutRatioBands[index ?? -1]?.points).toBe(body.payoutRatioActual.score);
+    expect(body.payoutRatioActual.fiscalYearMismatch).toBe(false);
+  });
 });
 
 /**
@@ -232,7 +267,10 @@ describe('DELETE /api/companies/:code — 保有銘柄がある場合は409（T-
   }
 
   function fakePortfolioRepositoryWithHeldCount(count: number): PortfolioRepository {
-    return { ...fakePortfolioRepository(), countHoldingsByCompanyCode: () => Promise.resolve(count) };
+    return {
+      ...fakePortfolioRepository(),
+      countHoldingsByCompanyCode: () => Promise.resolve(count),
+    };
   }
 
   it('保有件数0件なら204で削除できる', async () => {

@@ -3,7 +3,7 @@
  * URL の解釈そのものは `routes.ts`（純関数）に置いている。
  */
 
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 
 import { LIST_PATH, parseRoute, routeToPath, type Route } from './routes';
 
@@ -55,6 +55,10 @@ export function useRoute(): readonly [Route, (route: Route, options?: NavigateOp
   // スナップショットは文字列にする。オブジェクトを返すと毎回参照が変わり再描画が止まらない
   const href = useSyncExternalStore(subscribe, currentHref, () => LIST_PATH);
   const route = useMemo(() => parseRoute(href), [href]);
+
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [route.kind]);
 
   const navigate = useCallback((next: Route, options?: NavigateOptions) => {
     const path = routeToPath(next);

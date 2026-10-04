@@ -156,7 +156,7 @@ describe('style.css: .holding-row-actions が position:relative/z-index で stre
     expect(blockMatch).not.toBeNull();
     const block = blockMatch?.[1] ?? '';
     expect(block).toMatch(/position:\s*relative;/);
-    expect(block).toMatch(/z-index:\s*1;/);
+    expect(block).toMatch(/z-index:\s*2;/);
   });
 });
 

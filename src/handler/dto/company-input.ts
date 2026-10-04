@@ -10,6 +10,7 @@ import { z } from 'zod';
 
 import { type Company } from '../../domain/company/company';
 import { MAX_PRICE_SEN } from '../../domain/company/dividend-record';
+import { type PayoutRatioSideResult } from '../../domain/scoring/payout-ratio';
 import {
   type MetricKey,
   METRIC_KEYS,
@@ -18,6 +19,7 @@ import {
   METRIC_UNIT,
 } from '../../domain/shared/metric-key';
 import { type CompanyScoring } from '../../usecase/score-company';
+import { type ScoreBandView } from './scoring-bands';
 
 /**
  * 銘柄コード。4文字固定。先頭3文字は数字、末尾1文字は数字または英大文字（例: 130A）。
@@ -138,11 +140,30 @@ export interface MetricView {
   readonly unavailableReason: string | null;
 }
 
-/** ③ 予想側・実績側それぞれの判定結果を画面へ渡す形（内訳表示用） */
+/**
+ * ③ 予想側・実績側それぞれの判定結果を画面へ渡す形（内訳表示用）。
+ *
+ * domain の `PayoutRatioSideResult` を**平らにした**もの（`metric` と `evidence` の中身を
+ * 同じ階層に並べる。T-108 / company-api.md）。丸めない・`null` を 0 にしない。
+ */
 export interface PayoutRatioSideView {
   readonly score: number | null;
   readonly value: number | null;
   readonly unavailableReason: string | null;
+  /** 銭。選ばれた配当レコードの1株配当。レコードが無い・欠損なら `null`。`0` は無配（別物） */
+  readonly dividendSen: number | null;
+  /** 上記配当レコードの決算年度。レコードが無ければ `null` */
+  readonly dividendFiscalYear: number | null;
+  /** 銭。選ばれた業績レコードの EPS。**負がありうる**。レコードが無い・欠損なら `null` */
+  readonly epsSen: number | null;
+  /** 上記業績レコードの決算年度。レコードが無ければ `null` */
+  readonly epsFiscalYear: number | null;
+  /** 両レコードがあり年度が異なる。このとき値は返すが計算には使っていない（判定不能） */
+  readonly fiscalYearMismatch: boolean;
+  /** 赤字・無配の規則で 0点にしたときの規則。区分表で 0点になった場合は `null` */
+  readonly zeroScoreRule: PayoutRatioSideResult['zeroScoreRule'];
+  /** `payoutRatioBands` の該当区分の添字（0始まり）。判定不能・0点規則のときは `null` */
+  readonly matchedBandIndex: number | null;
 }
 
 export interface ScoringResponse {
@@ -165,6 +186,12 @@ export interface ScoringResponse {
   readonly payoutRatioForecast: PayoutRatioSideView;
   /** ③ 実績側の内訳。同上 */
   readonly payoutRatioActual: PayoutRatioSideView;
+  /**
+   * ③の採点に実際に使った区分表（`GET /api/scoring/bands` と同じ形）。
+   * `GET /api/companies/:code` は指標カスタマイズ（T-101）反映後の表、
+   * `POST /api/companies` は常にデフォルトの表（Y3）
+   */
+  readonly payoutRatioBands: readonly ScoreBandView[];
   /** ⑨ PER の出所。予想EPS / 実績EPS / 手入力のどれで算出したか。§3.5 */
   readonly perSource: 'forecast-eps' | 'actual-eps' | 'manual' | null;
   /** ⑨ PBR の出所 */
@@ -177,6 +204,22 @@ export interface ScoringResponse {
   readonly pbr: number | null;
   readonly fetchedAt: string;
   readonly metrics: readonly MetricView[];
+}
+
+/** ③ 片側の判定結果と計算根拠を、画面向けに平らな形へ展開する */
+function toPayoutRatioSideView(side: PayoutRatioSideResult): PayoutRatioSideView {
+  return {
+    score: side.metric.score,
+    value: side.metric.value,
+    unavailableReason: side.metric.unavailableReason,
+    dividendSen: side.evidence.dividendSen,
+    dividendFiscalYear: side.evidence.dividendFiscalYear,
+    epsSen: side.evidence.epsSen,
+    epsFiscalYear: side.evidence.epsFiscalYear,
+    fiscalYearMismatch: side.fiscalYearMismatch,
+    zeroScoreRule: side.zeroScoreRule,
+    matchedBandIndex: side.matchedBandIndex,
+  };
 }
 
 /**
@@ -193,16 +236,14 @@ export function toScoringResponse(scoring: CompanyScoring): ScoringResponse {
     totalMetricCount: scoring.card.totalMetricCount,
     dividendSource: scoring.dividendSource,
     payoutRatioSource: scoring.payoutRatioSource,
-    payoutRatioForecast: {
-      score: scoring.payoutRatioForecast.score,
-      value: scoring.payoutRatioForecast.value,
-      unavailableReason: scoring.payoutRatioForecast.unavailableReason,
-    },
-    payoutRatioActual: {
-      score: scoring.payoutRatioActual.score,
-      value: scoring.payoutRatioActual.value,
-      unavailableReason: scoring.payoutRatioActual.unavailableReason,
-    },
+    payoutRatioForecast: toPayoutRatioSideView(scoring.payoutRatioForecast),
+    payoutRatioActual: toPayoutRatioSideView(scoring.payoutRatioActual),
+    // 採点に使った表をそのまま写す。値の変換・丸め・並べ替えをしない（toScoringBandsResponse と同じ）
+    payoutRatioBands: scoring.payoutRatioBands.map((band) => ({
+      minInclusive: band.minInclusive,
+      maxExclusive: band.maxExclusive,
+      points: band.points,
+    })),
     perSource: scoring.perSource,
     pbrSource: scoring.pbrSource,
     priceSen: scoring.priceSen,

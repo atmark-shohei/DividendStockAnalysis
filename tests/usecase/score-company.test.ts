@@ -6,6 +6,7 @@ import type { DividendRecord } from '@/domain/company/dividend-record';
 import { type ResolvedScoringBands } from '@/usecase/resolve-scoring-bands';
 import { scoreCompany } from '@/usecase/score-company';
 import { BANDS_BY_METRIC } from '@/usecase/get-scoring-bands';
+import { PAYOUT_RATIO_BANDS } from '@/domain/scoring/bands';
 import { type ScoreBand } from '@/domain/scoring/score-band';
 import { METRIC_KEYS, type MetricKey } from '@/domain/shared/metric-key';
 
@@ -151,6 +152,10 @@ describe('年度の欠落がスコアに与える影響', () => {
  *
  * 一本化で予想EPSが `FinancialRecord`、予想配当が `DividendRecord` と別の型に
  * 分かれたため、年度で結合する。**揃わなければ判定不能。古い年度へ落とさない。**
+ *
+ * T-108 以降、年度の結合は domain（`calculatePayoutRatio`）が行い、usecase は値と年度を
+ * そのまま渡すだけになった。この describe は「usecase が null 化をやめても end-to-end の
+ * 結果が変わらない」ことの回帰として残している（判定そのものは domain テストで検証）。
  */
 describe('③ 予想配当性向は予想EPSと予想配当の年度が揃ったときだけ採点する', () => {
   const forecastEps = (fiscalYear: number, epsSen: number) =>
@@ -204,7 +209,7 @@ describe('③ 予想配当性向は予想EPSと予想配当の年度が揃った
     // 一切無い状態を作っている。`record`/`actualDividend` を使うため、実績側は
     // 判定できるデータが揃っている。
     const target = company([record(2026)], [actualDividend(2026, 9_000)]);
-    expect(scoreCompany(target).payoutRatioForecast.unavailableReason).toBe('input-missing');
+    expect(scoreCompany(target).payoutRatioForecast.metric.unavailableReason).toBe('input-missing');
   });
 
   it(
@@ -347,8 +352,8 @@ describe('③ 予想配当性向のソース選択（useActualForScoring）', ()
 
   it('予想・実績どちらの内訳も常に返す（表示用）', () => {
     const scoring = scoreCompany(bothAvailable(), false);
-    expect(scoring.payoutRatioForecast.score).not.toBeNull();
-    expect(scoring.payoutRatioActual.score).not.toBeNull();
+    expect(scoring.payoutRatioForecast.metric.score).not.toBeNull();
+    expect(scoring.payoutRatioActual.metric.score).not.toBeNull();
   });
 });
 
@@ -482,7 +487,9 @@ describe('resolvedBands（T-101 指標カスタマイズ）', () => {
   /** 6年ぶん連続、配当は毎年 2倍に増える会社。① は既定 bands なら 100%CAGR → 10点 */
   const contiguous = doubling([2025, 2024, 2023, 2022, 2021, 2020]);
 
-  const ALWAYS_SEVEN: readonly ScoreBand[] = [{ minInclusive: null, maxExclusive: null, points: 7 }];
+  const ALWAYS_SEVEN: readonly ScoreBand[] = [
+    { minInclusive: null, maxExclusive: null, points: 7 },
+  ];
 
   function resolvedBandsFor(
     selectedKeys: readonly MetricKey[],
@@ -529,5 +536,84 @@ describe('resolvedBands（T-101 指標カスタマイズ）', () => {
     expect(withOverrideAttempt.card.metrics.mixCoefficient.score).toBe(
       withoutOverride.card.metrics.mixCoefficient.score,
     );
+  });
+
+  it('③ resolvedBands 省略時、payoutRatioBands は PAYOUT_RATIO_BANDS そのもの（T-108）', () => {
+    const scoring = scoreCompany(contiguous);
+    expect(scoring.payoutRatioBands).toBe(PAYOUT_RATIO_BANDS);
+  });
+
+  it('③ 上書き表を渡すと payoutRatioBands はその表で、matchedBandIndex もその表の添字（T-108 / §10.3）', () => {
+    const target = company(
+      [record(2027, { isForecast: true, epsSen: 30_000 })],
+      [{ fiscalYear: 2027, kind: 'forecast', annualAmountSen: 9_000 }],
+    );
+    const resolvedBands = resolvedBandsFor(METRIC_KEYS, { payoutRatio: ALWAYS_SEVEN });
+    const scoring = scoreCompany(target, false, resolvedBands);
+    expect(scoring.payoutRatioBands).toBe(ALWAYS_SEVEN);
+    expect(scoring.payoutRatioForecast.matchedBandIndex).toBe(0);
+    expect(scoring.payoutRatioForecast.metric.score).toBe(7);
+  });
+});
+
+/**
+ * ③ 計算根拠の結線（T-108 / 設計書 §2 R1・§10.1）。
+ * usecase が選んだレコードの値・年度を **null 化せずに** domain へ渡していることを確認する。
+ * 判定そのもの（年度の食い違い・0点規則・添字）は domain テストで尽くしてある。
+ */
+describe('③ 計算根拠（evidence）を usecase が null 化せずに渡す', () => {
+  const forecastEps = (fiscalYear: number, epsSen: number) =>
+    record(fiscalYear, { isForecast: true, epsSen });
+  const forecastDividendRecord = (fiscalYear: number, annualAmountSen: number): DividendRecord => ({
+    fiscalYear,
+    kind: 'forecast',
+    annualAmountSen,
+  });
+
+  it('予想 EPS FY2027・予想配当 FY2026 → evidence 4 値は値のまま・fiscalYearMismatch true', () => {
+    const scoring = scoreCompany(
+      company([forecastEps(2027, 30_000)], [forecastDividendRecord(2026, 9_000)]),
+    );
+    expect(scoring.payoutRatioForecast.evidence).toEqual({
+      dividendSen: 9_000,
+      dividendFiscalYear: 2026,
+      epsSen: 30_000,
+      epsFiscalYear: 2027,
+    });
+    expect(scoring.payoutRatioForecast.fiscalYearMismatch).toBe(true);
+    expect(scoring.payoutRatioForecast.metric.unavailableReason).toBe('input-missing');
+  });
+
+  it('無配（予想配当 0）→ evidence.dividendSen は 0 のまま（null に化けない）', () => {
+    const scoring = scoreCompany(
+      company([forecastEps(2027, 30_000)], [forecastDividendRecord(2027, 0)]),
+    );
+    expect(scoring.payoutRatioForecast.evidence.dividendSen).toBe(0);
+    expect(scoring.payoutRatioForecast.zeroScoreRule).toBe('no-dividend');
+    expect(scoring.payoutRatioForecast.metric.score).toBe(0);
+  });
+
+  it('実績側: 実績 EPS FY2026・実績配当 FY2025 → 値のまま・fiscalYearMismatch true', () => {
+    const scoring = scoreCompany(
+      company([record(2026, { epsSen: 30_000 })], [actualDividend(2025, 12_000)]),
+    );
+    expect(scoring.payoutRatioActual.evidence).toEqual({
+      dividendSen: 12_000,
+      dividendFiscalYear: 2025,
+      epsSen: 30_000,
+      epsFiscalYear: 2026,
+    });
+    expect(scoring.payoutRatioActual.fiscalYearMismatch).toBe(true);
+  });
+
+  it('レコードが無い側は evidence 4 値すべて null', () => {
+    const scoring = scoreCompany(company([], []));
+    expect(scoring.payoutRatioForecast.evidence).toEqual({
+      dividendSen: null,
+      dividendFiscalYear: null,
+      epsSen: null,
+      epsFiscalYear: null,
+    });
+    expect(scoring.payoutRatioForecast.fiscalYearMismatch).toBe(false);
   });
 });
